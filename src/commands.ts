@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { type BalanceDecision, balanceDisabled, balanceSpec } from "./balance.ts";
 import { CliError, UsageError } from "./errors.ts";
 import type { ParsedFlags } from "./flags.ts";
 import type { HarnessName, LaunchSpec } from "./harness.ts";
@@ -42,7 +43,7 @@ export async function openCommand(
     prompt,
     passthrough,
   });
-  return finishLaunch(context, flags, spec);
+  return finishLaunch(context, flags, spec, flags.values["model"]);
 }
 
 export async function resumeCommand(
@@ -58,6 +59,7 @@ export async function resumeCommand(
   assertSessionId(sessionId);
   const harnessFlag = flags.values["harness"];
   let harness: HarnessName;
+  let sessionPath: string | null = null;
   if (harnessFlag !== undefined) {
     harness = parseHarnessName(harnessFlag);
   } else {
@@ -80,8 +82,47 @@ export async function resumeCommand(
       );
     }
     harness = first.harness;
+    sessionPath = first.path;
   }
-  return finishLaunch(context, flags, buildResume(harness, sessionId, passthrough));
+  const model = await resumeRoutingModel(context, harness, sessionId, sessionPath, passthrough);
+  return finishLaunch(context, flags, buildResume(harness, sessionId, passthrough), model);
+}
+
+/**
+ * The model that should drive account routing for a resume: an explicit
+ * `--model` in the forwarded args wins; otherwise, for claude, the session
+ * file's last-used model (a resume continues on it, so its quota window is
+ * the one being spent). Best-effort — balance treats null as no model
+ * workload, which is the conservation default.
+ */
+async function resumeRoutingModel(
+  context: Context,
+  harness: HarnessName,
+  sessionId: string,
+  sessionPath: string | null,
+  passthrough: string[],
+): Promise<string | undefined> {
+  for (let i = 0; i < passthrough.length; i++) {
+    const arg = passthrough[i]!;
+    if (arg === "--model") return passthrough[i + 1];
+    if (arg.startsWith("--model=")) return arg.slice("--model=".length);
+  }
+  if (harness !== "claude") return undefined;
+  const path =
+    sessionPath ??
+    (await findSessions(sessionId, context.env, context.home)).find(
+      (match) => match.harness === "claude",
+    )?.path ??
+    null;
+  if (path === null) return undefined;
+  try {
+    const text = await Bun.file(path).text();
+    const at = text.lastIndexOf('"model"');
+    if (at === -1) return undefined;
+    return text.slice(at).match(/^"model"\s*:\s*"([^"]+)"/)?.[1];
+  } catch {
+    return undefined;
+  }
 }
 
 export async function doctorCommand(context: Context, flags: ParsedFlags): Promise<Outcome> {
@@ -114,19 +155,43 @@ export async function doctorCommand(context: Context, flags: ParsedFlags): Promi
   return { kind: "result", data: { harnesses: reports }, human: lines.join("\n") };
 }
 
-function finishLaunch(context: Context, flags: ParsedFlags, spec: LaunchSpec): Outcome {
+async function finishLaunch(
+  context: Context,
+  flags: ParsedFlags,
+  spec: LaunchSpec,
+  routingModel: string | undefined,
+): Promise<Outcome> {
   const dryRun = flags.bools.has("dry-run");
   if (flags.bools.has("json") && !dryRun) {
     throw new UsageError("this command launches an interactive harness; --json needs --dry-run");
   }
-  if (!dryRun) return { kind: "launch", spec };
+  const noBalance = flags.bools.has("x-no-balance");
+  const account = flags.values["x-account"];
+  if (noBalance && account !== undefined) {
+    throw new UsageError("--x-account pins a balanced launch; drop --x-no-balance");
+  }
+
+  let launchSpec = spec;
+  let decision: BalanceDecision | null = null;
+  if (!balanceDisabled(context.env, noBalance)) {
+    const balanced = await balanceSpec(context.env, spec, {
+      account,
+      model: routingModel,
+      dryRun,
+    });
+    launchSpec = balanced.spec;
+    decision = balanced.decision;
+  }
+
+  if (!dryRun) return { kind: "launch", spec: launchSpec };
   const data = {
     harness: spec.harness,
     session_id: spec.sessionId,
     cwd: context.cwd,
-    command: spec.command,
+    command: launchSpec.command,
+    balance: decision,
   };
-  return { kind: "result", data, human: shellLine(spec.command) };
+  return { kind: "result", data, human: shellLine(launchSpec.command) };
 }
 
 const SHELL_SAFE = /^[A-Za-z0-9@%+=:,./_-]+$/;

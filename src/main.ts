@@ -28,14 +28,14 @@ interface CommandDefinition {
 
 const REGISTRY: Record<string, CommandDefinition> = {
   open: {
-    value: ["--model", "--effort", "--name"],
-    bool: ["--dry-run"],
+    value: ["--model", "--effort", "--name", "--x-account"],
+    bool: ["--dry-run", "--x-no-balance"],
     passthrough: true,
     run: openCommand,
   },
   resume: {
-    value: ["--harness"],
-    bool: ["--dry-run"],
+    value: ["--harness", "--x-account"],
+    bool: ["--dry-run", "--x-no-balance"],
     passthrough: true,
     run: resumeCommand,
   },

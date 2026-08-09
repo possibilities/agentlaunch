@@ -23,6 +23,10 @@ harnesses actually write, not from their documentation.
   nowhere else.
 - `resolve.ts` finds a session id across the stores and counts sessions;
   ids are validated glob-literal before they touch a pattern.
+- `balance.ts` composes the account-balancing prefix around a spec
+  (ADR 0003): shells `agentusage balance --json`, wraps with cswap /
+  codex-swap [pi] run, never edits the harness argv after the wrapper's
+  `--`.
 - `launch.ts` spawns a spec with inherited stdio and reports the child's
   exit as our own, spelling fatal signals as 128+n.
 - `commands.ts` returns either a launch or a printable result per command;

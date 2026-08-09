@@ -36,6 +36,9 @@ function run(args: string[], extraEnv: Record<string, string> = {}, cwd?: string
       CLAUDE_CONFIG_DIR: join(root, "claude"),
       CODEX_HOME: join(root, "codex"),
       PI_CODING_AGENT_DIR: join(root, "pi"),
+      // These tests assert the raw launch grammar; balanced composition has
+      // its own suite (balance.test.ts) with a fake stack.
+      AGENTSURFACE_NO_BALANCE: "1",
       ...extraEnv,
     },
   });
@@ -91,6 +94,7 @@ describe("surface", () => {
       session_id: null,
       cwd: realpathSync(root),
       command: ["claude", "--model", "fable", "--effort", "max", "fix the tests"],
+      balance: null,
     });
   });
 

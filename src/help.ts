@@ -46,9 +46,18 @@ Options:
                        pi      off|minimal|low|medium|high|xhigh|max
                      (spelled --thinking on pi, -c model_reasoning_effort= on codex)
   --name <name>      Run name; claude and pi only, codex is refused
-  --dry-run          Print the command instead of launching
+  --x-account <sel>  Pin the balanced launch to one account (claude: route or
+                     cN; codex/pi: account key or email) — still gated
+  --x-no-balance     Launch unbalanced (raw harness command, no account pick)
+  --dry-run          Print the command instead of launching; balances without
+                     reserving or claiming anything
   --json             With --dry-run, print the envelope (data: harness,
-                     session_id, cwd, command)
+                     session_id, cwd, command, balance)
+
+Launches are balanced by default: agentusage picks the account and the
+command is wrapped as cswap run <slot> --share-history -- … (claude) or
+codex-swap [pi] run --claim <lease> -- … (codex, pi). Set
+AGENTSURFACE_NO_BALANCE=1 to default a machine to unbalanced.
 
 Examples:
   agentsurface open claude --model fable --effort max "fix the failing tests"
@@ -63,8 +72,16 @@ errors that say which harnesses matched.
 
 Options:
   --harness <name>   claude|codex|pi — skip store detection
+  --x-account <sel>  Pin the balanced launch to one account
+  --x-no-balance     Launch unbalanced (raw harness command)
   --dry-run          Print the command instead of launching
   --json             With --dry-run, print the envelope
+
+Resumes balance like opens: cross-account resume is safe because claude
+launches share history (--share-history), codex keeps one canonical
+CODEX_HOME, and pi profiles share one canonical session store. A claude
+resume routes on the session's last-used model (an explicit --model after
+-- wins).
 
 Session stores scanned (env overrides honored):
   claude  $CLAUDE_CONFIG_DIR|~/.claude/projects/*/<id>.jsonl
@@ -115,10 +132,21 @@ Rules
   - resume without --harness scans the three session stores for the id and
     errors when it is missing or ambiguous; --harness skips the scan. Pi is
     resumed via --session <id> (pi's own --resume is a picker flag).
+  - Launches are balanced by default: agentusage balance picks the account,
+    and the command is composed as cswap run <slot> --share-history -- …
+    (claude) or codex-swap [pi] run --claim <lease> -- … (codex, pi). The
+    harness argv after the wrapper's -- is byte-identical to the unbalanced
+    command. --x-account <sel> pins the account (still gated); --x-no-balance
+    launches raw; AGENTSURFACE_NO_BALANCE=1 defaults a machine to raw. A
+    refused balance (no capacity, stale observation, missing stack) is a
+    domain error whose recovery names the fix — never a silent unbalanced
+    launch.
   - --dry-run prints the command instead of launching; add --json for the
     {schema_version, ok, error, data} envelope whose data carries
-    {harness, session_id, cwd, command}. --json without --dry-run on a
-    launch command is a usage fault, because launching is interactive.
+    {harness, session_id, cwd, command, balance}. Dry runs balance without
+    reserving: codex/pi print the --account spelling since no lease was
+    claimed. --json without --dry-run on a launch command is a usage fault,
+    because launching is interactive.
   - Exit codes: open and resume exit with the harness's own exit code.
     Non-launching outcomes use the family contract: 0 success, 1 domain
     error (ok:false envelope under --json, stderr prose otherwise), 2 usage

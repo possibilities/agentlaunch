@@ -34,6 +34,24 @@ store owns the id and refuses, with the candidates named, when that is
 ambiguous. `--dry-run` prints the command instead of launching; add `--json`
 for the machine envelope.
 
+## Balanced launches
+
+Every open and resume is balanced by default (ADR 0003): `agentusage
+balance` picks the account from live quota observations and the command is
+wrapped in the swap tool's public contract — `cswap run <slot>
+--share-history -- …` (claude), `codex-swap run|resume --claim <lease> --
+…` (codex), `codex-swap pi run --claim <lease> -- …` (pi, riding the codex
+account pool). The harness argv after the wrapper's `--` is byte-identical
+to the unbalanced command. `--model` drives fable intent and codex lane
+selection; a claude resume routes on the session's last-used model.
+
+Pins and escape hatches: `--x-account <sel>` pins one account (still gated
+by the swap tool), `--x-no-balance` launches raw once, and
+`AGENTSURFACE_NO_BALANCE=1` defaults a machine without the stack to raw. A
+refused balance (no capacity, stale observations, missing tools) fails the
+launch loudly with a recovery — never a silent unbalanced launch. Dry runs
+balance without reserving or claiming anything.
+
 ## For agents
 
 `agentsurface --agent-teaser` is the one-line summary, `--agent-help` the

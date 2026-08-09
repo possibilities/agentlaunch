@@ -9,10 +9,32 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+# Raw launch grammar: balancing off, exactly what the harness receives.
 run() {
-  env -i PATH="$PATH" HOME="$WORK/home" \
+  env -i PATH="$PATH" HOME="$WORK/home" AGENTSURFACE_NO_BALANCE=1 \
     CLAUDE_CONFIG_DIR="$WORK/claude" CODEX_HOME="$WORK/codex" PI_CODING_AGENT_DIR="$WORK/pi" \
     bun "$ROOT/src/main.ts" "$@"
+}
+
+# Balanced grammar: a fake agentusage first on PATH answers selection, so
+# composition is exercised without the real stack or any reservation.
+run_balanced() {
+  env -i PATH="$WORK/bin:$PATH" HOME="$WORK/home" \
+    CLAUDE_CONFIG_DIR="$WORK/claude" CODEX_HOME="$WORK/codex" PI_CODING_AGENT_DIR="$WORK/pi" \
+    bun "$ROOT/src/main.ts" "$@"
+}
+
+install_fake_balance() {
+  mkdir -p "$WORK/bin"
+  cat >"$WORK/bin/agentusage" <<'FAKE'
+#!/usr/bin/env bash
+if [ "$2" = "claude" ]; then
+  printf '{"schema_version":1,"provider":"claude","ok":true,"route":{"id":"claude-swap:1","kind":"managed","slot":1},"reason":"selected"}\n'
+else
+  printf '{"schema_version":1,"provider":"codex","ok":true,"accountKey":"account:org-smoke","lease":null,"reason":"selected"}\n'
+fi
+FAKE
+  chmod +x "$WORK/bin/agentusage"
 }
 
 expect_exit() {
@@ -74,5 +96,19 @@ expect_out "pi --session $SESSION_ID"
 expect_exit 1 run resume 99999999-9999-4999-9999-999999999999
 expect_exit 1 run resume 99999999-9999-4999-9999-999999999999 --dry-run --json
 expect_out '"code":"session_not_found"'
+
+# Balanced launches compose the swap prefix (fake stack, dry runs only)
+install_fake_balance
+expect_exit 0 run_balanced open claude --model fable --dry-run
+expect_out "cswap run 1 --share-history -- --model fable"
+expect_exit 0 run_balanced open codex --dry-run
+expect_out "codex-swap run --account account:org-smoke --"
+expect_exit 0 run_balanced open pi --dry-run
+expect_out "codex-swap pi run --account account:org-smoke --"
+expect_exit 0 run_balanced resume "$SESSION_ID" --dry-run
+expect_out "cswap run 1 --share-history -- --resume $SESSION_ID"
+expect_exit 0 run_balanced open claude --x-no-balance --dry-run
+expect_out "claude"
+expect_exit 2 run_balanced open claude --x-account c1 --x-no-balance --dry-run
 
 echo "smoke: all commands behaved"

@@ -73,16 +73,27 @@ consumes the launch spec that `--dry-run` already prints.
 Merge a finished worktree back to the mainline with surface bookkeeping.
 Orca already has landing machinery; this becomes a thin verb over it.
 
-## Balance harnesses across accounts (R) — deliberately not now
+## Balance harnesses across accounts (R) — **built** (slice 2)
 
-The launcher contract already exists in agentusage and stays outside this
-tool: `agentusage balance claude|codex --json` picks the account, then the
-launcher runs `cswap run <slot> --share-history -- <claude args>` or
-`codex-swap run --account <key> | --claim <lease> -- <codex args>`.
-agentsurface's job, when this slice arrives, is only to compose that prefix
-around its launch spec — the pure-spec design makes it a prefix, nothing
-more. Missing pieces elsewhere: no pi swap tool (a codex-swap-pi is
-planned), and agentusage has no pi lane.
+Every open and resume is balanced by default (ADR 0003): `agentusage
+balance claude|codex --json [--claim]` picks the account, and the launch
+spec is wrapped as `cswap run <slot> --share-history -- …`,
+`codex-swap run|resume --claim <lease> -- …`, or `codex-swap pi run
+--claim <lease> -- …`. `--x-account` pins, `--x-no-balance` /
+`AGENTSURFACE_NO_BALANCE=1` launch raw, refusals are loud with recovery.
+What building it taught us:
+
+- Pi rides the codex account pool: codex-swap grew a `pi` command family
+  (its ADR 0005) with per-account pi profiles and identity-verified links;
+  `balance codex` covers pi, with the `openai-codex/` model prefix
+  stripped so lane selection (spark) matches.
+- A claude resume routes on the session file's last-used model (cheap
+  JSONL sniff) — keeper needed a job registry for this; the session store
+  already knows.
+- Dry runs must not reserve: claude uses balance `--dry-run`, codex/pi
+  skip `--claim` and print the `--account` spelling.
+- Never set `PI_CODING_AGENT_SESSION_DIR` (it flattens pi's project-nested
+  session layout); pi profiles share history via a sessions symlink.
 
 ## Chat bus (S) — unexplored
 
