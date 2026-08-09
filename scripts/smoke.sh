@@ -131,4 +131,21 @@ expect_exit 0 run open codex --dry-run -- login
 expect_out "codex login"
 expect_exit 2 run open pi --yolo --no-yolo --dry-run
 
+# The narrative is on stderr, so stdout stays exactly the command
+expect_exit 0 run open claude --model fable --dry-run
+if [[ "$(cat "$WORK/out")" != "claude --model fable --dangerously-skip-permissions" ]]; then
+  echo "FAIL: narrative leaked into stdout" >&2
+  cat "$WORK/out" >&2
+  exit 1
+fi
+grep -q "Opening claude in " "$WORK/err" || { echo "FAIL: no narrative on stderr" >&2; exit 1; }
+expect_exit 0 run open claude --dry-run --json --x-verbose
+if [[ -s "$WORK/err" ]]; then
+  echo "FAIL: --json did not silence the narrative" >&2
+  cat "$WORK/err" >&2
+  exit 1
+fi
+expect_exit 0 run open claude --dry-run --x-verbose
+grep -q "Config " "$WORK/err" || { echo "FAIL: --x-verbose printed no mechanism" >&2; exit 1; }
+
 echo "smoke: all commands behaved"

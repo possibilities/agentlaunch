@@ -10,7 +10,9 @@
 - **Run name** — The human display label on a session: `--name` on claude and pi; codex has none. _Avoid_: title, label.
 - **Passthrough** — Argv after `--`, forwarded to the harness verbatim, invisible to the strict parser. _Avoid_: extra args, rest.
 - **Effort** — The one canonical reasoning-depth flag with per-harness value sets, spelled `--thinking` on pi and `-c model_reasoning_effort=` on codex. _Avoid_: thinking (pi's spelling, not the concept).
-- **Surface flags** — The reserved `--x-*` namespace (e.g. `--x-surface-session`); their absence means runner mode. _Avoid_: extension flags.
+- **Extension flag** — Anything in the reserved `--x-*` namespace: agentsurface's own controls, never forwarded to the harness and never a harness-shaped concept. Covers runner controls (`--x-account`, `--x-no-balance`, `--x-verbose`) and the surface flags still to come (`--x-surface-session`). _Avoid_: surface flag as the name for all of them — that is the subset below.
+- **Surface flag** — An Extension flag that lands a launch on a Surface rather than in this terminal; none exist yet. Their absence is what makes a launch runner mode. _Avoid_: using this for `--x-account` and friends, which are runner controls.
+- **Narrative** — The story a launch tells on stderr before the harness starts: where it opens, whether yolo applied, which account balancing chose, and the final command. `--x-verbose` adds mechanism; `--json` silences it (ADR 0007). _Avoid_: log, output.
 - **Land** — Merging a worktree's finished work back to the main line, with the surface's bookkeeping (later slice). _Avoid_: merge (land is merge plus surface state).
 - **Swap** — Running a harness under one specific account's credentials/profile: cswap for claude, codex-swap for codex and pi (`codex-swap pi run`, pi rides the codex account pool). _Avoid_: balancing (choosing the account is balancing; running under it is swap).
 - **Balance** — Choosing which account a launch should use, from live quota observations; `agentusage balance` owns this and launchers consume its answer. On by default for every launch (ADR 0003). _Avoid_: swap.

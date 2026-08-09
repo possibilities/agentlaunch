@@ -7,6 +7,7 @@ import type { FlagSpec, ParsedFlags } from "./flags.ts";
 import { parseFlags } from "./flags.ts";
 import { AGENT_HELP, AGENT_TEASER, HELP, TOP_HELP, VERSION } from "./help.ts";
 import { launch } from "./launch.ts";
+import { createNarrator } from "./narrate.ts";
 
 const SCHEMA_VERSION = 1;
 
@@ -29,13 +30,13 @@ interface CommandDefinition {
 const REGISTRY: Record<string, CommandDefinition> = {
   open: {
     value: ["--model", "--effort", "--name", "--x-account"],
-    bool: ["--dry-run", "--x-no-balance", "--yolo", "--no-yolo"],
+    bool: ["--dry-run", "--x-no-balance", "--x-verbose", "--yolo", "--no-yolo"],
     passthrough: true,
     run: openCommand,
   },
   resume: {
     value: ["--harness", "--x-account"],
-    bool: ["--dry-run", "--x-no-balance", "--yolo", "--no-yolo"],
+    bool: ["--dry-run", "--x-no-balance", "--x-verbose", "--yolo", "--no-yolo"],
     passthrough: true,
     run: resumeCommand,
   },
@@ -114,11 +115,13 @@ async function main(argv: string[]): Promise<number> {
     env: process.env,
     home: process.env["HOME"] ?? "",
     cwd: process.cwd(),
+    // Under --json the envelope is the whole story, so narration goes quiet.
+    narrator: createNarrator({ silent: json, verbose: flags.bools.has("x-verbose") }),
   };
 
   try {
     const outcome = await definition.run(context, flags, passthrough);
-    if (outcome.kind === "launch") return await launch(outcome.spec);
+    if (outcome.kind === "launch") return await launch(outcome.spec, context.narrator);
     emit(outcome, json);
     return 0;
   } catch (error) {

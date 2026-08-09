@@ -1,5 +1,7 @@
 import { CliError } from "./errors.ts";
 import type { HarnessName, LaunchSpec } from "./harness.ts";
+import type { Narrator } from "./narrate.ts";
+import { shellLine } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
 
 /**
@@ -27,6 +29,7 @@ export interface BalanceRequest {
   model: string | undefined;
   /** Dry runs must not reserve or claim anything. */
   dryRun: boolean;
+  narrator: Narrator;
 }
 
 export interface BalancedLaunch {
@@ -63,7 +66,7 @@ async function balanceClaude(
   if (request.account !== undefined) argv.push("--account", request.account);
   if (request.dryRun) argv.push("--dry-run");
 
-  const body = await runBalanceJson(env, argv);
+  const body = await runBalanceJson(env, argv, request.narrator);
   const route = body["route"];
   const slot =
     typeof route === "object" && route !== null
@@ -123,7 +126,7 @@ async function balanceCodexFamily(
   if (model !== undefined) argv.push("--model", model);
   if (!request.dryRun) argv.push("--claim");
 
-  const body = await runBalanceJson(env, argv);
+  const body = await runBalanceJson(env, argv, request.narrator);
   const accountKey = stringOrNull(body["accountKey"]);
   if (accountKey === null) {
     throw new CliError(
@@ -189,7 +192,12 @@ export function normalizePiModel(
 // ---------------------------------------------------------------------------
 // shared plumbing
 
-async function runBalanceJson(env: Environ, argv: string[]): Promise<Record<string, unknown>> {
+async function runBalanceJson(
+  env: Environ,
+  argv: string[],
+  narrator: Narrator,
+): Promise<Record<string, unknown>> {
+  narrator.detail(`Running: ${shellLine(argv)}`);
   const [bin, ...rest] = argv as [string, ...string[]];
   const resolved = Bun.which(bin);
   if (resolved === null) {

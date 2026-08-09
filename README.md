@@ -66,6 +66,24 @@ however it was typed. The `AGENTSURFACE_LAUNCH=1` sentinel marks
 already-routed children so shims exec the real binary (ADR 0004);
 `AGENTSURFACE_SHIM_BYPASS=1` is the manual escape.
 
+## The launch narrative
+
+Every open and resume tells its story on stderr before the harness takes
+the terminal — where it is opening, whether yolo applied, which account
+balancing chose and why, and the final command:
+
+    Opening claude in ~/code/agentsurface with model fable.
+    Yolo is on, so claude runs with --dangerously-skip-permissions.
+    Balanced onto claude-swap slot 1 (selected).
+    Launching: cswap run 1 --share-history -- claude --model fable --dangerously-skip-permissions
+
+stdout stays the result, so `--dry-run` remains a runnable line and
+`--json` a parseable envelope — and `--json` silences the narrative
+outright, since the envelope already carries every fact it would tell
+(ADR 0007). `--x-verbose` adds the mechanism behind each step: the config
+consulted, the `agentusage` command shelled, why balancing was skipped,
+the resolved binary, the sentinel.
+
 ## Yolo mode
 
 `~/.config/agentsurface/config.json` can drop each harness's permission

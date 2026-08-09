@@ -45,7 +45,7 @@ const RUN_NAMES_SUPPORTED: Record<HarnessName, boolean> = {
 
 /** One flag per harness that drops its permission gates. Pi has no gates
  * on tools at all; --approve only auto-trusts project-local files. */
-const YOLO_FLAGS: Record<HarnessName, string> = {
+export const YOLO_FLAGS: Record<HarnessName, string> = {
   claude: "--dangerously-skip-permissions",
   codex: "--dangerously-bypass-approvals-and-sandbox",
   pi: "--approve",

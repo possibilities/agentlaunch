@@ -11,7 +11,10 @@ import {
   parseHarnessName,
   sessionStore,
   utilityInvocation,
+  YOLO_FLAGS,
 } from "./harness.ts";
+import type { Narrator } from "./narrate.ts";
+import { shellLine, tildePath } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
 
@@ -19,6 +22,7 @@ export interface Context {
   env: Environ;
   home: string;
   cwd: string;
+  narrator: Narrator;
 }
 
 export type Outcome =
@@ -38,6 +42,7 @@ export async function openCommand(
     throw new UsageError("open takes at most one prompt; quote it, and put harness flags after --");
   }
   const harness = parseHarnessName(harnessName);
+  narrateOpening(context, harness, flags, prompt);
   const yolo = resolveYolo(context, flags, harness);
   const spec = buildOpen(harness, {
     model: flags.values["model"],
@@ -56,6 +61,36 @@ export async function openCommand(
     flags.values["model"] ?? modelFromArgs(passthrough),
     yolo,
   );
+}
+
+function narrateOpening(
+  context: Context,
+  harness: HarnessName,
+  flags: ParsedFlags,
+  prompt: string | undefined,
+): void {
+  const qualifiers: string[] = [];
+  const model = flags.values["model"];
+  const effort = flags.values["effort"];
+  const name = flags.values["name"];
+  if (model !== undefined) qualifiers.push(`model ${model}`);
+  if (effort !== undefined) qualifiers.push(`effort ${effort}`);
+  if (name !== undefined) qualifiers.push(`named ${name}`);
+  const tail = qualifiers.length > 0 ? ` with ${joinWords(qualifiers)}` : "";
+  context.narrator.say(`Opening ${harness} in ${tildePath(context.cwd, context.home)}${tail}.`);
+  if (prompt !== undefined) {
+    context.narrator.detail(`Starting prompt: ${truncate(prompt, 60)}`);
+  }
+}
+
+function joinWords(words: string[]): string {
+  if (words.length <= 1) return words[0] ?? "";
+  return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+function truncate(text: string, limit: number): string {
+  const flat = text.replaceAll(/\s+/g, " ").trim();
+  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1)}…`;
 }
 
 /** First --model value in forwarded args, either spelling; else undefined. */
@@ -84,7 +119,11 @@ export async function resumeCommand(
   let sessionPath: string | null = null;
   if (harnessFlag !== undefined) {
     harness = parseHarnessName(harnessFlag);
+    context.narrator.say(`Resuming session ${sessionId} as ${harness}, named by --harness.`);
   } else {
+    context.narrator.detail(
+      `Looking for session ${sessionId} in the claude, codex, and pi session stores.`,
+    );
     const matches = await findSessions(sessionId, context.env, context.home);
     const first = matches[0];
     if (first === undefined) {
@@ -105,8 +144,15 @@ export async function resumeCommand(
     }
     harness = first.harness;
     sessionPath = first.path;
+    context.narrator.say(
+      `Resuming session ${sessionId}, which belongs to ${harness}, in ${tildePath(context.cwd, context.home)}.`,
+    );
+    context.narrator.detail(`Session file: ${tildePath(first.path, context.home)}`);
   }
   const model = await resumeRoutingModel(context, harness, sessionId, sessionPath, passthrough);
+  if (model !== undefined) {
+    context.narrator.detail(`Routing on model ${model}.`);
+  }
   const yolo = resolveYolo(context, flags, harness);
   return finishLaunch(
     context,
@@ -124,9 +170,21 @@ function resolveYolo(context: Context, flags: ParsedFlags, harness: HarnessName)
   const on = flags.bools.has("yolo");
   const off = flags.bools.has("no-yolo");
   if (on && off) throw new UsageError("--yolo conflicts with --no-yolo; pick one");
-  if (on) return true;
-  if (off) return false;
-  return loadConfig(context.env, context.home).yolo[harness];
+  if (on || off) {
+    context.narrator.detail(`Yolo ${on ? "on" : "off"} by flag, so the config is not consulted.`);
+    return on;
+  }
+  const config = loadConfig(context.env, context.home);
+  context.narrator.detail(
+    config.exists
+      ? `Config ${tildePath(config.path, context.home)}: yolo ${describeYolo(config.yolo)}.`
+      : `No config at ${tildePath(config.path, context.home)}, so yolo is off everywhere.`,
+  );
+  return config.yolo[harness];
+}
+
+function describeYolo(yolo: Record<HarnessName, boolean>): string {
+  return HARNESS_NAMES.map((harness) => `${harness} ${yolo[harness] ? "on" : "off"}`).join(", ");
 }
 
 /**
@@ -259,19 +317,42 @@ async function finishLaunch(
     );
   }
 
+  narrateYolo(context, spec, yolo, utility);
+
   let launchSpec = spec;
   let decision: BalanceDecision | null = null;
-  if (!utility && !balanceDisabled(context.env, noBalance)) {
+  if (utility) {
+    context.narrator.say(
+      `${spec.harness} ${spec.command[1]} is a utility invocation, so it launches unwrapped.`,
+    );
+  } else if (balanceDisabled(context.env, noBalance)) {
+    context.narrator.say(
+      noBalance
+        ? "Balancing is off for this launch, so the harness runs on whatever account it already has."
+        : "Balancing is off on this machine (AGENTSURFACE_NO_BALANCE), so the harness runs unwrapped.",
+    );
+  } else {
+    context.narrator.detail(
+      account === undefined
+        ? "Asking agentusage which account has capacity."
+        : `Pinning the launch to ${account}; the swap tool still judges it.`,
+    );
     const balanced = await balanceSpec(context.env, spec, {
       account,
       model: routingModel,
       dryRun,
+      narrator: context.narrator,
     });
     launchSpec = balanced.spec;
     decision = balanced.decision;
+    context.narrator.say(describeAccount(balanced.decision));
   }
 
-  if (!dryRun) return { kind: "launch", spec: launchSpec };
+  if (!dryRun) {
+    context.narrator.say(`Launching: ${shellLine(launchSpec.command)}`);
+    return { kind: "launch", spec: launchSpec };
+  }
+  context.narrator.say("Dry run, so nothing is launched; the command follows on stdout.");
   const data = {
     harness: spec.harness,
     session_id: spec.sessionId,
@@ -284,10 +365,31 @@ async function finishLaunch(
   return { kind: "result", data, human: shellLine(launchSpec.command) };
 }
 
-const SHELL_SAFE = /^[A-Za-z0-9@%+=:,./_-]+$/;
+/** Yolo is the one decision that changes what the harness will let the model
+ * do, so it is narrated even when nothing was injected. */
+function narrateYolo(context: Context, spec: LaunchSpec, yolo: boolean, utility: boolean): void {
+  if (!yolo) {
+    context.narrator.detail(`Yolo is off, so ${spec.harness} keeps its permission prompts.`);
+    return;
+  }
+  if (utility) {
+    context.narrator.detail("Yolo is on, but a utility invocation never carries the flag.");
+    return;
+  }
+  const injected = YOLO_FLAGS[spec.harness];
+  context.narrator.say(
+    spec.command.includes(injected)
+      ? `Yolo is on, so ${spec.harness} runs with ${injected}.`
+      : `Yolo is on for ${spec.harness}, but ${injected} was already forwarded, so nothing was added.`,
+  );
+}
 
-function shellLine(command: string[]): string {
-  return command
-    .map((word) => (SHELL_SAFE.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`))
-    .join(" ");
+function describeAccount(decision: BalanceDecision): string {
+  const where =
+    decision.route !== null
+      ? `claude-swap slot ${decision.route.slot}`
+      : (decision.accountKey ?? "an account the swap tool picked");
+  const lease = decision.leaseId === null ? "" : ` on lease ${decision.leaseId}`;
+  const why = decision.reason === null ? "" : ` (${decision.reason})`;
+  return `Balanced onto ${where}${lease}${why}.`;
 }

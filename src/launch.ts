@@ -1,5 +1,6 @@
 import { CliError } from "./errors.ts";
 import type { LaunchSpec } from "./harness.ts";
+import type { Narrator } from "./narrate.ts";
 
 /** Exit the way a shell reports a fatal signal, so scripts around the
  * wrapper cannot tell it from the harness itself. */
@@ -10,7 +11,7 @@ const SIGNAL_EXIT: Record<string, number> = {
   SIGTERM: 143,
 };
 
-export async function launch(spec: LaunchSpec): Promise<number> {
+export async function launch(spec: LaunchSpec, narrator: Narrator): Promise<number> {
   const [bin, ...rest] = spec.command;
   if (bin === undefined) throw new CliError("empty_command", "launch spec has no command");
   const resolved = Bun.which(bin);
@@ -21,6 +22,8 @@ export async function launch(spec: LaunchSpec): Promise<number> {
       `install ${bin} or run agentsurface from a shell where it resolves`,
     );
   }
+  narrator.detail(`Resolved ${bin} to ${resolved}.`);
+  narrator.detail("Marking descendants with AGENTSURFACE_LAUNCH=1 so PATH shims do not re-enter.");
   const child = Bun.spawn([resolved, ...rest], {
     stdin: "inherit",
     stdout: "inherit",

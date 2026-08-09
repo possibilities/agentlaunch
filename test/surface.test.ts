@@ -203,6 +203,50 @@ describe("surface", () => {
     expect(parsed.error?.code).toBe("session_not_found");
   });
 
+  test("the launch narrative goes to stderr, leaving stdout usable", () => {
+    const result = run(["open", "claude", "--model", "fable", "--dry-run"]);
+    expect(result.code).toBe(0);
+    // stdout stays a runnable shell line, so --dry-run can be piped.
+    expect(result.stdout.trim()).toBe("claude --model fable");
+    expect(result.stderr).toContain("Opening claude in ");
+    expect(result.stderr).toContain("with model fable");
+    expect(result.stderr).toContain("Dry run, so nothing is launched");
+  });
+
+  test("--json silences the narrative so the envelope stands alone", () => {
+    const result = run(["open", "claude", "--dry-run", "--json", "--x-verbose"]);
+    expect(result.stderr).toBe("");
+    expect(() => JSON.parse(result.stdout)).not.toThrow();
+  });
+
+  test("--x-verbose adds mechanism, default keeps it out", () => {
+    const quiet = run(["open", "claude", "--dry-run"]);
+    expect(quiet.stderr).not.toContain("No config at");
+    const loud = run(["open", "claude", "--dry-run", "--x-verbose"]);
+    expect(loud.stderr).toContain("No config at");
+    expect(loud.stderr).toContain("Balancing is off on this machine");
+  });
+
+  test("the narrative names the yolo and utility decisions", () => {
+    const yolo = run(["open", "pi", "--yolo", "--dry-run"]);
+    expect(yolo.stderr).toContain("Yolo is on, so pi runs with --approve.");
+    const utility = run(["open", "codex", "--yolo", "--dry-run", "--", "login"]);
+    expect(utility.stderr).toContain("utility invocation");
+    expect(utility.stderr).not.toContain("Yolo is on, so codex runs");
+  });
+
+  test("resume narrates which store owned the session", () => {
+    const root = mkdtempSync(join(tmpdir(), "agentsurface-narr-"));
+    roots.push(root);
+    const projects = join(root, "claude", "projects", "-somewhere");
+    mkdirSync(projects, { recursive: true });
+    writeFileSync(join(projects, `${SESSION_ID}.jsonl`), "{}\n");
+    const result = run(["resume", SESSION_ID, "--dry-run"], {
+      CLAUDE_CONFIG_DIR: join(root, "claude"),
+    });
+    expect(result.stderr).toContain(`Resuming session ${SESSION_ID}, which belongs to claude`);
+  });
+
   test("doctor --json reports all three stores", () => {
     const result = run(["doctor", "--json"]);
     expect(result.code).toBe(0);
