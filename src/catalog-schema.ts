@@ -10,8 +10,8 @@
  * - `$schema` appears only in the published-file schema; the loader strips
  *   it before validation, whatever its value.
  * - Invariants that need the whole document — include references, provider
- *   semantics, duplicates after family expansion — live in `catalog.ts`,
- *   not here.
+ *   semantics, duplicates after family expansion, the effort-inheritance
+ *   chain, defaults resolution — live in `catalog.ts`, not here.
  * - Validation failures surface as one `catalog_invalid` CliError via
  *   `catalogParseError`, on the first issue in document order.
  */
@@ -20,7 +20,8 @@ import { CliError } from "./errors.ts";
 import type { HarnessName } from "./harness.ts";
 
 /** Names the operator types or references: models, efforts, families,
- * providers. No slashes or colons — those belong to emitted spellings. */
+ * providers. No slashes or colons — colons belong to the harness-value
+ * grammar and slashes to emitted spellings. */
 export const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** Emitted spellings may carry provider paths and the like; only whitespace
@@ -34,12 +35,16 @@ const HARNESSES = ["claude", "codex", "pi"] as const satisfies readonly HarnessN
 const effortList = (description: string) =>
   z.array(z.string().regex(NAME_PATTERN)).min(1).describe(description);
 
-const defaultEffort = z
-  .string()
-  .regex(NAME_PATTERN)
-  .describe(
-    "This model's default effort, filled in when the model is chosen without an explicit effort — overriding the harness's own default. Must be in the model's effective efforts.",
-  );
+const modelDefaultsSchema = z
+  .strictObject({
+    effort: z
+      .string()
+      .regex(NAME_PATTERN)
+      .describe(
+        "This model's default effort, filled in when the model is chosen without an explicit effort — overriding the harness's resolved default. Must be in the model's effective efforts.",
+      ),
+  })
+  .describe("Defaults this model carries; only the effort is defaultable per model.");
 
 const familyMemberSchema = z
   .strictObject({
@@ -50,18 +55,39 @@ const familyMemberSchema = z
         "The name the operator types for this model — identical in every harness that includes the family; only the emitted spelling varies per harness.",
       ),
     efforts: effortList(
-      "Model-bound effort vocabulary: the efforts this model supports wherever it runs, replacing the including harness's set. Omit it and the model inherits each including harness's efforts.",
+      "Model-bound effort vocabulary: the efforts this model supports wherever it runs, replacing the family's (or including harness's) set. Omit it and the model inherits down the chain.",
     ).optional(),
-    effort: defaultEffort.optional(),
+    defaults: modelDefaultsSchema.optional(),
   })
   .describe("One model a family offers.");
 
+const familyDefaultsSchema = z
+  .strictObject({
+    model: z
+      .string()
+      .regex(NAME_PATTERN)
+      .describe("The family's default model; must be one of its members."),
+    effort: z
+      .string()
+      .regex(NAME_PATTERN)
+      .describe(
+        "The family's default effort; must be valid for the default model in every harness that includes the family.",
+      ),
+  })
+  .describe(
+    "Defaults the family supplies to a harness that includes it and states none of its own. A harness including two defaults-bearing families must state its own.",
+  );
+
 const familySchema = z
   .strictObject({
+    efforts: effortList(
+      "The family's effort vocabulary: what members inherit when they carry no set of their own, whichever harness includes them.",
+    ).optional(),
     models: z
       .array(familyMemberSchema)
       .min(1)
       .describe("The family's models, in presentation order."),
+    defaults: familyDefaultsSchema.optional(),
   })
   .describe(
     "A model family: a list of models defined once and included by any number of harnesses, so the same typed names work everywhere the family is included.",
@@ -80,7 +106,7 @@ const localModelSchema = z
     efforts: effortList(
       "Efforts this model supports, replacing the harness-level set. Omit it and the model inherits the harness's efforts.",
     ).optional(),
-    effort: defaultEffort.optional(),
+    defaults: modelDefaultsSchema.optional(),
   })
   .describe("A model this harness offers outside any family.");
 
@@ -94,11 +120,30 @@ const includeSchema = z
       .string()
       .regex(NAME_PATTERN)
       .describe(
-        "Provider the harness runs these models through. How a provider combines with a model name is that harness's own semantics — pi spells it openai-codex/gpt-5.6 — and a provider on a harness with no provider semantics is a catalog fault.",
+        "Provider the harness runs these models through. How a provider combines with a model name is that harness's own semantics — pi spells it openai-codex/gpt-5.6-sol — and a provider on a harness with no provider semantics is a catalog fault.",
       )
       .optional(),
   })
   .describe("One family this harness includes.");
+
+const harnessDefaultsSchema = z
+  .strictObject({
+    model: z
+      .string()
+      .regex(NAME_PATTERN)
+      .describe(
+        "The harness's default model, launched when only the harness is named. Must be one of this harness's offered models, families included.",
+      ),
+    effort: z
+      .string()
+      .regex(NAME_PATTERN)
+      .describe(
+        "The harness's default effort, filled in when the chosen model has no default of its own. Every offered model without its own default must allow it — a model with a narrower set needs its own defaults.",
+      ),
+  })
+  .describe(
+    "This harness's own defaults. Optional when exactly one included family carries defaults — the family's then apply — and required otherwise.",
+  );
 
 const harnessEntrySchema = z
   .strictObject({
@@ -108,41 +153,25 @@ const harnessEntrySchema = z
         "Which harness adapter this entry describes. The catalog describes what a harness offers; it cannot conjure an adapter, so only claude, codex, and pi are accepted.",
       ),
     efforts: effortList(
-      "The harness's own effort vocabulary, in low-to-high order: the effective set for any model without its own, and what an effort-only request is matched against.",
-    ),
-    effort: z
-      .string()
-      .regex(NAME_PATTERN)
-      .describe(
-        'The harness\'s default effort, filled in when the chosen model has no default of its own. Required. Must be in "efforts", and every offered model without its own default must allow it — a model with a narrower set needs its own "effort".',
-      ),
+      "The harness's own effort vocabulary: what a local model inherits when neither it nor a family provides a set. Required exactly when some local model has no set of its own.",
+    ).optional(),
     models: z
       .array(localModelSchema)
       .min(1)
       .describe("Models this harness offers outside any family.")
       .optional(),
-    model: z
-      .string()
-      .regex(NAME_PATTERN)
-      .describe(
-        "The harness's default model, filled into a request that named no model — when it also satisfies an explicitly requested effort. Required. Must be one of this harness's offered models, families included.",
-      ),
     families: z
       .array(includeSchema)
       .min(1)
       .describe("Families this harness includes, unioned into its offering.")
       .optional(),
+    defaults: harnessDefaultsSchema.optional(),
   })
   .describe(
-    "One harness's offering. The array order of these entries is load-bearing: an ambiguous model/effort request resolves to the earliest matching harness, and the first entry is the default when nothing is requested.",
+    "One harness's offering. The array order of these entries is load-bearing: a model:effort request resolves to the earliest harness offering that combination.",
   );
 
 const catalogShape = {
-  harness: z
-    .enum(HARNESSES)
-    .describe(
-      'The default harness: what a request that names neither model nor effort resolves to. Required, and must be listed in "harnesses". Throughout this file, a plural key names the offering and its singular names the default.',
-    ),
   families: z
     .record(z.string().regex(NAME_PATTERN), familySchema)
     .describe(
@@ -153,7 +182,7 @@ const catalogShape = {
     .array(harnessEntrySchema)
     .min(1)
     .describe(
-      "The harness offerings, in priority order: earliest matching entry wins an ambiguous request, and the first entry is the default harness.",
+      "The harness offerings, in priority order: a model:effort request resolves to the earliest entry offering that combination.",
     ),
 };
 

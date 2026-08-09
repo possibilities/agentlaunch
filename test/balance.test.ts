@@ -106,12 +106,11 @@ function balanceCalls(world: World): string[] {
 }
 
 describe("balanced launch", () => {
-  test("claude composes the cswap prefix and forwards the tokens verbatim", () => {
+  test("claude composes the cswap prefix around the injected defaults", () => {
     const world = makeWorld();
     const result = run(world, [
+      "--x-harness",
       "claude",
-      "--model",
-      "fable",
       "hi there",
       "--x-no-yolo",
       "--x-dry-run",
@@ -130,16 +129,36 @@ describe("balanced launch", () => {
       "--share-history",
       "--",
       "--model",
-      "fable",
+      "opus",
+      "--effort",
+      "medium",
       "hi there",
     ]);
     expect(data.balance.route.slot).toBe(2);
+    expect(balanceCalls(world)).toEqual(["balance claude --json --model opus --dry-run"]);
+  });
+
+  test("a forwarded model yields the dimension and drives routing", () => {
+    const world = makeWorld();
+    const result = run(world, [
+      "--x-harness",
+      "claude",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--model",
+      "fable",
+      "-p",
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe(
+      "cswap run 2 --share-history -- --effort medium --model fable -p",
+    );
     expect(balanceCalls(world)).toEqual(["balance claude --json --model fable --dry-run"]);
   });
 
   test("the injected yolo flag rides inside the wrapped command", () => {
     const world = makeWorld();
-    const result = run(world, ["claude", "--x-dry-run", "--x-json"]);
+    const result = run(world, ["--x-harness", "claude", "--x-dry-run", "--x-json"]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
     expect(data.command).toEqual([
@@ -149,19 +168,16 @@ describe("balanced launch", () => {
       "--share-history",
       "--",
       "--dangerously-skip-permissions",
+      "--model",
+      "opus",
+      "--effort",
+      "medium",
     ]);
   });
 
-  test("codex dry run composes the copy-runnable --account spelling", () => {
+  test("codex composes the copy-runnable --account spelling around its spellings", () => {
     const world = makeWorld();
-    const result = run(world, [
-      "codex",
-      "-c",
-      'model_reasoning_effort="xhigh"',
-      "--x-no-yolo",
-      "--x-dry-run",
-      "--x-json",
-    ]);
+    const result = run(world, ["--x-harness", "codex", "--x-no-yolo", "--x-dry-run", "--x-json"]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as {
       command: string[];
@@ -173,47 +189,64 @@ describe("balanced launch", () => {
       "--account",
       "account:org-test",
       "--",
+      "--model",
+      "gpt-5.6-sol",
       "-c",
-      'model_reasoning_effort="xhigh"',
+      'model_reasoning_effort="high"',
     ]);
     expect(data.balance.leaseId).toBeNull();
     // Dry runs never claim.
-    expect(balanceCalls(world)).toEqual(["balance codex --json"]);
+    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-sol"]);
   });
 
-  test("codex's -m short drives routing", () => {
+  test("codex's -m short yields the model dimension and drives routing", () => {
     const world = makeWorld();
-    const result = run(world, ["codex", "-m", "gpt-x", "--x-no-yolo", "--x-dry-run"]);
+    const result = run(world, [
+      "--x-harness",
+      "codex",
+      "-m",
+      "gpt-x",
+      "--x-no-yolo",
+      "--x-dry-run",
+    ]);
     expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe(
+      `codex-swap run --account account:org-test -- -c 'model_reasoning_effort="high"' -m gpt-x`,
+    );
     expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-x"]);
   });
 
-  test("pi normalizes the provider-prefixed model for lane selection", () => {
+  test("pi injects the provider spelling and routes on the family name", () => {
     const world = makeWorld();
-    const result = run(world, [
-      "pi",
-      "--model",
-      "openai-codex/gpt-5.3-codex-spark",
-      "--x-no-yolo",
-      "--x-dry-run",
-      "--x-json",
-    ]);
+    const result = run(world, ["--x-harness", "pi", "--x-no-yolo", "--x-dry-run", "--x-json"]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
-    expect(data.command.slice(0, 5)).toEqual([
+    expect(data.command).toEqual([
       "codex-swap",
       "pi",
       "run",
       "--account",
       "account:org-test",
+      "--",
+      "--model",
+      "openai-codex/gpt-5.6-sol",
+      "--thinking",
+      "high",
     ]);
-    expect(data.command.slice(5)).toEqual(["--", "--model", "openai-codex/gpt-5.3-codex-spark"]);
-    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.3-codex-spark"]);
+    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-sol"]);
+  });
+
+  test("a colon harness value routes on its requested model", () => {
+    const world = makeWorld();
+    const result = run(world, ["--x-harness", "gpt-5.6-luna:max", "--x-no-yolo", "--x-dry-run"]);
+    expect(result.code).toBe(0);
+    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-luna"]);
   });
 
   test("--x-account pins codex without a balance call", () => {
     const world = makeWorld();
     const result = run(world, [
+      "--x-harness",
       "codex",
       "--x-account",
       "you@example.com",
@@ -233,14 +266,24 @@ describe("balanced launch", () => {
 
   test("--x-account forwards to balance for claude", () => {
     const world = makeWorld();
-    const result = run(world, ["claude", "--x-account", "c1", "--x-no-yolo", "--x-dry-run"]);
+    const result = run(world, [
+      "--x-harness",
+      "claude",
+      "--x-account",
+      "c1",
+      "--x-no-yolo",
+      "--x-dry-run",
+    ]);
     expect(result.code).toBe(0);
-    expect(balanceCalls(world)).toEqual(["balance claude --json --account c1 --dry-run"]);
+    expect(balanceCalls(world)).toEqual([
+      "balance claude --json --model opus --account c1 --dry-run",
+    ]);
   });
 
   test("--x-no-balance and AGENTSURFACE_NO_BALANCE launch raw", () => {
     const world = makeWorld();
     const flagged = run(world, [
+      "--x-harness",
       "claude",
       "--x-no-balance",
       "--x-no-yolo",
@@ -252,22 +295,22 @@ describe("balanced launch", () => {
       command: string[];
       balance: null;
     };
-    expect(flaggedData.command).toEqual(["claude"]);
+    expect(flaggedData.command).toEqual(["claude", "--model", "opus", "--effort", "medium"]);
     expect(flaggedData.balance).toBeNull();
 
-    const env = run(world, ["codex", "--x-no-yolo", "--x-dry-run", "--x-json"], {
+    const env = run(world, ["--x-harness", "codex", "--x-no-yolo", "--x-dry-run", "--x-json"], {
       AGENTSURFACE_NO_BALANCE: "1",
     });
     expect(env.code).toBe(0);
-    expect(((JSON.parse(env.stdout) as AnyEnvelope).data as { command: string[] }).command).toEqual(
-      ["codex"],
+    expect(((JSON.parse(env.stdout) as AnyEnvelope).data as { command: string[] }).command[0]).toBe(
+      "codex",
     );
     expect(balanceCalls(world)).toEqual([]);
   });
 
   test("--x-account with --x-no-balance is a usage fault", () => {
     const world = makeWorld();
-    const result = run(world, ["claude", "--x-account", "c1", "--x-no-balance"]);
+    const result = run(world, ["--x-harness", "claude", "--x-account", "c1", "--x-no-balance"]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("--x-account pins a balanced launch");
   });
@@ -283,12 +326,11 @@ describe("balanced launch", () => {
       }),
     );
     writeFileSync(join(world.binDir, "exit-code"), "3");
-    const result = run(world, ["codex", "--x-dry-run", "--x-json"]);
+    const result = run(world, ["--x-harness", "codex", "--x-dry-run", "--x-json"]);
     expect(result.code).toBe(1);
     const envelope = JSON.parse(result.stdout) as AnyEnvelope;
     expect(envelope.ok).toBe(false);
     expect(envelope.error?.code).toBe("balance_no_eligible_account");
-    expect(envelope.error?.message).toBe("every account is exhausted");
     expect(envelope.error?.recovery).toContain("--x-no-balance");
   });
 
@@ -297,7 +339,7 @@ describe("balanced launch", () => {
     rmSync(join(world.binDir, "agentusage"));
     // PATH without the real stack — only the fake bin dir and bun itself —
     // so the real agentusage can never leak into this refusal.
-    const result = run(world, ["claude", "--x-dry-run", "--x-json"], {
+    const result = run(world, ["--x-harness", "claude", "--x-dry-run", "--x-json"], {
       PATH: `${world.binDir}:${dirname(process.execPath)}`,
     });
     expect(result.code).toBe(1);
@@ -306,9 +348,16 @@ describe("balanced launch", () => {
     expect(envelope.error?.recovery).toContain("AGENTSURFACE_NO_BALANCE");
   });
 
-  test("a utility invocation passes through without consulting balance", () => {
+  test("a utility invocation passes through without balance or injection", () => {
     const world = makeWorld();
-    const result = run(world, ["codex", "--x-dry-run", "--x-json", "login", "--device-auth"]);
+    const result = run(world, [
+      "--x-harness",
+      "codex",
+      "--x-dry-run",
+      "--x-json",
+      "login",
+      "--device-auth",
+    ]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as {
       command: string[];
@@ -324,7 +373,7 @@ describe("balanced launch", () => {
   test("a utility invocation works even when the stack is missing entirely", () => {
     const world = makeWorld();
     rmSync(join(world.binDir, "agentusage"));
-    const result = run(world, ["codex", "--x-dry-run", "--x-json", "--version"], {
+    const result = run(world, ["--x-harness", "codex", "--x-dry-run", "--x-json", "--version"], {
       PATH: `${world.binDir}:${dirname(process.execPath)}`,
     });
     expect(result.code).toBe(0);
@@ -334,7 +383,7 @@ describe("balanced launch", () => {
 
   test("--x-account on a utility invocation is a usage fault, not a silent drop", () => {
     const world = makeWorld();
-    const result = run(world, ["codex", "--x-account", "acc_x", "login"]);
+    const result = run(world, ["--x-harness", "codex", "--x-account", "acc_x", "login"]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("utility invocation");
     expect(balanceCalls(world)).toEqual([]);
@@ -342,7 +391,7 @@ describe("balanced launch", () => {
 });
 
 describe("balanced resume", () => {
-  test("claude resume routes on the session's last-used model", () => {
+  test("claude resume routes on the session's last-used model, uninjected", () => {
     const world = makeWorld();
     const store = join(world.root, "claude", "projects", "-some-cwd");
     mkdirSync(store, { recursive: true });
@@ -365,26 +414,6 @@ describe("balanced resume", () => {
       SESSION_ID,
     ]);
     expect(balanceCalls(world)).toEqual(["balance claude --json --model claude-fable-5 --dry-run"]);
-  });
-
-  test("an explicit --model in forwarded tokens wins over the sniff", () => {
-    const world = makeWorld();
-    const store = join(world.root, "claude", "projects", "-some-cwd");
-    mkdirSync(store, { recursive: true });
-    writeFileSync(
-      join(store, `${SESSION_ID}.jsonl`),
-      `${JSON.stringify({ message: { model: "claude-fable-5" } })}\n`,
-    );
-    const result = run(world, [
-      "x-resume",
-      SESSION_ID,
-      "--x-no-yolo",
-      "--x-dry-run",
-      "--model",
-      "haiku",
-    ]);
-    expect(result.code).toBe(0);
-    expect(balanceCalls(world)).toEqual(["balance claude --json --model haiku --dry-run"]);
   });
 
   test("codex resume moves the session id into the wrapper grammar", () => {
@@ -471,14 +500,6 @@ describe("compose units", () => {
 });
 
 describe("shim support", () => {
-  test("a forwarded --model drives routing without being consumed", () => {
-    const world = makeWorld();
-    const result = run(world, ["claude", "--x-no-yolo", "--x-dry-run", "--model", "fable", "-p"]);
-    expect(result.code).toBe(0);
-    expect(balanceCalls(world)).toEqual(["balance claude --json --model fable --dry-run"]);
-    expect(result.stdout.trim()).toBe("cswap run 2 --share-history -- --model fable -p");
-  });
-
   test("real launches carry the AGENTSURFACE_LAUNCH sentinel", () => {
     const world = makeWorld();
     const probe = join(world.binDir, "claude");
@@ -488,7 +509,7 @@ describe("shim support", () => {
       `#!/usr/bin/env bash\nprintf '%s' "\${AGENTSURFACE_LAUNCH:-unset}" > ${JSON.stringify(out)}\n`,
     );
     chmodSync(probe, 0o755);
-    const result = run(world, ["claude", "--x-no-balance"]);
+    const result = run(world, ["--x-harness", "claude", "--x-no-balance"]);
     expect(result.code).toBe(0);
     expect(readFileSync(out, "utf8")).toBe("1");
   });

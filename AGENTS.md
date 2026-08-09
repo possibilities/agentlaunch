@@ -111,11 +111,14 @@ the adapters; append a new numbered record rather than editing an old one.
 - Pi is resumed with `--session <id>`; pi's `--resume` is a picker boolean.
   (cass emits the broken `pi --resume <id>` form — do not copy commands
   from it.)
-- The catalog is data (ADR 0010): it names what exists — harnesses in
-  priority order, models, effort sets, defaults (plural = offering,
-  singular = default) — while the adapters in `harness.ts` own every
-  emission spelling, provider semantics included. zod 4 is the one runtime
-  dependency, adopted with the fleet's config conventions.
+- The catalog is data (ADR 0010/0011): it names what exists — harnesses in
+  priority order, families, models, effort sets inheriting model > family
+  > harness, defaults in `defaults` objects — while the adapters in
+  `harness.ts` own every emission spelling, provider semantics included.
+  Every launch consumes it through the `--x-harness` value; the resolved
+  model and effort are injected, narrated, and owned per dimension (colon
+  forms fault on forwarded counterparts, the name form yields). zod 4 is
+  the one runtime dependency, adopted with the fleet's config conventions.
 - No invented state: no generated session ids, no extra flags beyond the
   narrated yolo/balance composition. Utility invocations pass through
   byte-identical.

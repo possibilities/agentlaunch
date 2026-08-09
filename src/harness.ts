@@ -32,6 +32,67 @@ export const PROVIDER_SPELLINGS: Record<
   pi: (provider, model) => `${provider}/${model}`,
 };
 
+/** How a resolved model is spelled at launch. One spelling everywhere;
+ * the per-harness variation lives in the spelling string itself
+ * (provider-combined for pi). */
+export function modelArguments(spelling: string): string[] {
+  return ["--model", spelling];
+}
+
+/** How a resolved effort is spelled at launch: claude and pi have flags,
+ * codex only takes the TOML config override. */
+export function effortArguments(harness: HarnessName, effort: string): string[] {
+  switch (harness) {
+    case "claude":
+      return ["--effort", effort];
+    case "codex":
+      return ["-c", `model_reasoning_effort="${effort}"`];
+    case "pi":
+      return ["--thinking", effort];
+  }
+}
+
+/** The first forwarded token that natively claims the model dimension —
+ * `--model`, `--model=…`, codex's `-m` — or null. Read for conflict and
+ * yield decisions; the tokens themselves are never edited. */
+export function modelDimensionToken(
+  harness: HarnessName,
+  tokens: readonly string[],
+): string | null {
+  for (const token of tokens) {
+    if (token === "--model" || token.startsWith("--model=")) return token;
+    if (harness === "codex" && (token === "-m" || token.startsWith("-m="))) return token;
+  }
+  return null;
+}
+
+/** The first forwarded token that natively claims the effort dimension —
+ * claude `--effort`, pi `--thinking`, codex `-c|--config` whose value sets
+ * model_reasoning_effort — or null. */
+export function effortDimensionToken(
+  harness: HarnessName,
+  tokens: readonly string[],
+): string | null {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (harness === "claude" && (token === "--effort" || token.startsWith("--effort="))) {
+      return token;
+    }
+    if (harness === "pi" && (token === "--thinking" || token.startsWith("--thinking="))) {
+      return token;
+    }
+    if (harness === "codex") {
+      if (
+        (token === "-c" || token === "--config") &&
+        tokens[i + 1]?.startsWith("model_reasoning_effort=")
+      ) {
+        return `${token} ${tokens[i + 1]}`;
+      }
+    }
+  }
+  return null;
+}
+
 /** What a launch is, apart from launching it. A surface consumes this same
  * shape later, so nothing in here may assume a live terminal. */
 export interface LaunchSpec {

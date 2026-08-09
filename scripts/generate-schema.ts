@@ -16,7 +16,7 @@ import { configFileSchema } from "../src/config-schema.ts";
 
 const CATALOG_TITLE = "agentsurface catalog";
 const CATALOG_DESCRIPTION =
-  "The ordered description of harnesses, their models, and their effort sets, read from the built-in catalog.json shipped with the checkout — or, when it exists, ~/.config/agentsurface/catalog.json (XDG_CONFIG_HOME relocates the directory), which REPLACES the built-in outright rather than merging with it. Harness order is load-bearing: an ambiguous model/effort request resolves to the earliest matching harness, and the first entry is the default. The file is validated strictly; every fault is a catalog_invalid error rather than a silently ignored line, and x-doctor reports it.";
+  "The ordered description of harnesses, their models, and their effort sets, read from the built-in catalog.json shipped with the checkout — or, when it exists, ~/.config/agentsurface/catalog.json (XDG_CONFIG_HOME relocates the directory), which REPLACES the built-in outright rather than merging with it. Every launch consumes it through the --x-harness value: a harness name launches that harness's defaults, <model>:<effort> resolves to the earliest harness in the file's order offering the combination, <harness>:<model>:<effort> pins and validates. Effort sets inherit model > family > harness; defaults live in a \"defaults\" object per harness, per family (supplying a harness that includes it and states none), and per model (effort only). The file is validated strictly and totally at load; every fault is a catalog_invalid error rather than a silently ignored line, and x-doctor reports it.";
 
 const CONFIG_TITLE = "agentsurface launcher configuration";
 const CONFIG_DESCRIPTION =

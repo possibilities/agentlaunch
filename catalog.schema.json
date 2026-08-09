@@ -1,17 +1,12 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "agentsurface catalog",
-  "description": "The ordered description of harnesses, their models, and their effort sets, read from the built-in catalog.json shipped with the checkout — or, when it exists, ~/.config/agentsurface/catalog.json (XDG_CONFIG_HOME relocates the directory), which REPLACES the built-in outright rather than merging with it. Harness order is load-bearing: an ambiguous model/effort request resolves to the earliest matching harness, and the first entry is the default. The file is validated strictly; every fault is a catalog_invalid error rather than a silently ignored line, and x-doctor reports it.",
+  "description": "The ordered description of harnesses, their models, and their effort sets, read from the built-in catalog.json shipped with the checkout — or, when it exists, ~/.config/agentsurface/catalog.json (XDG_CONFIG_HOME relocates the directory), which REPLACES the built-in outright rather than merging with it. Every launch consumes it through the --x-harness value: a harness name launches that harness's defaults, <model>:<effort> resolves to the earliest harness in the file's order offering the combination, <harness>:<model>:<effort> pins and validates. Effort sets inherit model > family > harness; defaults live in a \"defaults\" object per harness, per family (supplying a harness that includes it and states none), and per model (effort only). The file is validated strictly and totally at load; every fault is a catalog_invalid error rather than a silently ignored line, and x-doctor reports it.",
   "type": "object",
   "properties": {
     "$schema": {
       "type": "string",
       "description": "Path or URL of this schema, for editors that offer completion and validation. The loader accepts it and ignores it; it is the one key here that configures nothing."
-    },
-    "harness": {
-      "type": "string",
-      "enum": ["claude", "codex", "pi"],
-      "description": "The default harness: what a request that names neither model nor effort resolves to. Required, and must be listed in \"harnesses\". Throughout this file, a plural key names the offering and its singular names the default."
     },
     "families": {
       "type": "object",
@@ -22,6 +17,15 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
+          "efforts": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+            },
+            "description": "The family's effort vocabulary: what members inherit when they carry no set of their own, whichever harness includes them."
+          },
           "models": {
             "minItems": 1,
             "type": "array",
@@ -40,12 +44,20 @@
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
                   },
-                  "description": "Model-bound effort vocabulary: the efforts this model supports wherever it runs, replacing the including harness's set. Omit it and the model inherits each including harness's efforts."
+                  "description": "Model-bound effort vocabulary: the efforts this model supports wherever it runs, replacing the family's (or including harness's) set. Omit it and the model inherits down the chain."
                 },
-                "effort": {
-                  "type": "string",
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-                  "description": "This model's default effort, filled in when the model is chosen without an explicit effort — overriding the harness's own default. Must be in the model's effective efforts."
+                "defaults": {
+                  "type": "object",
+                  "properties": {
+                    "effort": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                      "description": "This model's default effort, filled in when the model is chosen without an explicit effort — overriding the harness's resolved default. Must be in the model's effective efforts."
+                    }
+                  },
+                  "required": ["effort"],
+                  "additionalProperties": false,
+                  "description": "Defaults this model carries; only the effort is defaultable per model."
                 }
               },
               "required": ["model"],
@@ -53,6 +65,24 @@
               "description": "One model a family offers."
             },
             "description": "The family's models, in presentation order."
+          },
+          "defaults": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                "description": "The family's default model; must be one of its members."
+              },
+              "effort": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                "description": "The family's default effort; must be valid for the default model in every harness that includes the family."
+              }
+            },
+            "required": ["model", "effort"],
+            "additionalProperties": false,
+            "description": "Defaults the family supplies to a harness that includes it and states none of its own. A harness including two defaults-bearing families must state its own."
           }
         },
         "required": ["models"],
@@ -79,12 +109,7 @@
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
             },
-            "description": "The harness's own effort vocabulary, in low-to-high order: the effective set for any model without its own, and what an effort-only request is matched against."
-          },
-          "effort": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-            "description": "The harness's default effort, filled in when the chosen model has no default of its own. Required. Must be in \"efforts\", and every offered model without its own default must allow it — a model with a narrower set needs its own \"effort\"."
+            "description": "The harness's own effort vocabulary: what a local model inherits when neither it nor a family provides a set. Required exactly when some local model has no set of its own."
           },
           "models": {
             "minItems": 1,
@@ -111,10 +136,18 @@
                   },
                   "description": "Efforts this model supports, replacing the harness-level set. Omit it and the model inherits the harness's efforts."
                 },
-                "effort": {
-                  "type": "string",
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-                  "description": "This model's default effort, filled in when the model is chosen without an explicit effort — overriding the harness's own default. Must be in the model's effective efforts."
+                "defaults": {
+                  "type": "object",
+                  "properties": {
+                    "effort": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                      "description": "This model's default effort, filled in when the model is chosen without an explicit effort — overriding the harness's resolved default. Must be in the model's effective efforts."
+                    }
+                  },
+                  "required": ["effort"],
+                  "additionalProperties": false,
+                  "description": "Defaults this model carries; only the effort is defaultable per model."
                 }
               },
               "required": ["model"],
@@ -122,11 +155,6 @@
               "description": "A model this harness offers outside any family."
             },
             "description": "Models this harness offers outside any family."
-          },
-          "model": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-            "description": "The harness's default model, filled into a request that named no model — when it also satisfies an explicitly requested effort. Required. Must be one of this harness's offered models, families included."
           },
           "families": {
             "minItems": 1,
@@ -142,7 +170,7 @@
                 "provider": {
                   "type": "string",
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-                  "description": "Provider the harness runs these models through. How a provider combines with a model name is that harness's own semantics — pi spells it openai-codex/gpt-5.6 — and a provider on a harness with no provider semantics is a catalog fault."
+                  "description": "Provider the harness runs these models through. How a provider combines with a model name is that harness's own semantics — pi spells it openai-codex/gpt-5.6-sol — and a provider on a harness with no provider semantics is a catalog fault."
                 }
               },
               "required": ["family"],
@@ -150,15 +178,33 @@
               "description": "One family this harness includes."
             },
             "description": "Families this harness includes, unioned into its offering."
+          },
+          "defaults": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                "description": "The harness's default model, launched when only the harness is named. Must be one of this harness's offered models, families included."
+              },
+              "effort": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                "description": "The harness's default effort, filled in when the chosen model has no default of its own. Every offered model without its own default must allow it — a model with a narrower set needs its own defaults."
+              }
+            },
+            "required": ["model", "effort"],
+            "additionalProperties": false,
+            "description": "This harness's own defaults. Optional when exactly one included family carries defaults — the family's then apply — and required otherwise."
           }
         },
-        "required": ["harness", "efforts", "effort", "model"],
+        "required": ["harness"],
         "additionalProperties": false,
-        "description": "One harness's offering. The array order of these entries is load-bearing: an ambiguous model/effort request resolves to the earliest matching harness, and the first entry is the default when nothing is requested."
+        "description": "One harness's offering. The array order of these entries is load-bearing: a model:effort request resolves to the earliest harness offering that combination."
       },
-      "description": "The harness offerings, in priority order: earliest matching entry wins an ambiguous request, and the first entry is the default harness."
+      "description": "The harness offerings, in priority order: a model:effort request resolves to the earliest entry offering that combination."
     }
   },
-  "required": ["harness", "harnesses"],
+  "required": ["harnesses"],
   "additionalProperties": false
 }

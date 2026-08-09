@@ -18,10 +18,10 @@ writes the deployed SHA to `~/.local/state/agentsurface/deployed-sha`.
 
 ## Use
 
-    agentsurface claude "fix the failing tests"
-    agentsurface claude --model fable "fix the failing tests"
-    agentsurface codex -c 'model_reasoning_effort="xhigh"' --search
-    agentsurface pi --model sonnet:high
+    agentsurface --x-harness claude "fix the failing tests"
+    agentsurface --x-harness gpt-5.6-sol:ultra "hard problem"
+    agentsurface --x-harness pi:gpt-5.6-luna:max
+    agentsurface --x-harness claude --model sonnet "quick question"
     agentsurface x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
     agentsurface x-resume 019fcb41-6f70-7283-aa42-97510cb09818 --x-harness codex
     agentsurface x-doctor
@@ -32,10 +32,26 @@ prompts, flags, and subcommands alike, native spellings only. Unknown
 `--x-*` flags are usage faults; unknown harness flags are the harness's to
 judge, so a harness upgrade never changes how a command parses here. Bare
 `x-*` words in command position are reserved for agentsurface (`x-resume`,
-`x-doctor`). `x-resume` without `--x-harness` detects which session store
-owns the id and refuses, with the candidates named, when that is
-ambiguous. `--x-dry-run` prints the command instead of launching; add
-`--x-json` for the machine envelope.
+`x-doctor`).
+
+Every launch names what it runs through the **harness value** (ADR 0011):
+`--x-harness claude` launches that harness on its catalog defaults;
+`--x-harness gpt-5.6-sol:ultra` resolves to the earliest harness in
+catalog order offering that model at that effort; `--x-harness
+pi:gpt-5.6-luna:max` pins and validates. The resolved model and effort are
+injected in the harness's own spelling — `--model` everywhere (pi gets
+`openai-codex/gpt-5.6-sol`), then `--effort` (claude), `-c
+model_reasoning_effort="…"` (codex), or `--thinking` (pi) — and narrated.
+A colon form owns both dimensions: a forwarded native model/effort flag
+beside it is a usage fault. The bare-name form yields per dimension: a
+forwarded `--model sonnet` wins that dimension and only the effort is
+injected. Utility invocations (`codex login`, bare `--version`) take no
+injection; resumes never do — a session continues on its own model.
+
+`x-resume` without `--x-harness` detects which session store owns the id
+and refuses, with the candidates named, when that is ambiguous.
+`--x-dry-run` prints the command instead of launching; add `--x-json` for
+the machine envelope.
 
 ## The catalog
 
@@ -45,27 +61,31 @@ harnesses, their models, and their effort sets (ADR 0010); a custom
 `catalog.schema.json` describes the file for editors, generated from the
 zod source of truth (`bun run generate:schemas`).
 
-- **Families** define a model list once: the `gpt` family is included as-is
-  by codex and through the `openai-codex` provider by pi, so `gpt-5.6`
-  means the same thing on both — pi merely emits `openai-codex/gpt-5.6`.
-  What a provider means is each harness's own semantics; claude and codex
-  have none, and a provider on their includes is a fault.
-- **Efforts** attach per harness and per model — the model's set replaces
-  the harness's — so `max` is allowed exactly where it is real.
-- **Defaults**: a plural key names the offering, its singular the default —
-  the top-level `harness`, each harness's `model` and `effort` (required),
-  and optionally a model's own `effort` overriding the harness default.
-- **Resolution** (the runtime flags consuming it arrive in a later slice):
-  harnesses are walked in catalog order and the earliest entry offering
-  the requested model at the requested effort wins — `gpt-5.6` + `xhigh`
-  picks codex, `gpt-5.6` + `max` skips codex for pi. Defaults fill what
-  the request left unspecified; nothing requested resolves to the default
-  harness.
+- **Families** define a model list once: the `claude` family is included
+  by the claude harness, and the `gpt` family as-is by codex and through
+  the `openai-codex` provider by pi — so `gpt-5.6-sol` means the same
+  thing on both, and only the emitted spelling differs. What a provider
+  means is each harness's own semantics; claude and codex have none, and a
+  provider on their includes is a fault.
+- **Efforts** inherit model > family > harness — a member's own set wins,
+  else the family's, else the harness's — so `ultra` is allowed exactly
+  where it is real.
+- **Defaults** live in a `defaults` object: per harness, per family
+  (supplying any harness that includes it and states none of its own —
+  two defaults-bearing includes without own defaults is a fault), and per
+  model (`{"effort": …}` only, overriding the harness's resolved default
+  when that model is chosen). There is no default harness — every launch
+  names one through the harness value.
+- **Resolution**: the `--x-harness` value consumes it — a harness name
+  launches its defaults, `model:effort` walks the harness order and the
+  earliest offering wins (`gpt-5.6-sol:ultra` picks codex over pi), a full
+  triple pins and validates.
 - Validation is strict and total at load: unknown keys or families,
-  providers without semantics, duplicates after family expansion, and
-  unsatisfiable defaults are all `catalog_invalid`, and a malformed custom
-  catalog fails rather than falling back. `x-doctor` reports the active
-  catalog's source, order, default, and model counts.
+  providers without semantics, duplicates after family expansion, missing
+  effort chains, and unsatisfiable defaults are all `catalog_invalid`, and
+  a malformed custom catalog fails rather than falling back. `x-doctor`
+  reports the active catalog's source, order, model counts, and resolved
+  defaults.
 
 ## Yolo mode
 

@@ -61,33 +61,46 @@ expect_out() {
 expect_exit 0 run --version
 expect_exit 0 run --agent-teaser
 expect_exit 0 run --agent-help
-expect_exit 0 run claude --x-help
+expect_exit 0 run --x-help
 expect_exit 0 run x-doctor
 expect_exit 0 run x-doctor --x-json
 expect_out '"harnesses"'
 expect_out '"catalog"'
 
-# Launches, dry runs only. Yolo is on by default (ADR 0009).
-expect_exit 0 run claude --x-dry-run
-expect_out "claude --dangerously-skip-permissions"
-expect_exit 0 run codex --x-dry-run
-expect_out "codex --dangerously-bypass-approvals-and-sandbox"
-expect_exit 0 run pi --x-dry-run
-expect_out "pi --approve"
+# Launches resolve the --x-harness value against the catalog and inject the
+# resolved model and effort in the harness's own spelling. Yolo is on by
+# default (ADR 0009).
+expect_exit 0 run --x-harness claude --x-dry-run
+expect_out "claude --dangerously-skip-permissions --model opus --effort medium"
+expect_exit 0 run --x-harness codex --x-no-yolo --x-dry-run
+expect_out "codex --model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"'"
+expect_exit 0 run --x-harness pi --x-no-yolo --x-dry-run
+expect_out "pi --model openai-codex/gpt-5.6-sol --thinking high"
 
-# Unprefixed tokens forward verbatim, in the order typed.
-expect_exit 0 run claude "hello there" --model fable --x-no-yolo --x-dry-run
-expect_out "claude 'hello there' --model fable"
-expect_exit 0 run claude --permission-mode plan --x-no-yolo --x-dry-run --x-json
-expect_out '"--permission-mode"'
-expect_exit 0 run codex --totally-unknown-flag --x-no-yolo --x-dry-run
-expect_out "codex --totally-unknown-flag"
+# Colon forms: model:effort walks catalog order, harness:model:effort pins.
+expect_exit 0 run --x-harness gpt-5.6-sol:ultra --x-no-yolo --x-dry-run
+expect_out "codex --model gpt-5.6-sol -c 'model_reasoning_effort=\"ultra\"'"
+expect_exit 0 run --x-harness sonnet:high --x-no-yolo --x-dry-run
+expect_out "claude --model sonnet --effort high"
+expect_exit 0 run --x-harness pi:gpt-5.6-luna:max --x-no-yolo --x-dry-run
+expect_out "pi --model openai-codex/gpt-5.6-luna --thinking max"
 
-# --x-no-yolo redacts an explicitly forwarded yolo flag; the removal is
-# narrated on stderr and recorded in the envelope.
-expect_exit 0 run claude --dangerously-skip-permissions --x-no-yolo --x-dry-run --x-json
-expect_out '"redactions":\["--dangerously-skip-permissions"\]'
-expect_exit 0 run claude --dangerously-skip-permissions --x-no-yolo --x-dry-run
+# The name route yields per dimension to forwarded native flags.
+expect_exit 0 run --x-harness claude --model sonnet --x-no-yolo --x-dry-run
+expect_out "claude --effort medium --model sonnet"
+expect_exit 0 run --x-harness claude "hello there" --x-no-yolo --x-dry-run --x-json
+expect_out '"model_source":"default"'
+
+# Colon forms own both dimensions; conflicts and misses are usage faults.
+expect_exit 2 run --x-harness claude:opus:high --model sonnet --x-dry-run
+expect_exit 2 run --x-harness claude:opus:high --effort low --x-dry-run
+expect_exit 2 run --x-harness gpt-5.5:ultra --x-dry-run
+expect_exit 2 run --x-harness opus --x-dry-run
+expect_exit 2 run --x-harness claude:opus --x-dry-run
+expect_exit 2 run --x-harness cursor:m:e --x-dry-run
+
+# --x-no-yolo redacts an explicitly forwarded yolo flag, narrated.
+expect_exit 0 run --x-harness claude --dangerously-skip-permissions --x-no-yolo --x-dry-run
 if grep -q -- "--dangerously" "$WORK/out"; then
   echo "FAIL: --x-no-yolo did not redact the forwarded flag" >&2
   exit 1
@@ -100,34 +113,35 @@ grep -q "removed --dangerously-skip-permissions" "$WORK/err" || {
 # The config file disables yolo; --x-yolo forces it back per launch.
 mkdir -p "$WORK/home/.config/agentsurface"
 printf '{"yolo":false}\n' >"$WORK/home/.config/agentsurface/config.json"
-expect_exit 0 run claude --x-dry-run
+expect_exit 0 run --x-harness claude --x-dry-run
 if grep -q -- "--dangerously" "$WORK/out"; then
   echo "FAIL: a disabling config still injected the flag" >&2
   exit 1
 fi
-expect_exit 0 run claude --x-yolo --x-dry-run
+expect_exit 0 run --x-harness claude --x-yolo --x-dry-run
 expect_out "claude --dangerously-skip-permissions"
-expect_exit 2 run pi --x-yolo --x-no-yolo --x-dry-run
+expect_exit 2 run --x-harness pi --x-yolo --x-no-yolo --x-dry-run
 rm "$WORK/home/.config/agentsurface/config.json"
 
-# Utility invocations pass through unwrapped and unflagged.
-expect_exit 0 run codex --x-dry-run login
+# Utility invocations pass through uninjected; colon forms refuse them.
+expect_exit 0 run --x-harness codex --x-dry-run login
 expect_out "codex login"
-expect_exit 0 run claude --x-dry-run --version
+expect_exit 0 run --x-harness claude --x-dry-run --version
 expect_out "claude --version"
+expect_exit 2 run --x-harness codex:gpt-5.5:high login --x-dry-run
 
 # Usage faults exit 2 before anything runs
-expect_exit 2 run cursor --x-dry-run
-expect_exit 2 run claude --x-bogus
-expect_exit 2 run claude x-something
-expect_exit 2 run claude --x-json
+expect_exit 2 run --x-bogus
+expect_exit 2 run x-something
+expect_exit 2 run --x-harness claude --x-json
 expect_exit 2 run x-resume a/b --x-dry-run
+expect_exit 2 run claude
 expect_exit 2 run open claude
 expect_exit 2 run resume abc
 expect_exit 2 run doctor
-expect_exit 2 run bogus-command
+expect_exit 2 run land
 
-# Resume against a fixture store
+# Resume against a fixture store: no model/effort injection, ever.
 SESSION_ID="05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60"
 mkdir -p "$WORK/claude/projects/-somewhere"
 printf '{}\n' >"$WORK/claude/projects/-somewhere/$SESSION_ID.jsonl"
@@ -143,34 +157,35 @@ expect_out '"code":"session_not_found"'
 
 # Balanced launches compose the swap prefix (fake stack, dry runs only)
 install_fake_balance
-expect_exit 0 run_balanced claude --model fable --x-no-yolo --x-dry-run
-expect_out "cswap run 1 --share-history -- --model fable"
-expect_exit 0 run_balanced codex --x-no-yolo --x-dry-run
+expect_exit 0 run_balanced --x-harness claude --x-no-yolo --x-dry-run
+expect_out "cswap run 1 --share-history -- --model opus --effort medium"
+expect_exit 0 run_balanced --x-harness codex --x-no-yolo --x-dry-run
 expect_out "codex-swap run --account account:org-smoke --"
-expect_exit 0 run_balanced pi --x-no-yolo --x-dry-run
-expect_out "codex-swap pi run --account account:org-smoke --"
+expect_exit 0 run_balanced --x-harness pi --x-no-yolo --x-dry-run
+expect_out "codex-swap pi run --account account:org-smoke -- --model openai-codex/gpt-5.6-sol"
 expect_exit 0 run_balanced x-resume "$SESSION_ID" --x-no-yolo --x-dry-run
 expect_out "cswap run 1 --share-history -- --resume $SESSION_ID"
-expect_exit 0 run_balanced claude --x-no-balance --x-no-yolo --x-dry-run
+expect_exit 0 run_balanced --x-harness claude --x-no-balance --x-no-yolo --x-dry-run
 expect_out "claude"
-expect_exit 2 run_balanced claude --x-account c1 --x-no-balance --x-dry-run
+expect_exit 2 run_balanced --x-harness claude --x-account c1 --x-no-balance --x-dry-run
 
 # The narrative is on stderr, so stdout stays exactly the command
-expect_exit 0 run claude --model fable --x-no-yolo --x-dry-run
-if [[ "$(cat "$WORK/out")" != "claude --model fable" ]]; then
+expect_exit 0 run --x-harness claude --x-no-yolo --x-dry-run
+if [[ "$(cat "$WORK/out")" != "claude --model opus --effort medium" ]]; then
   echo "FAIL: narrative leaked into stdout" >&2
   cat "$WORK/out" >&2
   exit 1
 fi
 grep -q "^open    claude$" "$WORK/err" || { echo "FAIL: no narrative on stderr" >&2; exit 1; }
-grep -q "^yolo    off" "$WORK/err" || { echo "FAIL: yolo row missing" >&2; exit 1; }
-expect_exit 0 run claude --x-dry-run --x-json --x-verbose
+grep -q "^model   opus · default$" "$WORK/err" || { echo "FAIL: model row missing" >&2; exit 1; }
+grep -q "^effort  medium · default$" "$WORK/err" || { echo "FAIL: effort row missing" >&2; exit 1; }
+expect_exit 0 run --x-harness claude --x-dry-run --x-json --x-verbose
 if [[ -s "$WORK/err" ]]; then
   echo "FAIL: --x-json did not silence the narrative" >&2
   cat "$WORK/err" >&2
   exit 1
 fi
-expect_exit 0 run claude --x-dry-run --x-verbose
+expect_exit 0 run --x-harness claude --x-dry-run --x-verbose
 grep -q "^config  " "$WORK/err" || { echo "FAIL: --x-verbose printed no mechanism" >&2; exit 1; }
 
 echo "smoke: all commands behaved"

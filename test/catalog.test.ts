@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadCatalog, resolveRequest } from "../src/catalog.ts";
+import { loadCatalog, parseHarnessValue, resolveRequest } from "../src/catalog.ts";
 import { CliError, UsageError } from "../src/errors.ts";
 import type { Environ } from "../src/paths.ts";
 
@@ -27,87 +27,197 @@ function writeCatalog(content: string): { env: Environ; home: string } {
   return { env, home };
 }
 
-/** A minimal valid custom catalog to mutate per test. */
+/** A minimal valid custom catalog to mutate per test: family-level efforts
+ * and defaults, one narrowed member. */
 const CUSTOM = {
-  harness: "codex",
   families: {
-    gpt: { models: [{ model: "gpt-5.6" }, { model: "gpt-5.3-codex-spark" }] },
+    gpt: {
+      efforts: ["low", "high", "max"],
+      models: [{ model: "gpt-a" }, { model: "gpt-b", efforts: ["high"] }],
+      defaults: { model: "gpt-a", effort: "high" },
+    },
   },
   harnesses: [
-    {
-      harness: "codex",
-      efforts: ["low", "high"],
-      effort: "high",
-      families: [{ family: "gpt" }],
-      model: "gpt-5.6",
-    },
-    {
-      harness: "pi",
-      efforts: ["low", "high", "max"],
-      effort: "high",
-      families: [{ family: "gpt", provider: "openai-codex" }],
-      model: "gpt-5.6",
-    },
+    { harness: "codex", families: [{ family: "gpt" }] },
+    { harness: "pi", families: [{ family: "gpt", provider: "prov" }] },
   ],
 };
 
+describe("parseHarnessValue", () => {
+  test("a bare harness name pins that harness", () => {
+    expect(parseHarnessValue("claude")).toEqual({ harness: "claude" });
+    expect(parseHarnessValue("pi")).toEqual({ harness: "pi" });
+  });
+
+  test("one colon is model:effort, both parts required", () => {
+    expect(parseHarnessValue("gpt-5.6-sol:high")).toEqual({
+      model: "gpt-5.6-sol",
+      effort: "high",
+    });
+    expect(() => parseHarnessValue("gpt-5.6-sol:")).toThrow(/needs both parts/);
+    expect(() => parseHarnessValue(":high")).toThrow(/needs both parts/);
+  });
+
+  test("two colons are harness:model:effort, all parts required", () => {
+    expect(parseHarnessValue("pi:gpt-5.6-luna:max")).toEqual({
+      harness: "pi",
+      model: "gpt-5.6-luna",
+      effort: "max",
+    });
+    expect(() => parseHarnessValue("claude:opus:")).toThrow(/needs all three parts/);
+    expect(() => parseHarnessValue("::")).toThrow(/needs all three parts/);
+    expect(() => parseHarnessValue("cursor:m:e")).toThrow(/"cursor" is not a harness/);
+  });
+
+  test("anything else is a pointed usage fault", () => {
+    expect(() => parseHarnessValue("opus")).toThrow(/is not a harness value/);
+    expect(() => parseHarnessValue("a:b:c:d")).toThrow(/is not a harness value/);
+  });
+});
+
 describe("loadCatalog", () => {
-  test("no custom file loads the built-in, in its stated order", () => {
+  test("no custom file loads the built-in: family-shaped, in stated order", () => {
     const { env, home } = emptyHome();
     const catalog = loadCatalog(env, home);
     expect(catalog.source).toBe("built-in");
-    expect(catalog.harness).toBe("claude");
     expect(catalog.harnesses.map((entry) => entry.harness)).toEqual(["claude", "codex", "pi"]);
-    expect(catalog.harnesses[0]?.models.map((model) => model.model)).toEqual([
-      "fable",
-      "opus",
-      "sonnet",
-      "haiku",
-    ]);
+    const claude = catalog.harnesses[0]!;
+    expect(claude.models.map((model) => model.model)).toEqual(["fable", "opus", "sonnet", "haiku"]);
+    expect(claude.model).toBe("opus");
+    expect(claude.effort).toBe("medium");
+    expect(claude.models[0]?.family).toBe("claude");
   });
 
-  test("a family member keeps one typed name and gets per-harness spellings", () => {
+  test("family defaults supply both including harnesses; provider shapes pi's spellings", () => {
     const { env, home } = emptyHome();
     const catalog = loadCatalog(env, home);
     const codex = catalog.harnesses.find((entry) => entry.harness === "codex");
     const pi = catalog.harnesses.find((entry) => entry.harness === "pi");
-    const viaCodex = codex?.models.find((model) => model.model === "gpt-5.6");
-    const viaPi = pi?.models.find((model) => model.model === "gpt-5.6");
-    expect(viaCodex?.spelling).toBe("gpt-5.6");
-    expect(viaPi?.spelling).toBe("openai-codex/gpt-5.6");
-    expect(viaPi?.family).toBe("gpt");
+    expect(codex?.model).toBe("gpt-5.6-sol");
+    expect(codex?.effort).toBe("high");
+    expect(pi?.model).toBe("gpt-5.6-sol");
+    expect(pi?.models.find((model) => model.model === "gpt-5.6-sol")?.spelling).toBe(
+      "openai-codex/gpt-5.6-sol",
+    );
+    expect(codex?.models.find((model) => model.model === "gpt-5.6-sol")?.spelling).toBe(
+      "gpt-5.6-sol",
+    );
   });
 
-  test("a custom catalog replaces the built-in outright", () => {
+  test("efforts inherit member > family > harness", () => {
     const { env, home } = writeCatalog(JSON.stringify(CUSTOM));
     const catalog = loadCatalog(env, home);
-    expect(catalog.source).toBe("custom");
-    expect(catalog.harness).toBe("codex");
-    expect(catalog.harnesses.map((entry) => entry.harness)).toEqual(["codex", "pi"]);
-  });
-
-  test("$schema is tolerated and stripped", () => {
-    const { env, home } = writeCatalog(JSON.stringify({ $schema: "x", ...CUSTOM }));
-    expect(loadCatalog(env, home).source).toBe("custom");
-  });
-
-  test("members inherit the including harness's efforts unless they carry their own", () => {
-    const narrowed = structuredClone(CUSTOM);
-    narrowed.families.gpt.models[1] = {
-      model: "gpt-5.3-codex-spark",
-      efforts: ["high"],
-    } as never;
-    const { env, home } = writeCatalog(JSON.stringify(narrowed));
-    const catalog = loadCatalog(env, home);
-    const pi = catalog.harnesses.find((entry) => entry.harness === "pi");
-    expect(pi?.models.find((model) => model.model === "gpt-5.6")?.efforts).toEqual([
+    const codex = catalog.harnesses[0]!;
+    expect(codex.models.find((model) => model.model === "gpt-a")?.efforts).toEqual([
       "low",
       "high",
       "max",
     ]);
-    expect(pi?.models.find((model) => model.model === "gpt-5.3-codex-spark")?.efforts).toEqual([
-      "high",
-    ]);
+    expect(codex.models.find((model) => model.model === "gpt-b")?.efforts).toEqual(["high"]);
+  });
+
+  test("a local model with no efforts anywhere is a fault; the harness set covers it", () => {
+    const local = {
+      harnesses: [
+        {
+          harness: "claude",
+          efforts: ["low", "high"],
+          models: [{ model: "fable" }],
+          defaults: { model: "fable", effort: "high" },
+        },
+      ],
+    };
+    const { env, home } = writeCatalog(JSON.stringify(local));
+    expect(loadCatalog(env, home).harnesses[0]?.models[0]?.efforts).toEqual(["low", "high"]);
+
+    const bare = {
+      harnesses: [
+        {
+          harness: "claude",
+          models: [{ model: "fable" }],
+          defaults: { model: "fable", effort: "high" },
+        },
+      ],
+    };
+    const { env: env2, home: home2 } = writeCatalog(JSON.stringify(bare));
+    expect(() => loadCatalog(env2, home2)).toThrow(/has no efforts and the harness declares none/);
+  });
+
+  test("harness defaults win over family defaults", () => {
+    const overridden = structuredClone(CUSTOM);
+    overridden.harnesses[0] = {
+      ...overridden.harnesses[0],
+      defaults: { model: "gpt-b", effort: "high" },
+    } as never;
+    const { env, home } = writeCatalog(JSON.stringify(overridden));
+    const codex = loadCatalog(env, home).harnesses[0]!;
+    expect(codex.model).toBe("gpt-b");
+    expect(codex.effort).toBe("high");
+  });
+
+  test("defaults must come from somewhere, and from one place", () => {
+    const none = structuredClone(CUSTOM);
+    none.families.gpt = { ...none.families.gpt, defaults: undefined } as never;
+    const { env: env1, home: home1 } = writeCatalog(JSON.stringify(none));
+    expect(() => loadCatalog(env1, home1)).toThrow(/has no defaults/);
+
+    const two = {
+      families: {
+        a: {
+          efforts: ["low"],
+          models: [{ model: "m-a" }],
+          defaults: { model: "m-a", effort: "low" },
+        },
+        b: {
+          efforts: ["low"],
+          models: [{ model: "m-b" }],
+          defaults: { model: "m-b", effort: "low" },
+        },
+      },
+      harnesses: [{ harness: "pi", families: [{ family: "a" }, { family: "b" }] }],
+    };
+    const { env: env2, home: home2 } = writeCatalog(JSON.stringify(two));
+    expect(() => loadCatalog(env2, home2)).toThrow(/2 defaults-bearing families/);
+  });
+
+  test("default declarations are validated where they land", () => {
+    const modelUnknown = structuredClone(CUSTOM);
+    modelUnknown.families.gpt.defaults = { model: "ghost", effort: "high" } as never;
+    const { env: env1, home: home1 } = writeCatalog(JSON.stringify(modelUnknown));
+    expect(() => loadCatalog(env1, home1)).toThrow(/default model "ghost" is not among its models/);
+
+    const effortOutside = structuredClone(CUSTOM);
+    effortOutside.families.gpt.defaults = { model: "gpt-b", effort: "max" } as never;
+    const { env: env2, home: home2 } = writeCatalog(JSON.stringify(effortOutside));
+    expect(() => loadCatalog(env2, home2)).toThrow(
+      /default effort "max" is not allowed by its default model "gpt-b"/,
+    );
+
+    const memberOutside = structuredClone(CUSTOM);
+    memberOutside.families.gpt.models[1] = {
+      model: "gpt-b",
+      efforts: ["high"],
+      defaults: { effort: "max" },
+    } as never;
+    const { env: env3, home: home3 } = writeCatalog(JSON.stringify(memberOutside));
+    expect(() => loadCatalog(env3, home3)).toThrow(
+      /model "gpt-b" default effort "max" is not in its efforts/,
+    );
+  });
+
+  test("a model's own default effort wins for the name route", () => {
+    const owned = structuredClone(CUSTOM);
+    owned.families.gpt.models[0] = { model: "gpt-a", defaults: { effort: "max" } } as never;
+    const { env, home } = writeCatalog(JSON.stringify(owned));
+    const resolved = resolveRequest(loadCatalog(env, home), { harness: "codex" });
+    expect(resolved.effort).toBe("max");
+  });
+
+  test("a custom catalog replaces the built-in outright; $schema is stripped", () => {
+    const { env, home } = writeCatalog(JSON.stringify({ $schema: "x", ...CUSTOM }));
+    const catalog = loadCatalog(env, home);
+    expect(catalog.source).toBe("custom");
+    expect(catalog.harnesses.map((entry) => entry.harness)).toEqual(["codex", "pi"]);
   });
 
   test("a malformed custom catalog is catalog_invalid, never a fall-back", () => {
@@ -121,22 +231,18 @@ describe("loadCatalog", () => {
     }
   });
 
-  test("unknown keys, bad names, and missing required defaults are rejected", () => {
-    const { harness: _dropped, ...withoutDefault } = CUSTOM;
+  test("unknown keys, bad names, and structural faults are rejected", () => {
     for (const bad of [
       JSON.stringify({ ...CUSTOM, extra: 1 }),
-      JSON.stringify(withoutDefault),
-      JSON.stringify({ harness: "pi", harnesses: [{ harness: "cursor", efforts: ["low"] }] }),
-      JSON.stringify({ harness: "pi", harnesses: [{ harness: "pi", efforts: [] }] }),
+      JSON.stringify({ ...CUSTOM, harness: "codex" }),
+      JSON.stringify({ harnesses: [{ harness: "cursor" }] }),
       JSON.stringify({
-        harness: "pi",
         harnesses: [
           {
             harness: "pi",
-            efforts: ["low"],
-            effort: "low",
-            models: [{ model: "a/b" }],
-            model: "a/b",
+            efforts: [],
+            models: [{ model: "m" }],
+            defaults: { model: "m", effort: "low" },
           },
         ],
       }),
@@ -147,94 +253,35 @@ describe("loadCatalog", () => {
     }
   });
 
-  test("an include referencing an unknown family is a catalog fault", () => {
-    const { env, home } = writeCatalog(
-      JSON.stringify({
-        harness: "pi",
-        harnesses: [
-          {
-            harness: "pi",
-            efforts: ["low"],
-            effort: "low",
-            model: "x",
-            families: [{ family: "ghost" }],
-          },
-        ],
-      }),
-    );
-    expect(() => loadCatalog(env, home)).toThrow(/unknown family "ghost"/);
-  });
+  test("unknown families, foreign providers, and duplicates are faults", () => {
+    const ghost = {
+      harnesses: [{ harness: "pi", families: [{ family: "ghost" }] }],
+    };
+    const { env: env1, home: home1 } = writeCatalog(JSON.stringify(ghost));
+    expect(() => loadCatalog(env1, home1)).toThrow(/unknown family "ghost"/);
 
-  test("a provider on a harness without provider semantics is a catalog fault", () => {
     const withProvider = structuredClone(CUSTOM);
     withProvider.harnesses[0] = {
       harness: "codex",
-      efforts: ["low", "high"],
-      effort: "high",
-      model: "gpt-5.6",
-      families: [{ family: "gpt", provider: "openai-codex" }],
+      families: [{ family: "gpt", provider: "prov" }],
     } as never;
-    const { env, home } = writeCatalog(JSON.stringify(withProvider));
-    expect(() => loadCatalog(env, home)).toThrow(/no provider semantics/);
-  });
+    const { env: env2, home: home2 } = writeCatalog(JSON.stringify(withProvider));
+    expect(() => loadCatalog(env2, home2)).toThrow(/no provider semantics/);
 
-  test("duplicate harnesses and duplicate models after expansion are faults", () => {
-    const twice = { harness: "codex", harnesses: [CUSTOM.harnesses[0], CUSTOM.harnesses[0]] };
-    const { env: env1, home: home1 } = writeCatalog(
-      JSON.stringify({ families: CUSTOM.families, ...twice }),
-    );
-    expect(() => loadCatalog(env1, home1)).toThrow(/more than once/);
+    const twice = {
+      families: CUSTOM.families,
+      harnesses: [CUSTOM.harnesses[0], CUSTOM.harnesses[0]],
+    };
+    const { env: env3, home: home3 } = writeCatalog(JSON.stringify(twice));
+    expect(() => loadCatalog(env3, home3)).toThrow(/more than once/);
 
     const shadowed = structuredClone(CUSTOM);
     shadowed.harnesses[1] = {
       ...shadowed.harnesses[1],
-      models: [{ model: "gpt-5.6" }],
+      models: [{ model: "gpt-a", efforts: ["low"] }],
     } as never;
-    const { env: env2, home: home2 } = writeCatalog(JSON.stringify(shadowed));
-    expect(() => loadCatalog(env2, home2)).toThrow(/"gpt-5.6" more than once \(via family "gpt"\)/);
-  });
-
-  test("default declarations are validated where they are declared", () => {
-    const unlisted = { ...structuredClone(CUSTOM), harness: "claude" };
-    const effortOutside = structuredClone(CUSTOM);
-    effortOutside.harnesses[0] = { ...effortOutside.harnesses[0], effort: "max" } as never;
-    const modelUnknown = structuredClone(CUSTOM);
-    modelUnknown.harnesses[0] = { ...modelUnknown.harnesses[0], model: "ghost" } as never;
-    const narrowedWithoutOwn = {
-      harness: "pi",
-      families: { gpt: { models: [{ model: "m", efforts: ["low"] }] } },
-      harnesses: [
-        {
-          harness: "pi",
-          efforts: ["low", "max"],
-          effort: "max",
-          families: [{ family: "gpt", provider: "openai-codex" }],
-          model: "m",
-        },
-      ],
-    };
-    const memberDefaultOutside = {
-      harness: "pi",
-      harnesses: [
-        {
-          harness: "pi",
-          efforts: ["low", "max"],
-          effort: "low",
-          models: [{ model: "m", efforts: ["low"], effort: "max" }],
-          model: "m",
-        },
-      ],
-    };
-    for (const [bad, message] of [
-      [unlisted, /default harness "claude" is not listed/],
-      [effortOutside, /default effort "max" is not in its efforts/],
-      [modelUnknown, /default model "ghost" is not among its models/],
-      [narrowedWithoutOwn, /not allowed by model "m"; give that model its own "effort"/],
-      [memberDefaultOutside, /model "m" default effort "max" is not in its efforts/],
-    ] as const) {
-      const { env, home } = writeCatalog(JSON.stringify(bad));
-      expect(() => loadCatalog(env, home)).toThrow(message);
-    }
+    const { env: env4, home: home4 } = writeCatalog(JSON.stringify(shadowed));
+    expect(() => loadCatalog(env4, home4)).toThrow(/"gpt-a" more than once \(via family "gpt"\)/);
   });
 });
 
@@ -244,119 +291,57 @@ describe("resolveRequest", () => {
     return loadCatalog(env, home);
   };
 
-  test("catalog order breaks the tie for a model both codex and pi offer", () => {
-    const resolved = resolveRequest(builtin(), { model: "gpt-5.6" });
-    expect(resolved.harness).toBe("codex");
-    expect(resolved.model?.spelling).toBe("gpt-5.6");
-    expect(resolved.modelDefaulted).toBe(false);
-    expect(resolved.effort).toBe("xhigh");
-    expect(resolved.effortDefaulted).toBe(true);
-  });
-
-  test("the effort participates in the match: max skips codex and lands on pi", () => {
-    const resolved = resolveRequest(builtin(), { model: "gpt-5.6", effort: "max" });
-    expect(resolved.harness).toBe("pi");
-    expect(resolved.model?.spelling).toBe("openai-codex/gpt-5.6");
-    expect(resolved.effort).toBe("max");
-    expect(resolved.effortDefaulted).toBe(false);
-  });
-
-  test("an effort codex does take keeps the earlier harness", () => {
-    expect(resolveRequest(builtin(), { model: "gpt-5.6", effort: "xhigh" }).harness).toBe("codex");
-  });
-
-  test("effort-only requests match harness sets in order and fill the default model", () => {
-    const max = resolveRequest(builtin(), { effort: "max" });
-    expect(max.harness).toBe("claude");
-    expect(max.model?.model).toBe("fable");
-    expect(max.modelDefaulted).toBe(true);
-    expect(resolveRequest(builtin(), { effort: "minimal" }).harness).toBe("codex");
-    expect(resolveRequest(builtin(), { effort: "off" }).harness).toBe("pi");
-  });
-
-  test("nothing requested resolves to the default harness with its defaults filled", () => {
-    const resolved = resolveRequest(builtin(), {});
+  test("a harness name resolves to its defaults, marked defaulted", () => {
+    const resolved = resolveRequest(builtin(), { harness: "claude" });
     expect(resolved.harness).toBe("claude");
-    expect(resolved.model?.model).toBe("fable");
-    expect(resolved.effort).toBe("max");
+    expect(resolved.model.model).toBe("opus");
+    expect(resolved.effort).toBe("medium");
     expect(resolved.modelDefaulted).toBe(true);
     expect(resolved.effortDefaulted).toBe(true);
   });
 
-  test("a model's own default effort overrides the harness default", () => {
-    const { env, home } = writeCatalog(
-      JSON.stringify({
-        harness: "codex",
-        harnesses: [
-          {
-            harness: "codex",
-            efforts: ["low", "high"],
-            effort: "low",
-            models: [
-              { model: "small", efforts: ["low"] },
-              { model: "big", effort: "high" },
-            ],
-            model: "small",
-          },
-        ],
-      }),
-    );
-    const catalog = loadCatalog(env, home);
-    const big = resolveRequest(catalog, { model: "big" });
-    expect(big.effort).toBe("high");
-    expect(big.effortDefaulted).toBe(true);
-    const small = resolveRequest(catalog, { model: "small" });
-    expect(small.effort).toBe("low");
+  test("model:effort walks catalog order; earliest offering wins", () => {
+    const sol = resolveRequest(builtin(), { model: "gpt-5.6-sol", effort: "ultra" });
+    expect(sol.harness).toBe("codex");
+    expect(sol.model.spelling).toBe("gpt-5.6-sol");
+    expect(sol.modelDefaulted).toBe(false);
+    const sonnet = resolveRequest(builtin(), { model: "sonnet", effort: "high" });
+    expect(sonnet.harness).toBe("claude");
   });
 
-  test("the default model steps aside rather than contradict an explicit effort", () => {
-    const { env, home } = writeCatalog(
-      JSON.stringify({
-        harness: "codex",
-        harnesses: [
-          {
-            harness: "codex",
-            efforts: ["low", "high"],
-            effort: "low",
-            models: [{ model: "small", efforts: ["low"] }, { model: "big" }],
-            model: "small",
-          },
-        ],
-      }),
-    );
-    const resolved = resolveRequest(loadCatalog(env, home), { effort: "high" });
-    expect(resolved.harness).toBe("codex");
-    expect(resolved.model).toBeNull();
-    expect(resolved.modelDefaulted).toBe(false);
-    expect(resolved.effort).toBe("high");
-  });
-
-  test("a pinned harness validates instead of selecting", () => {
-    const ok = resolveRequest(builtin(), { harness: "pi", model: "gpt-5.6", effort: "max" });
-    expect(ok.model?.spelling).toBe("openai-codex/gpt-5.6");
-    expect(() => resolveRequest(builtin(), { harness: "codex", effort: "max" })).toThrow(
-      /does not take effort "max"/,
-    );
-    expect(() => resolveRequest(builtin(), { harness: "claude", model: "gpt-5.6" })).toThrow(
-      /does not offer model "gpt-5.6" \(it offers fable, opus, sonnet, haiku\)/,
-    );
-  });
-
-  test("a pinned harness fills its defaults too", () => {
-    const resolved = resolveRequest(builtin(), { harness: "pi" });
-    expect(resolved.model?.spelling).toBe("openai-codex/gpt-5.6");
-    expect(resolved.effort).toBe("high");
-    expect(resolved.modelDefaulted).toBe(true);
-    expect(resolved.effortDefaulted).toBe(true);
+  test("a pinned triple validates and keeps the pi spelling", () => {
+    const pinned = resolveRequest(builtin(), {
+      harness: "pi",
+      model: "gpt-5.6-luna",
+      effort: "max",
+    });
+    expect(pinned.model.spelling).toBe("openai-codex/gpt-5.6-luna");
+    expect(() =>
+      resolveRequest(builtin(), { harness: "codex", model: "gpt-5.5", effort: "ultra" }),
+    ).toThrow(/does not take effort "ultra"/);
+    expect(() =>
+      resolveRequest(builtin(), { harness: "claude", model: "gpt-5.5", effort: "high" }),
+    ).toThrow(/does not offer model "gpt-5.5"/);
   });
 
   test("misses name what would have been accepted where", () => {
-    expect(() => resolveRequest(builtin(), { model: "nope" })).toThrow(
+    expect(() => resolveRequest(builtin(), { model: "nope", effort: "high" })).toThrow(
       /no harness in the catalog offers model "nope"/,
     );
-    expect(() => resolveRequest(builtin(), { model: "gpt-5.6", effort: "ultra" })).toThrow(
-      /codex allows minimal, low, medium, high, xhigh; pi allows/,
+    expect(() => resolveRequest(builtin(), { model: "gpt-5.5", effort: "ultra" })).toThrow(
+      /codex allows low, medium, high, xhigh; pi allows low, medium, high, xhigh/,
     );
-    expect(() => resolveRequest(builtin(), { effort: "ultra" })).toThrow(UsageError);
+  });
+
+  test("a sparse request without a harness is guarded", () => {
+    expect(() => resolveRequest(builtin(), { model: "opus" })).toThrow(UsageError);
+    expect(() => resolveRequest(builtin(), {})).toThrow(UsageError);
+  });
+
+  test("an unlisted harness is a usage fault", () => {
+    const { env, home } = writeCatalog(JSON.stringify(CUSTOM));
+    expect(() => resolveRequest(loadCatalog(env, home), { harness: "claude" })).toThrow(
+      /the catalog does not list harness "claude"/,
+    );
   });
 });

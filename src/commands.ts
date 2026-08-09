@@ -1,6 +1,12 @@
 import { existsSync } from "node:fs";
 import { type BalanceDecision, balanceDisabled, balanceSpec } from "./balance.ts";
-import { BUILTIN_CATALOG_PATH, catalogPath, loadCatalog } from "./catalog.ts";
+import {
+  BUILTIN_CATALOG_PATH,
+  catalogPath,
+  loadCatalog,
+  parseHarnessValue,
+  resolveRequest,
+} from "./catalog.ts";
 import { configPath, loadConfig } from "./config.ts";
 import { CliError, UsageError } from "./errors.ts";
 import type { HarnessName, LaunchSpec, YoloApplication, YoloDecision } from "./harness.ts";
@@ -8,7 +14,11 @@ import {
   applyYolo,
   buildOpen,
   buildResume,
+  effortArguments,
+  effortDimensionToken,
   HARNESS_NAMES,
+  modelArguments,
+  modelDimensionToken,
   parseHarnessName,
   sessionStore,
   utilityInvocation,
@@ -30,11 +40,14 @@ export type Outcome =
   | { kind: "launch"; spec: LaunchSpec }
   | { kind: "result"; data: unknown; human: string };
 
-export async function launchCommand(
-  context: Context,
-  harness: HarnessName,
-  parts: Partitioned,
-): Promise<Outcome> {
+/** A launch dimension as the narrative and envelope report it: what value
+ * applies and whose decision it was. */
+interface DimensionReport {
+  value: string | null;
+  source: "requested" | "default" | "forwarded" | null;
+}
+
+export async function launchCommand(context: Context, parts: Partitioned): Promise<Outcome> {
   const tokens = parts.harness;
   const head = tokens[0];
   if (head?.startsWith("x-")) {
@@ -42,19 +55,79 @@ export async function launchCommand(
       `unknown x command "${head}" — bare x-* words in command position are agentsurface's own; a prompt starting with "x-" needs the harness's -p spelling`,
     );
   }
+  const value = parts.values["x-harness"];
+  if (value === undefined) {
+    throw new UsageError(
+      "a launch names its harness: pass --x-harness <harness>, <model>:<effort>, or <harness>:<model>:<effort>",
+    );
+  }
+  const request = parseHarnessValue(value);
+  const catalog = loadCatalog(context.env, context.home);
+  const resolution = resolveRequest(catalog, request);
+  const harness = resolution.harness;
   context.narrator.row("open", harness);
   context.narrator.row("cwd", tildePath(context.cwd, context.home));
+
   const utility = utilityInvocation(harness, tokens);
+  // Colon forms own both dimensions (ADR 0011): they fault on a forwarded
+  // counterpart, and mean nothing on a utility invocation. The name route
+  // yields per dimension — the caller's native spelling wins, unjudged.
+  const requested = request.model !== undefined;
+  if (utility && requested) {
+    throw new UsageError(
+      `"${head}" is a utility invocation; model and effort do not apply — pass --x-harness ${harness}`,
+    );
+  }
+  let stream = tokens;
+  let model: DimensionReport = { value: null, source: null };
+  let effort: DimensionReport = { value: null, source: null };
+  if (utility) {
+    context.narrator.detail("model", "never applied to a utility invocation");
+  } else {
+    const modelToken = modelDimensionToken(harness, tokens);
+    const effortToken = effortDimensionToken(harness, tokens);
+    if (requested && modelToken !== null) {
+      throw new UsageError(
+        `--x-harness ${value} set the model; drop the forwarded "${modelToken}"`,
+      );
+    }
+    if (requested && effortToken !== null) {
+      throw new UsageError(
+        `--x-harness ${value} set the effort; drop the forwarded "${effortToken}"`,
+      );
+    }
+    model =
+      modelToken === null
+        ? {
+            value: resolution.model.model,
+            source: resolution.modelDefaulted ? "default" : "requested",
+          }
+        : { value: modelFromArgs(tokens) ?? null, source: "forwarded" };
+    effort =
+      effortToken === null
+        ? { value: resolution.effort, source: resolution.effortDefaulted ? "default" : "requested" }
+        : { value: null, source: "forwarded" };
+    stream = [
+      ...(modelToken === null ? modelArguments(resolution.model.spelling) : []),
+      ...(effortToken === null ? effortArguments(harness, resolution.effort) : []),
+      ...tokens,
+    ];
+    context.narrator.row("model", facts(model.value ?? undefined, model.source ?? undefined));
+    context.narrator.row("effort", facts(effort.value ?? undefined, effort.source ?? undefined));
+  }
+
   const yolo = resolveYolo(context, parts, harness);
-  const applied = applyYolo(harness, tokens, yolo, utility);
+  const applied = applyYolo(harness, stream, yolo, utility);
   return finishLaunch(
     context,
     parts,
     buildOpen(harness, applied.tokens),
-    modelFromArgs(tokens),
+    model.value ?? undefined,
     yolo,
     applied,
     utility,
+    model,
+    effort,
   );
 }
 
@@ -229,8 +302,11 @@ export async function doctorCommand(context: Context, parts: Partitioned): Promi
   lines.push("catalog", `  path   ${catalog.path} (${catalog.source})`);
   if (catalog.valid && catalog.harnesses !== null) {
     lines.push(
-      `  order  ${catalog.harnesses.map((entry) => entry.harness).join(", ")} (default ${catalog.default})`,
+      `  order  ${catalog.harnesses.map((entry) => entry.harness).join(", ")}`,
       `  models ${catalog.harnesses.map((entry) => `${entry.harness} ${entry.models}`).join(", ")}`,
+      `  defaults ${catalog.harnesses
+        .map((entry) => `${entry.harness} ${entry.defaults.model}:${entry.defaults.effort}`)
+        .join(", ")}`,
     );
   } else {
     lines.push(`  order  INVALID: ${catalog.error}`);
@@ -254,8 +330,11 @@ interface CatalogReport {
   source: "built-in" | "custom";
   path: string;
   valid: boolean;
-  default: HarnessName | null;
-  harnesses: Array<{ harness: HarnessName; models: number }> | null;
+  harnesses: Array<{
+    harness: HarnessName;
+    models: number;
+    defaults: { model: string; effort: string };
+  }> | null;
   error: string | null;
 }
 
@@ -269,10 +348,10 @@ function catalogReport(context: Context): CatalogReport {
       source: catalog.source,
       path: catalog.path,
       valid: true,
-      default: catalog.harness,
       harnesses: catalog.harnesses.map((entry) => ({
         harness: entry.harness,
         models: entry.models.length,
+        defaults: { model: entry.model, effort: entry.effort },
       })),
       error: null,
     };
@@ -282,7 +361,6 @@ function catalogReport(context: Context): CatalogReport {
       source: isCustom ? "custom" : "built-in",
       path: isCustom ? custom : BUILTIN_CATALOG_PATH,
       valid: false,
-      default: null,
       harnesses: null,
       error: (error as Error).message,
     };
@@ -312,6 +390,8 @@ function configReport(context: Context): ConfigReport {
   }
 }
 
+const NO_DIMENSION: DimensionReport = { value: null, source: null };
+
 async function finishLaunch(
   context: Context,
   parts: Partitioned,
@@ -320,6 +400,8 @@ async function finishLaunch(
   yolo: YoloDecision,
   applied: YoloApplication,
   utility: boolean,
+  model: DimensionReport = NO_DIMENSION,
+  effort: DimensionReport = NO_DIMENSION,
 ): Promise<Outcome> {
   const dryRun = parts.bools.has("x-dry-run");
   if (parts.bools.has("x-json") && !dryRun) {
@@ -380,6 +462,10 @@ async function finishLaunch(
     utility,
     yolo: yolo.on,
     redactions: applied.redacted,
+    model: model.value,
+    model_source: model.source,
+    effort: effort.value,
+    effort_source: effort.source,
   };
   return { kind: "result", data, human: shellLine(launchSpec.command) };
 }

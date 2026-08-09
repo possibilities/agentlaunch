@@ -92,14 +92,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * zod's object parser deliberately skips a literal `__proto__` key — its
  * prototype-pollution guard — so a strict object never reports one as
  * unrecognized. JSON.parse does give the key an own slot, and this config
- * has always rejected it like any other unknown name; these two helpers
- * hand the key back to the strictness it would otherwise slip past.
+ * has always rejected it like any other unknown name, so every strict level
+ * here asks for it by hand rather than letting it slip past.
  */
-function hasHiddenKey(value: unknown): boolean {
-  return isRecord(value) && Object.hasOwn(value, "__proto__");
-}
-
 const HIDDEN_KEY = "__proto__";
+
+function hasHiddenKey(value: unknown): boolean {
+  return isRecord(value) && Object.hasOwn(value, HIDDEN_KEY);
+}
 
 /** The keys a strict object rejected at its own level. */
 function unrecognizedKeys(issues: readonly z.ZodIssue[]): string[] {
@@ -114,17 +114,14 @@ function unrecognizedKeys(issues: readonly z.ZodIssue[]): string[] {
  * parse succeeded, because that is exactly when the hidden key slips
  * through.
  */
-export function unknownConfigKeys(
-  body: Record<string, unknown>,
-  error: z.ZodError | undefined,
-): string[] {
+function unknownConfigKeys(body: Record<string, unknown>, error: z.ZodError | undefined): string[] {
   const unknown = new Set(error === undefined ? [] : unrecognizedKeys(error.issues));
   if (hasHiddenKey(body)) unknown.add(HIDDEN_KEY);
   return Object.keys(body).filter((key) => unknown.has(key));
 }
 
 /** The error for keys that name no setting. */
-export function unknownKeyError(keys: readonly string[], path: string): CliError {
+function unknownKeyError(keys: readonly string[], path: string): CliError {
   return new CliError(
     "config_invalid",
     `${path} has unknown key${keys.length > 1 ? "s" : ""}: ${keys.join(", ")}`,
@@ -145,11 +142,7 @@ function mapBranchIssues(issue: z.ZodIssue | undefined): readonly z.ZodIssue[] {
  * counts as offending is the schema's verdict; only which one is named
  * first is decided here.
  */
-export function yoloFault(
-  raw: unknown,
-  issue: z.ZodIssue | undefined,
-  path: string,
-): CliError | null {
+function yoloFault(raw: unknown, issue: z.ZodIssue | undefined, path: string): CliError | null {
   const fault = (message: string): CliError =>
     new CliError("config_invalid", `${path}: ${message}`, `fix ${path}`);
   if (isRecord(raw)) {
@@ -192,6 +185,19 @@ export function parseConfig(body: Record<string, unknown>, path: string): Config
     path,
   );
   if (fault !== null) throw fault;
-  if (!result.success) throw new CliError("config_invalid", `${path} is invalid`, `fix ${path}`);
+  if (!result.success) throw remainingFault(result.error, path);
   return result.data;
+}
+
+/** Whatever the two shaped messages above do not cover — a key added to the
+ * shape before it is given a message of its own still names itself rather
+ * than failing anonymously. */
+function remainingFault(error: z.ZodError, path: string): CliError {
+  const issue = error.issues[0];
+  const where = issue === undefined ? "" : issue.path.map(String).join(".");
+  return new CliError(
+    "config_invalid",
+    where === "" ? `${path} is invalid` : `${path}: ${where}: ${issue?.message}`,
+    `fix ${path}`,
+  );
 }

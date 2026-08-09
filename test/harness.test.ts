@@ -4,6 +4,10 @@ import {
   applyYolo,
   buildOpen,
   buildResume,
+  effortArguments,
+  effortDimensionToken,
+  modelArguments,
+  modelDimensionToken,
   parseHarnessName,
   sessionStore,
   utilityInvocation,
@@ -143,6 +147,44 @@ describe("applyYolo", () => {
     const alias = applyYolo("pi", ["-a", "hello"], EXPLICIT_OFF, false);
     expect(alias.tokens).toEqual(["hello"]);
     expect(alias.redacted).toEqual(["-a"]);
+  });
+});
+
+describe("model and effort spellings", () => {
+  test("model emission is --model with the resolved spelling", () => {
+    expect(modelArguments("openai-codex/gpt-5.6-sol")).toEqual([
+      "--model",
+      "openai-codex/gpt-5.6-sol",
+    ]);
+  });
+
+  test("effort emission is per harness", () => {
+    expect(effortArguments("claude", "medium")).toEqual(["--effort", "medium"]);
+    expect(effortArguments("codex", "high")).toEqual(["-c", 'model_reasoning_effort="high"']);
+    expect(effortArguments("pi", "max")).toEqual(["--thinking", "max"]);
+  });
+
+  test("model-dimension detection sees --model, --model=, and codex -m", () => {
+    expect(modelDimensionToken("claude", ["-p", "hi", "--model", "opus"])).toBe("--model");
+    expect(modelDimensionToken("claude", ["--model=opus"])).toBe("--model=opus");
+    expect(modelDimensionToken("codex", ["-m", "gpt-x"])).toBe("-m");
+    expect(modelDimensionToken("claude", ["-m", "gpt-x"])).toBeNull();
+    expect(modelDimensionToken("pi", ["hello"])).toBeNull();
+  });
+
+  test("effort-dimension detection is per harness, codex via -c pairs", () => {
+    expect(effortDimensionToken("claude", ["--effort", "max"])).toBe("--effort");
+    expect(effortDimensionToken("claude", ["--effort=max"])).toBe("--effort=max");
+    expect(effortDimensionToken("pi", ["--thinking", "high"])).toBe("--thinking");
+    expect(effortDimensionToken("codex", ["-c", 'model_reasoning_effort="low"'])).toBe(
+      '-c model_reasoning_effort="low"',
+    );
+    expect(effortDimensionToken("codex", ["--config", "model_reasoning_effort=low"])).toBe(
+      "--config model_reasoning_effort=low",
+    );
+    expect(effortDimensionToken("codex", ["-c", "other=1"])).toBeNull();
+    expect(effortDimensionToken("codex", ["--effort", "max"])).toBeNull();
+    expect(effortDimensionToken("claude", ["--thinking", "high"])).toBeNull();
   });
 });
 

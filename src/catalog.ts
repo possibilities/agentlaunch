@@ -4,18 +4,19 @@ import type { CatalogValues, HarnessEntryValues } from "./catalog-schema.ts";
 import { catalogParseError, catalogValuesSchema } from "./catalog-schema.ts";
 import { CliError, UsageError } from "./errors.ts";
 import type { HarnessName } from "./harness.ts";
-import { PROVIDER_SPELLINGS } from "./harness.ts";
+import { isHarnessName, PROVIDER_SPELLINGS } from "./harness.ts";
 import type { Environ } from "./paths.ts";
 import { configDirectory } from "./paths.ts";
 
 /**
  * The catalog: the ordered description of harnesses, their models, and
- * their effort sets (ADR 0010). The built-in `catalog.json` ships with the
- * checkout; a custom file at ~/.config/agentsurface/catalog.json REPLACES it
- * outright — no merging, so what will happen is answerable by reading one
- * file. A malformed custom catalog is a `catalog_invalid` fault, never a
- * silent fall-back to the built-in: a catalog written to constrain must not
- * quietly stop constraining.
+ * their effort sets (ADR 0010, reshaped by ADR 0011). The built-in
+ * `catalog.json` ships with the checkout; a custom file at
+ * ~/.config/agentsurface/catalog.json REPLACES it outright — no merging, so
+ * what will happen is answerable by reading one file. A malformed custom
+ * catalog is a `catalog_invalid` fault, never a silent fall-back to the
+ * built-in: a catalog written to constrain must not quietly stop
+ * constraining.
  */
 
 export interface CatalogModel {
@@ -26,10 +27,11 @@ export interface CatalogModel {
    * family includes, `spelling` for local models, the name itself
    * otherwise. */
   spelling: string;
-  /** Effective effort set: the model's own, or the harness's. */
+  /** Effective effort set: the model's own, else the family's, else the
+   * harness's. */
   efforts: readonly string[];
   /** Default effort when the model is chosen without one; overrides the
-   * harness default. Null falls through to the harness. */
+   * harness's resolved default. Null falls through. */
   effort: string | null;
   /** The family that contributed the model, null for a local one. */
   family: string | null;
@@ -37,20 +39,17 @@ export interface CatalogModel {
 
 export interface CatalogHarness {
   harness: HarnessName;
-  efforts: readonly string[];
-  /** Default effort, filled when the chosen model has no default of its
-   * own. */
-  effort: string;
   models: CatalogModel[];
-  /** Default model, filled into a request that named none. */
+  /** Resolved default model: the harness's own defaults, or the sole
+   * defaults-bearing included family's. */
   model: string;
+  /** Resolved default effort, same source as the default model. */
+  effort: string;
 }
 
 export interface Catalog {
   source: "built-in" | "custom";
   path: string;
-  /** The default harness: what nothing-requested resolves to. */
-  harness: HarnessName;
   /** In priority order. */
   harnesses: CatalogHarness[];
 }
@@ -120,10 +119,7 @@ function expandCatalog(values: CatalogValues, path: string, source: Catalog["sou
     seenHarnesses.add(entry.harness);
     harnesses.push(expandHarness(entry, values, fault));
   }
-  if (!seenHarnesses.has(values.harness)) {
-    throw fault(`default harness "${values.harness}" is not listed in "harnesses"`);
-  }
-  return { source, path, harness: values.harness, harnesses };
+  return { source, path, harnesses };
 }
 
 function expandHarness(
@@ -146,14 +142,23 @@ function expandHarness(
   };
 
   for (const local of entry.models ?? []) {
+    const efforts = local.efforts ?? entry.efforts;
+    if (efforts === undefined) {
+      throw fault(
+        `harness "${entry.harness}" model "${local.model}" has no efforts and the harness declares none`,
+      );
+    }
     add({
       model: local.model,
       spelling: local.spelling ?? local.model,
-      efforts: local.efforts ?? entry.efforts,
-      effort: local.effort ?? null,
+      efforts,
+      effort: local.defaults?.effort ?? null,
       family: null,
     });
   }
+
+  /** Included families that carry defaults, for defaults resolution below. */
+  const familyDefaults: Array<{ family: string; model: string; effort: string }> = [];
   for (const include of entry.families ?? []) {
     const family = values.families?.[include.family];
     if (family === undefined) {
@@ -166,29 +171,58 @@ function expandHarness(
       );
     }
     for (const member of family.models) {
+      const efforts = member.efforts ?? family.efforts ?? entry.efforts;
+      if (efforts === undefined) {
+        throw fault(
+          `family "${include.family}" model "${member.model}" has no efforts, and neither the family nor harness "${entry.harness}" declares any`,
+        );
+      }
       add({
         model: member.model,
         spelling:
           include.provider !== undefined && combine !== null
             ? combine(include.provider, member.model)
             : member.model,
-        efforts: member.efforts ?? entry.efforts,
-        effort: member.effort ?? null,
+        efforts,
+        effort: member.defaults?.effort ?? null,
         family: include.family,
       });
     }
+    if (family.defaults !== undefined) {
+      if (!family.models.some((member) => member.model === family.defaults?.model)) {
+        throw fault(
+          `family "${include.family}" default model "${family.defaults.model}" is not among its models`,
+        );
+      }
+      familyDefaults.push({ family: include.family, ...family.defaults });
+    }
   }
 
-  // Defaults are validated where they are declared, so a contradiction is a
-  // load fault rather than a surprise at fill time.
-  if (!entry.efforts.includes(entry.effort)) {
-    throw fault(
-      `harness "${entry.harness}" default effort "${entry.effort}" is not in its efforts (${entry.efforts.join(", ")})`,
-    );
+  // Defaults resolve from the harness's own entry, else the sole
+  // defaults-bearing included family — and are validated where they land,
+  // so a contradiction is a load fault rather than a surprise at fill time.
+  let defaults: { model: string; effort: string } | undefined = entry.defaults;
+  if (defaults === undefined) {
+    if (familyDefaults.length === 0) {
+      throw fault(
+        `harness "${entry.harness}" has no defaults — declare "defaults" on the entry or on an included family`,
+      );
+    }
+    if (familyDefaults.length > 1) {
+      throw fault(
+        `harness "${entry.harness}" includes ${familyDefaults.length} defaults-bearing families (${familyDefaults
+          .map((candidate) => candidate.family)
+          .join(", ")}); declare its own "defaults" to disambiguate`,
+      );
+    }
+    defaults = familyDefaults[0]!;
   }
-  if (!models.some((model) => model.model === entry.model)) {
+  const defaultModel = models.find((model) => model.model === defaults.model);
+  if (defaultModel === undefined) {
     throw fault(
-      `harness "${entry.harness}" default model "${entry.model}" is not among its models (${models.map((model) => model.model).join(", ") || "none"})`,
+      `harness "${entry.harness}" default model "${defaults.model}" is not among its models (${
+        models.map((model) => model.model).join(", ") || "none"
+      })`,
     );
   }
   for (const model of models) {
@@ -197,19 +231,14 @@ function expandHarness(
         `harness "${entry.harness}" model "${model.model}" default effort "${model.effort}" is not in its efforts (${model.efforts.join(", ")})`,
       );
     }
-    if (model.effort === null && !model.efforts.includes(entry.effort)) {
-      throw fault(
-        `harness "${entry.harness}" default effort "${entry.effort}" is not allowed by model "${model.model}"; give that model its own "effort"`,
-      );
-    }
   }
-  return {
-    harness: entry.harness,
-    efforts: entry.efforts,
-    effort: entry.effort,
-    models,
-    model: entry.model,
-  };
+  const defaultEffort = defaultModel.effort ?? defaults.effort;
+  if (!defaultModel.efforts.includes(defaultEffort)) {
+    throw fault(
+      `harness "${entry.harness}" default effort "${defaultEffort}" is not allowed by its default model "${defaultModel.model}" (${defaultModel.efforts.join(", ")})`,
+    );
+  }
+  return { harness: entry.harness, models, model: defaults.model, effort: defaults.effort };
 }
 
 export interface ModelRequest {
@@ -218,12 +247,49 @@ export interface ModelRequest {
   effort?: string | undefined;
 }
 
+const HARNESS_VALUE_FORMS = "use <harness>, <model>:<effort>, or <harness>:<model>:<effort>";
+
+/**
+ * The --x-harness value (ADR 0011): a harness name launches that harness's
+ * defaults; <model>:<effort> selects the earliest harness offering the
+ * combination; <harness>:<model>:<effort> pins and validates. Colons claim
+ * the value strictly — no sparse forms, no empty parts.
+ */
+export function parseHarnessValue(value: string): ModelRequest {
+  if (!value.includes(":")) {
+    if (isHarnessName(value)) return { harness: value };
+    throw new UsageError(`"${value}" is not a harness value: ${HARNESS_VALUE_FORMS}`);
+  }
+  const parts = value.split(":");
+  if (parts.length === 2) {
+    const [model, effort] = parts as [string, string];
+    if (model === "" || effort === "") {
+      throw new UsageError(
+        `"${value}" is not a harness value: the <model>:<effort> form needs both parts`,
+      );
+    }
+    return { model, effort };
+  }
+  if (parts.length === 3) {
+    const [harness, model, effort] = parts as [string, string, string];
+    if (harness === "" || model === "" || effort === "") {
+      throw new UsageError(
+        `"${value}" is not a harness value: the <harness>:<model>:<effort> form needs all three parts`,
+      );
+    }
+    if (!isHarnessName(harness)) {
+      throw new UsageError(
+        `"${value}" is not a harness value: "${harness}" is not a harness (expected claude, codex, or pi)`,
+      );
+    }
+    return { harness, model, effort };
+  }
+  throw new UsageError(`"${value}" is not a harness value: ${HARNESS_VALUE_FORMS}`);
+}
+
 export interface Resolution {
   harness: HarnessName;
-  /** Null only when an explicitly requested effort ruled the harness's
-   * default model out. */
-  model: CatalogModel | null;
-  /** Requested, or defaulted from the model, or from the harness. */
+  model: CatalogModel;
   effort: string;
   /** True where the catalog's defaults, not the request, chose the value. */
   modelDefaulted: boolean;
@@ -231,13 +297,12 @@ export interface Resolution {
 }
 
 /**
- * Resolve a model/effort request against the catalog. With the harness
- * pinned the catalog validates; without it the catalog selects — harnesses
- * in order, earliest match wins, and the effort participates in the match,
- * so a model+effort lands on the earliest harness whose offering allows
- * both. Nothing requested at all resolves to the default harness. Defaults
- * fill what the request left unspecified after selection; they never
- * participate in it.
+ * Resolve a harness value against the catalog. The three request shapes
+ * mirror the grammar (ADR 0011): {harness} launches that harness's
+ * defaults; {model, effort} walks the harnesses in catalog order and the
+ * earliest one offering that combination wins; {harness, model, effort}
+ * validates against the named harness. Model and effort always come in
+ * pairs — there are no sparse requests.
  */
 export function resolveRequest(catalog: Catalog, request: ModelRequest): Resolution {
   if (request.harness !== undefined) {
@@ -245,105 +310,73 @@ export function resolveRequest(catalog: Catalog, request: ModelRequest): Resolut
     if (entry === undefined) {
       throw new UsageError(`the catalog does not list harness "${request.harness}"`);
     }
-    return resolvePinned(entry, request);
+    if (request.model === undefined) return defaultsOf(entry);
+    return resolvePinned(entry, request.model, request.effort ?? "");
   }
-  if (request.model === undefined && request.effort === undefined) {
-    const entry = catalog.harnesses.find((candidate) => candidate.harness === catalog.harness);
-    if (entry === undefined) {
-      throw new UsageError(`the catalog does not list harness "${catalog.harness}"`);
-    }
-    return fill(entry, request, null);
+  if (request.model === undefined || request.effort === undefined) {
+    throw new UsageError("a harness value names a harness, or a model and an effort");
   }
   for (const entry of catalog.harnesses) {
-    const resolved = matchEntry(entry, request);
-    if (resolved !== null) return resolved;
+    const model = entry.models.find((candidate) => candidate.model === request.model);
+    if (model === undefined || !model.efforts.includes(request.effort)) continue;
+    return {
+      harness: entry.harness,
+      model,
+      effort: request.effort,
+      modelDefaulted: false,
+      effortDefaulted: false,
+    };
   }
-  throw new UsageError(describeMiss(catalog, request));
+  throw new UsageError(describeMiss(catalog, request.model, request.effort));
 }
 
-/** Defaults fill what the request left unspecified; the default model steps
- * aside rather than contradict an explicitly requested effort. */
-function fill(
-  entry: CatalogHarness,
-  request: ModelRequest,
-  requested: CatalogModel | null,
-): Resolution {
-  let model = requested;
-  let modelDefaulted = false;
-  if (model === null && request.model === undefined) {
-    const candidate = entry.models.find((offered) => offered.model === entry.model) ?? null;
-    if (
-      candidate !== null &&
-      (request.effort === undefined || candidate.efforts.includes(request.effort))
-    ) {
-      model = candidate;
-      modelDefaulted = true;
-    }
+/** The name route: the harness's resolved defaults, with the default
+ * model's own default effort winning over the harness's. */
+function defaultsOf(entry: CatalogHarness): Resolution {
+  const model = entry.models.find((candidate) => candidate.model === entry.model);
+  if (model === undefined) {
+    // Unreachable: expandHarness validated the default model exists.
+    throw new UsageError(`the catalog default model "${entry.model}" is missing`);
   }
   return {
     harness: entry.harness,
     model,
-    effort: request.effort ?? model?.effort ?? entry.effort,
-    modelDefaulted,
-    effortDefaulted: request.effort === undefined,
+    effort: model.effort ?? entry.effort,
+    modelDefaulted: true,
+    effortDefaulted: true,
   };
 }
 
-function resolvePinned(entry: CatalogHarness, request: ModelRequest): Resolution {
-  let model: CatalogModel | null = null;
-  if (request.model !== undefined) {
-    model = entry.models.find((candidate) => candidate.model === request.model) ?? null;
-    if (model === null) {
-      throw new UsageError(
-        `${entry.harness} does not offer model "${request.model}" (it offers ${listModels(entry)})`,
-      );
-    }
+function resolvePinned(entry: CatalogHarness, requestedModel: string, effort: string): Resolution {
+  const model = entry.models.find((candidate) => candidate.model === requestedModel);
+  if (model === undefined) {
+    throw new UsageError(
+      `${entry.harness} does not offer model "${requestedModel}" (it offers ${
+        entry.models.map((candidate) => candidate.model).join(", ") || "no models"
+      })`,
+    );
   }
-  if (request.effort !== undefined) {
-    const allowed = model === null ? entry.efforts : model.efforts;
-    if (!allowed.includes(request.effort)) {
-      throw new UsageError(
-        `${entry.harness}${model === null ? "" : ` model "${model.model}"`} does not take effort "${request.effort}" (allowed: ${allowed.join(", ")})`,
-      );
-    }
+  if (!model.efforts.includes(effort)) {
+    throw new UsageError(
+      `${entry.harness} model "${model.model}" does not take effort "${effort}" (allowed: ${model.efforts.join(", ")})`,
+    );
   }
-  return fill(entry, request, model);
-}
-
-function matchEntry(entry: CatalogHarness, request: ModelRequest): Resolution | null {
-  if (request.model !== undefined) {
-    const model = entry.models.find((candidate) => candidate.model === request.model);
-    if (model === undefined) return null;
-    if (request.effort !== undefined && !model.efforts.includes(request.effort)) return null;
-    return fill(entry, request, model);
-  }
-  if (request.effort === undefined || !entry.efforts.includes(request.effort)) return null;
-  return fill(entry, request, null);
+  return { harness: entry.harness, model, effort, modelDefaulted: false, effortDefaulted: false };
 }
 
 /** Name what was asked and what would have been accepted where. */
-function describeMiss(catalog: Catalog, request: ModelRequest): string {
-  if (request.model === undefined) {
-    const sets = catalog.harnesses
-      .map((entry) => `${entry.harness} takes ${entry.efforts.join(", ")}`)
-      .join("; ");
-    return `no harness in the catalog takes effort "${request.effort}" (${sets})`;
-  }
+function describeMiss(catalog: Catalog, requestedModel: string, effort: string): string {
   const offering = catalog.harnesses.filter((entry) =>
-    entry.models.some((model) => model.model === request.model),
+    entry.models.some((model) => model.model === requestedModel),
   );
   if (offering.length === 0) {
-    return `no harness in the catalog offers model "${request.model}"`;
+    return `no harness in the catalog offers model "${requestedModel}"`;
   }
   const sets = offering
     .map((entry) => {
-      const model = entry.models.find((candidate) => candidate.model === request.model);
-      return `${entry.harness} allows ${(model?.efforts ?? entry.efforts).join(", ")}`;
+      const model = entry.models.find((candidate) => candidate.model === requestedModel);
+      return `${entry.harness} allows ${(model?.efforts ?? []).join(", ")}`;
     })
     .join("; ");
-  return `no harness offers model "${request.model}" at effort "${request.effort}" (${sets})`;
-}
-
-function listModels(entry: CatalogHarness): string {
-  return entry.models.map((model) => model.model).join(", ") || "no models";
+  return `no harness offers model "${requestedModel}" at effort "${effort}" (${sets})`;
 }

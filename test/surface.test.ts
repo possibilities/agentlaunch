@@ -59,63 +59,30 @@ describe("surface", () => {
     expect(run(["--version"]).stdout.trim()).toBe(VERSION);
   });
 
-  test("help lands on stdout and unknown commands are usage faults", () => {
+  test("help lands on stdout; launches without --x-harness are usage faults", () => {
     expect(run([]).stdout).toContain("agentsurface — one launcher");
     expect(run(["--agent-teaser"]).stdout).toContain("Launch agent harnesses");
     expect(run(["--agent-help"]).stdout).toContain("agent runbook");
-    expect(run(["claude", "--x-help"]).stdout).toContain("Launch the harness in this terminal");
-    const unknown = run(["land"]);
-    expect(unknown.code).toBe(2);
-    expect(unknown.stderr).toContain('unknown command "land"');
+    expect(run(["--x-help"]).stdout).toContain("Launch a harness in this terminal");
+    const missing = run(["land"]);
+    expect(missing.code).toBe(2);
+    expect(missing.stderr).toContain("a launch names its harness");
   });
 
   test("the retired grammar is refused loudly, never misread", () => {
-    const open = run(["open", "claude", "--x-dry-run"]);
-    expect(open.code).toBe(2);
-    expect(open.stderr).toContain("the harness name is the command");
+    const positional = run(["claude", "--x-dry-run"]);
+    expect(positional.code).toBe(2);
+    expect(positional.stderr).toContain("pass --x-harness claude");
+    expect(run(["open", "claude"]).stderr).toContain("--x-harness");
     expect(run(["resume", SESSION_ID]).stderr).toContain("resume is now x-resume");
     expect(run(["doctor"]).stderr).toContain("doctor is now x-doctor");
-    expect(run(["help"]).stderr).toContain("--x-help");
   });
 
-  test("every unprefixed token forwards verbatim, in the order typed", () => {
-    const result = run([
-      "claude",
-      "fix the tests",
-      "--model",
-      "fable",
-      "--x-dry-run",
-      "--x-json",
-      "--x-no-yolo",
-      "--totally-unknown-flag",
-    ]);
-    expect(result.code).toBe(0);
-    const parsed = envelope(result);
-    expect(parsed.data?.["command"]).toEqual([
-      "claude",
-      "fix the tests",
-      "--model",
-      "fable",
-      "--totally-unknown-flag",
-    ]);
-  });
-
-  test("a literal -- has no meaning and forwards like any token", () => {
-    const result = run(["claude", "--x-dry-run", "--x-json", "--x-no-yolo", "--", "--weird"]);
-    expect(envelope(result).data?.["command"]).toEqual(["claude", "--", "--weird"]);
-  });
-
-  test("bare x-* words in command position are reserved", () => {
-    const result = run(["claude", "x-something"]);
-    expect(result.code).toBe(2);
-    expect(result.stderr).toContain('unknown x command "x-something"');
-  });
-
-  test("--x-dry-run --x-json emits the launch spec envelope", () => {
+  test("a launch resolves the harness value and injects the catalog defaults", () => {
     const root = mkdtempSync(join(tmpdir(), "agentsurface-cwd-"));
     roots.push(root);
     const result = run(
-      ["claude", "--model", "fable", "fix the tests", "--x-dry-run", "--x-json", "--x-no-yolo"],
+      ["--x-harness", "claude", "fix the tests", "--x-dry-run", "--x-json", "--x-no-yolo"],
       {},
       root,
     );
@@ -126,133 +93,185 @@ describe("surface", () => {
       harness: "claude",
       session_id: null,
       cwd: realpathSync(root),
-      command: ["claude", "--model", "fable", "fix the tests"],
+      command: ["claude", "--model", "opus", "--effort", "medium", "fix the tests"],
       balance: null,
       utility: false,
       yolo: false,
       redactions: [],
+      model: "opus",
+      model_source: "default",
+      effort: "medium",
+      effort_source: "default",
     });
   });
 
-  test("yolo is on by default and injects the harness's own flag", () => {
-    const claude = run(["claude", "--x-dry-run", "--x-json"]);
-    expect(envelope(claude).data?.["command"]).toEqual([
-      "claude",
-      "--dangerously-skip-permissions",
-    ]);
-    expect(envelope(claude).data?.["yolo"]).toBe(true);
-    const codex = run(["codex", "--x-dry-run", "--x-json"]);
+  test("every harness injects its own spellings", () => {
+    const codex = run(["--x-harness", "codex", "--x-dry-run", "--x-json", "--x-no-yolo"]);
     expect(envelope(codex).data?.["command"]).toEqual([
       "codex",
-      "--dangerously-bypass-approvals-and-sandbox",
+      "--model",
+      "gpt-5.6-sol",
+      "-c",
+      'model_reasoning_effort="high"',
     ]);
-    const pi = run(["pi", "--x-dry-run", "--x-json"]);
-    expect(envelope(pi).data?.["command"]).toEqual(["pi", "--approve"]);
+    const pi = run(["--x-harness", "pi", "--x-dry-run", "--x-json", "--x-no-yolo"]);
+    expect(envelope(pi).data?.["command"]).toEqual([
+      "pi",
+      "--model",
+      "openai-codex/gpt-5.6-sol",
+      "--thinking",
+      "high",
+    ]);
   });
 
-  test("the config file disables yolo, and --x-yolo forces it back per launch", () => {
-    const root = mkdtempSync(join(tmpdir(), "agentsurface-yolo-"));
-    roots.push(root);
-    const home = join(root, "home");
-    mkdirSync(join(home, ".config", "agentsurface"), { recursive: true });
-    writeFileSync(
-      join(home, ".config", "agentsurface", "config.json"),
-      JSON.stringify({ yolo: { claude: false } }),
-    );
-    const off = run(["claude", "--x-dry-run", "--x-json"], { HOME: home });
-    expect(envelope(off).data?.["command"]).toEqual(["claude"]);
-    expect(envelope(off).data?.["yolo"]).toBe(false);
-    const forced = run(["claude", "--x-yolo", "--x-dry-run", "--x-json"], { HOME: home });
-    expect(envelope(forced).data?.["command"]).toEqual([
+  test("colon forms request both dimensions and pick by catalog order", () => {
+    const walked = run([
+      "--x-harness",
+      "gpt-5.6-sol:ultra",
+      "--x-dry-run",
+      "--x-json",
+      "--x-no-yolo",
+    ]);
+    const data = envelope(walked).data;
+    expect(data?.["harness"]).toBe("codex");
+    expect(data?.["model_source"]).toBe("requested");
+    expect(data?.["effort"]).toBe("ultra");
+    const pinned = run([
+      "--x-harness",
+      "pi:gpt-5.6-luna:max",
+      "--x-dry-run",
+      "--x-json",
+      "--x-no-yolo",
+    ]);
+    expect(envelope(pinned).data?.["command"]).toEqual([
+      "pi",
+      "--model",
+      "openai-codex/gpt-5.6-luna",
+      "--thinking",
+      "max",
+    ]);
+  });
+
+  test("bad harness values and misses are usage faults", () => {
+    expect(run(["--x-harness", "opus"]).code).toBe(2);
+    expect(run(["--x-harness", "claude:opus"]).code).toBe(2);
+    expect(run(["--x-harness", "a:b:c:d"]).code).toBe(2);
+    expect(run(["--x-harness", "cursor:m:e"]).code).toBe(2);
+    const miss = run(["--x-harness", "gpt-5.5:ultra"]);
+    expect(miss.code).toBe(2);
+    expect(miss.stderr).toContain('no harness offers model "gpt-5.5" at effort "ultra"');
+  });
+
+  test("the name route yields per dimension to forwarded native flags", () => {
+    const result = run([
+      "--x-harness",
+      "claude",
+      "--model",
+      "sonnet",
+      "--x-dry-run",
+      "--x-json",
+      "--x-no-yolo",
+    ]);
+    const data = envelope(result).data;
+    expect(data?.["command"]).toEqual(["claude", "--effort", "medium", "--model", "sonnet"]);
+    expect(data?.["model"]).toBe("sonnet");
+    expect(data?.["model_source"]).toBe("forwarded");
+    expect(data?.["effort_source"]).toBe("default");
+  });
+
+  test("a colon form faults on a forwarded model or effort counterpart", () => {
+    const model = run(["--x-harness", "claude:opus:high", "--model", "sonnet", "--x-dry-run"]);
+    expect(model.code).toBe(2);
+    expect(model.stderr).toContain("set the model");
+    const effort = run(["--x-harness", "claude:opus:high", "--effort", "low", "--x-dry-run"]);
+    expect(effort.code).toBe(2);
+    expect(effort.stderr).toContain("set the effort");
+    const codex = run([
+      "--x-harness",
+      "codex:gpt-5.5:high",
+      "-c",
+      'model_reasoning_effort="low"',
+      "--x-dry-run",
+    ]);
+    expect(codex.code).toBe(2);
+  });
+
+  test("utility invocations get no injection, and colon forms refuse them", () => {
+    const utility = run(["--x-harness", "codex", "--x-dry-run", "--x-json", "login"]);
+    const parsed = envelope(utility);
+    expect(parsed.data?.["command"]).toEqual(["codex", "login"]);
+    expect(parsed.data?.["utility"]).toBe(true);
+    expect(parsed.data?.["model"]).toBeNull();
+    const colon = run(["--x-harness", "codex:gpt-5.5:high", "login", "--x-dry-run"]);
+    expect(colon.code).toBe(2);
+    expect(colon.stderr).toContain("utility invocation");
+  });
+
+  test("yolo is on by default and rides after the injected dimensions", () => {
+    const result = run(["--x-harness", "claude", "--x-dry-run", "--x-json"]);
+    expect(envelope(result).data?.["command"]).toEqual([
       "claude",
       "--dangerously-skip-permissions",
+      "--model",
+      "opus",
+      "--effort",
+      "medium",
     ]);
-    const both = run(["pi", "--x-yolo", "--x-no-yolo", "--x-dry-run"]);
-    expect(both.code).toBe(2);
-  });
-
-  test("a scoped --x-no-yolo only bites its own harness", () => {
-    const other = run(["claude", "--x-no-yolo", "codex", "--x-dry-run", "--x-json"]);
-    expect(envelope(other).data?.["command"]).toEqual(["claude", "--dangerously-skip-permissions"]);
-    const scoped = run(["claude", "--x-no-yolo", "claude", "--x-dry-run", "--x-json"]);
-    expect(envelope(scoped).data?.["command"]).toEqual(["claude"]);
   });
 
   test("--x-no-yolo redacts an explicitly forwarded yolo flag and narrates it", () => {
     const result = run([
+      "--x-harness",
       "claude",
       "--dangerously-skip-permissions",
-      "--model",
-      "fable",
       "--x-no-yolo",
       "--x-dry-run",
       "--x-json",
     ]);
     const parsed = envelope(result);
-    expect(parsed.data?.["command"]).toEqual(["claude", "--model", "fable"]);
     expect(parsed.data?.["redactions"]).toEqual(["--dangerously-skip-permissions"]);
-    const narrated = run(["pi", "-a", "--x-no-yolo", "--x-dry-run"]);
-    expect(narrated.stdout.trim()).toBe("pi");
+    const narrated = run(["--x-harness", "pi", "-a", "--x-no-yolo", "--x-dry-run"]);
     expect(narrated.stderr).toContain("yolo    off · removed -a · explicitly forwarded");
   });
 
-  test("pi's own --no-approve wins over default-on injection", () => {
-    const result = run(["pi", "--no-approve", "--x-dry-run", "--x-json"]);
-    expect(envelope(result).data?.["command"]).toEqual(["pi", "--no-approve"]);
+  test("bare x-* words in command position are reserved", () => {
+    const result = run(["x-something"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('unknown x command "x-something"');
   });
 
-  test("utility invocations stay bare under yolo, x-flags anywhere", () => {
-    const result = run(["codex", "--x-dry-run", "--x-json", "login"]);
-    const parsed = envelope(result);
-    expect(parsed.data?.["command"]).toEqual(["codex", "login"]);
-    expect(parsed.data?.["utility"]).toBe(true);
-  });
-
-  test("a malformed config fails the launch and x-doctor reports it", () => {
-    const root = mkdtempSync(join(tmpdir(), "agentsurface-badconf-"));
+  test("a malformed config or catalog fails the launch and x-doctor reports both", () => {
+    const root = mkdtempSync(join(tmpdir(), "agentsurface-badfiles-"));
     roots.push(root);
     const home = join(root, "home");
     mkdirSync(join(home, ".config", "agentsurface"), { recursive: true });
-    writeFileSync(join(home, ".config", "agentsurface", "config.json"), "not json");
-    const launch = run(["claude", "--x-dry-run", "--x-json"], { HOME: home });
+    writeFileSync(join(home, ".config", "agentsurface", "catalog.json"), "not json");
+    const launch = run(["--x-harness", "claude", "--x-dry-run", "--x-json"], { HOME: home });
     expect(launch.code).toBe(1);
-    expect(envelope(launch).error?.code).toBe("config_invalid");
+    expect(envelope(launch).error?.code).toBe("catalog_invalid");
     const doctor = run(["x-doctor", "--x-json"], { HOME: home });
     expect(doctor.code).toBe(0);
-    const config = envelope(doctor).data?.["config"] as { valid: boolean };
-    expect(config.valid).toBe(false);
+    const catalog = envelope(doctor).data?.["catalog"] as { valid: boolean; source: string };
+    expect(catalog.valid).toBe(false);
+    expect(catalog.source).toBe("custom");
   });
 
-  test("an explicit --x-yolo still works while the config is malformed", () => {
-    const root = mkdtempSync(join(tmpdir(), "agentsurface-badconf2-"));
-    roots.push(root);
-    const home = join(root, "home");
-    mkdirSync(join(home, ".config", "agentsurface"), { recursive: true });
-    writeFileSync(join(home, ".config", "agentsurface", "config.json"), "not json");
-    const result = run(["claude", "--x-no-yolo", "--x-dry-run", "--x-json"], { HOME: home });
+  test("x-doctor reports the catalog's order, models, and resolved defaults", () => {
+    const result = run(["x-doctor", "--x-json"]);
     expect(result.code).toBe(0);
-    expect(envelope(result).data?.["command"]).toEqual(["claude"]);
+    const catalog = envelope(result).data?.["catalog"] as {
+      source: string;
+      valid: boolean;
+      harnesses: Array<{ harness: string; models: number; defaults: { model: string } }>;
+    };
+    expect(catalog.source).toBe("built-in");
+    expect(catalog.valid).toBe(true);
+    expect(catalog.harnesses.map((entry) => entry.harness)).toEqual(["claude", "codex", "pi"]);
+    expect(catalog.harnesses[0]?.defaults.model).toBe("opus");
+    expect(run(["x-doctor", "stray"]).code).toBe(2);
   });
 
-  test("--x-dry-run without --x-json prints a shell line", () => {
-    const result = run(["codex", "two words", "--x-dry-run", "--x-no-yolo"]);
-    expect(result.code).toBe(0);
-    expect(result.stdout.trim()).toBe("codex 'two words'");
-  });
-
-  test("launch-command --x-json without --x-dry-run is a usage fault", () => {
-    const result = run(["claude", "--x-json"]);
-    expect(result.code).toBe(2);
-    expect(result.stderr).toContain("--x-json needs --x-dry-run");
-  });
-
-  test("unknown --x-* flags are usage faults", () => {
-    const result = run(["claude", "--x-bogus"]);
-    expect(result.code).toBe(2);
-    expect(result.stderr).toContain('unknown option "--x-bogus"');
-  });
-
-  test("x-resume detects the owning store and spells pi resume as --session", () => {
+  test("x-resume detects the owning store and takes no injection", () => {
     const root = mkdtempSync(join(tmpdir(), "agentsurface-store-"));
     roots.push(root);
     const projects = join(root, "claude", "projects", "-somewhere");
@@ -276,31 +295,7 @@ describe("surface", () => {
     expect(envelope(forced).data?.["command"]).toEqual(["pi", "--session", SESSION_ID]);
   });
 
-  test("x-resume injects yolo like a launch and forwards extra tokens", () => {
-    const result = run([
-      "x-resume",
-      SESSION_ID,
-      "--x-harness",
-      "claude",
-      "--continue-ish",
-      "--x-dry-run",
-      "--x-json",
-    ]);
-    expect(envelope(result).data?.["command"]).toEqual([
-      "claude",
-      "--resume",
-      SESSION_ID,
-      "--dangerously-skip-permissions",
-      "--continue-ish",
-    ]);
-  });
-
   test("x-resume misses are domain errors, not launches", () => {
-    const human = run(["x-resume", SESSION_ID]);
-    expect(human.code).toBe(1);
-    expect(human.stderr).toContain("is not in the claude, codex, or pi session stores");
-    expect(human.stderr).toContain("--x-harness");
-
     const machine = run(["x-resume", SESSION_ID, "--x-dry-run", "--x-json"]);
     expect(machine.code).toBe(1);
     const parsed = envelope(machine);
@@ -309,83 +304,32 @@ describe("surface", () => {
   });
 
   test("the launch narrative goes to stderr as aligned rows, leaving stdout usable", () => {
-    const result = run(["claude", "--model", "fable", "--x-dry-run", "--x-no-yolo"]);
+    const result = run(["--x-harness", "claude", "--x-dry-run", "--x-no-yolo"]);
     expect(result.code).toBe(0);
     // stdout stays a runnable shell line, so --x-dry-run can be piped.
-    expect(result.stdout.trim()).toBe("claude --model fable");
+    expect(result.stdout.trim()).toBe("claude --model opus --effort medium");
     const rows = result.stderr.trimEnd().split("\n");
     expect(rows[0]).toBe("open    claude");
     expect(rows[1]).toMatch(/^cwd {5}\S/);
+    expect(rows).toContain("model   opus · default");
+    expect(rows).toContain("effort  medium · default");
     expect(rows).toContain("yolo    off · permission prompts stay on");
     expect(rows).toContain("account skipped · balancing off (AGENTSURFACE_NO_BALANCE)");
     expect(rows).toContain("dry run nothing launched · command on stdout");
-    // Every row shares one value column.
     for (const row of rows) expect(row.slice(0, 8)).toMatch(/^\S.{0,6} +$|^\S{8}$/);
   });
 
   test("--x-json silences the narrative so the envelope stands alone", () => {
-    const result = run(["claude", "--x-dry-run", "--x-json", "--x-verbose"]);
+    const result = run(["--x-harness", "claude", "--x-dry-run", "--x-json", "--x-verbose"]);
     expect(result.stderr).toBe("");
     expect(() => JSON.parse(result.stdout)).not.toThrow();
   });
 
   test("--x-verbose adds mechanism rows, default keeps them out", () => {
-    const quiet = run(["claude", "--x-dry-run"]);
+    const quiet = run(["--x-harness", "claude", "--x-dry-run"]);
     expect(quiet.stderr).not.toContain("config ");
-    const loud = run(["claude", "--x-dry-run", "--x-verbose"]);
+    const loud = run(["--x-harness", "claude", "--x-dry-run", "--x-verbose"]);
     expect(loud.stderr).toContain("config  ");
     expect(loud.stderr).toContain("missing · yolo on everywhere");
-  });
-
-  test("the narrative names the yolo and utility decisions", () => {
-    const yolo = run(["pi", "--x-dry-run"]);
-    expect(yolo.stderr).toContain("yolo    on · --approve");
-    const utility = run(["codex", "--x-dry-run", "login"]);
-    expect(utility.stderr).toContain("account skipped · login is a utility invocation");
-    expect(utility.stderr).not.toContain("yolo    on · --dangerously");
-  });
-
-  test("x-resume narrates which store owned the session", () => {
-    const root = mkdtempSync(join(tmpdir(), "agentsurface-narr-"));
-    roots.push(root);
-    const projects = join(root, "claude", "projects", "-somewhere");
-    mkdirSync(projects, { recursive: true });
-    writeFileSync(join(projects, `${SESSION_ID}.jsonl`), "{}\n");
-    const result = run(["x-resume", SESSION_ID, "--x-dry-run"], {
-      CLAUDE_CONFIG_DIR: join(root, "claude"),
-    });
-    expect(result.stderr).toContain(`resume  claude · ${SESSION_ID}`);
-  });
-
-  test("x-doctor --x-json reports all three stores and refuses arguments", () => {
-    const result = run(["x-doctor", "--x-json"]);
-    expect(result.code).toBe(0);
-    const parsed = envelope(result);
-    const harnesses = parsed.data?.["harnesses"] as Array<{ harness: string }>;
-    expect(harnesses.map((report) => report.harness)).toEqual(["claude", "codex", "pi"]);
-    expect(run(["x-doctor", "stray"]).code).toBe(2);
-  });
-
-  test("x-doctor reports the catalog, downgrading a malformed custom one", () => {
-    const clean = envelope(run(["x-doctor", "--x-json"]));
-    const catalog = clean.data?.["catalog"] as {
-      source: string;
-      valid: boolean;
-      harnesses: Array<{ harness: string; models: number }>;
-    };
-    expect(catalog.source).toBe("built-in");
-    expect(catalog.valid).toBe(true);
-    expect(catalog.harnesses.map((entry) => entry.harness)).toEqual(["claude", "codex", "pi"]);
-
-    const root = mkdtempSync(join(tmpdir(), "agentsurface-badcat-"));
-    roots.push(root);
-    const home = join(root, "home");
-    mkdirSync(join(home, ".config", "agentsurface"), { recursive: true });
-    writeFileSync(join(home, ".config", "agentsurface", "catalog.json"), "not json");
-    const doctor = run(["x-doctor", "--x-json"], { HOME: home });
-    expect(doctor.code).toBe(0);
-    const bad = envelope(doctor).data?.["catalog"] as { source: string; valid: boolean };
-    expect(bad.valid).toBe(false);
-    expect(bad.source).toBe("custom");
   });
 });

@@ -3,7 +3,7 @@ import type { Context, Outcome } from "./commands.ts";
 import { doctorCommand, launchCommand, resumeCommand } from "./commands.ts";
 import { failure, success } from "./envelope.ts";
 import { CliError, UsageError } from "./errors.ts";
-import { HARNESS_NAMES, isHarnessName } from "./harness.ts";
+import { HARNESS_NAMES } from "./harness.ts";
 import { AGENT_HELP, AGENT_TEASER, HELP, TOP_HELP, VERSION } from "./help.ts";
 import { launch } from "./launch.ts";
 import { createNarrator } from "./narrate.ts";
@@ -27,7 +27,7 @@ interface RouteFlags {
 }
 
 const LAUNCH_FLAGS: RouteFlags = {
-  value: ["--x-account"],
+  value: ["--x-harness", "--x-account"],
   bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
   scoped: ["--x-yolo", "--x-no-yolo"],
 };
@@ -48,10 +48,13 @@ function specFor(flags: RouteFlags): XSpec {
 
 /** The pre-ADR-0008 grammar, retired loudly rather than silently misread. */
 const RETIRED_SPELLINGS: Record<string, string> = {
-  open: "the open command is retired: the harness name is the command — run `agentsurface <harness> …`",
+  open: "the open command is retired: launches name their harness with --x-harness",
   resume: "resume is now x-resume",
   doctor: "doctor is now x-doctor",
   help: "help is now --x-help on a command, or bare `agentsurface`",
+  claude: "the harness moved off the command position: pass --x-harness claude",
+  codex: "the harness moved off the command position: pass --x-harness codex",
+  pi: "the harness moved off the command position: pass --x-harness pi",
 };
 
 function emit(outcome: Extract<Outcome, { kind: "result" }>, json: boolean): void {
@@ -90,32 +93,34 @@ async function main(argv: string[]): Promise<number> {
     return 2;
   }
 
+  // Anything that is not an x-command is a launch: the harness arrives as
+  // the --x-harness value (ADR 0011), never as a positional, so every
+  // remaining token belongs to x-space or the harness.
   let helpTopic: string;
   let spec: XSpec;
+  let own: string[];
   let run: (context: Context, parts: Partitioned) => Promise<Outcome>;
-  if (isHarnessName(first)) {
-    const harness = first;
-    helpTopic = "launch";
-    spec = specFor(LAUNCH_FLAGS);
-    run = (context, parts) => launchCommand(context, harness, parts);
-  } else if (first === "x-resume") {
+  if (first === "x-resume") {
     helpTopic = "x-resume";
     spec = specFor(RESUME_FLAGS);
+    own = argv.slice(1);
     run = resumeCommand;
   } else if (first === "x-doctor") {
     helpTopic = "x-doctor";
     spec = specFor({});
+    own = argv.slice(1);
     run = doctorCommand;
   } else {
-    console.error(`unknown command "${first}"`);
-    console.error(TOP_HELP);
-    return 2;
+    helpTopic = "launch";
+    spec = specFor(LAUNCH_FLAGS);
+    own = argv;
+    run = launchCommand;
   }
   const helpText = HELP[helpTopic] ?? TOP_HELP;
 
   let parts: Partitioned;
   try {
-    parts = partition(argv.slice(1), spec, HARNESS_NAMES);
+    parts = partition(own, spec, HARNESS_NAMES);
   } catch (error) {
     if (!(error instanceof UsageError)) throw error;
     console.error(error.message);
