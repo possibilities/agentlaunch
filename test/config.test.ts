@@ -60,6 +60,15 @@ describe("loadConfig", () => {
     expect(loadConfig(env, home).yolo).toEqual({ claude: false, codex: true, pi: false });
   });
 
+  test("a $schema key is accepted and ignored", () => {
+    const { env, home } = writeConfig(
+      JSON.stringify({ $schema: "./config.schema.json", yolo: { claude: true } }),
+    );
+    const config = loadConfig(env, home);
+    expect(config.exists).toBe(true);
+    expect(config.yolo).toEqual({ claude: true, codex: false, pi: false });
+  });
+
   test("invalid shapes are config_invalid domain errors", () => {
     for (const bad of [
       "not json at all",

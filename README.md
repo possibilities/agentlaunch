@@ -96,6 +96,8 @@ launch spec. `--yolo` / `--no-yolo` override per launch. Utility
 invocations never get the flag, and a flag already forwarded after `--` is
 not duplicated (ADR 0006). A malformed config fails the launch loudly;
 `doctor` reports the config's path, validity, and per-harness state.
+`config.schema.json` in this repo describes the file for editors — name it
+in a `"$schema"` key, which the loader accepts and ignores.
 
 With the PATH shims installed, this is what lets upstream tools — orca's
 per-agent default args included — stop encoding permission flags per

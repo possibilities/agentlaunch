@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "agentsurface launcher configuration",
+  "description": "Per-user configuration for the agentsurface launcher, read from ~/.config/agentsurface/config.json (XDG_CONFIG_HOME relocates the directory). The file is optional: with no file at all, yolo is off for every harness. When the file does exist it is validated strictly and every fault is a config_invalid domain error that fails the launch — a config that would be silently misread is worse than none, because yolo opens permission gates and a typo must fail the launch rather than quietly launch gated. Only `doctor` downgrades that to a report.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "description": "Path or URL of this schema, for editors that offer completion and validation. The loader accepts it and ignores it; it is the only key besides \"yolo\" that does not fail validation.",
+      "type": "string"
+    },
+    "yolo": {
+      "description": "Whether a launch drops each harness's own interactive permission gates by injecting that harness's documented flag into the launch spec: --dangerously-skip-permissions for claude, --dangerously-bypass-approvals-and-sandbox for codex, --approve for pi. Omit the key entirely and every harness is off. A bare boolean sets all three at once; an object sets them individually and leaves the unnamed ones off. Utility invocations never receive the flag, and a flag the caller already forwarded after `--` is not duplicated (ADR 0006). `--yolo` and `--no-yolo` override this per launch.",
+      "oneOf": [
+        {
+          "description": "One answer for every harness: true injects each harness's permission flag into claude, codex, and pi alike; false is the default state and injects nothing.",
+          "type": "boolean"
+        },
+        {
+          "description": "Per-harness answers. Only claude, codex, and pi are accepted — an unknown harness name is a config_invalid error rather than a silently ignored line, so that a misspelling can never read as \"off\" when the operator meant \"on\". Any harness left out stays off.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "claude": {
+              "description": "Inject --dangerously-skip-permissions into claude launches. Defaults to false when omitted.",
+              "type": "boolean"
+            },
+            "codex": {
+              "description": "Inject --dangerously-bypass-approvals-and-sandbox into codex launches. Defaults to false when omitted.",
+              "type": "boolean"
+            },
+            "pi": {
+              "description": "Inject --approve into pi launches. Defaults to false when omitted. Pi's tools never prompt, so this only auto-trusts project-local files.",
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

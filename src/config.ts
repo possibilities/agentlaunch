@@ -42,7 +42,8 @@ export function loadConfig(env: Environ, home: string): Config {
     );
   }
   const body = parsed as Record<string, unknown>;
-  const unknownKeys = Object.keys(body).filter((key) => key !== "yolo");
+  // "$schema" is reserved for editor tooling; it names no setting and is ignored.
+  const unknownKeys = Object.keys(body).filter((key) => key !== "yolo" && key !== "$schema");
   if (unknownKeys.length > 0) {
     throw new CliError(
       "config_invalid",
