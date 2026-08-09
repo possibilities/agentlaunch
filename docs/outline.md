@@ -52,7 +52,7 @@ Still open (surface half): resuming a session *onto* a surface — same
 resolution, but the launch lands in a surface workspace instead of this
 terminal.
 
-## Open harness on surface (S) — next candidate
+## Open harness on surface (S) — first surface slice
 
 Adds `--x-*` flags (e.g. `--x-surface-session`) to the same `open` command;
 returns a JSON envelope describing the landed run instead of becoming the
@@ -95,6 +95,42 @@ What building it taught us:
 - Never set `PI_CODING_AGENT_SESSION_DIR` (it flattens pi's project-nested
   session layout); pi profiles share history via a sessions symlink.
 
+## Yolo mode (R) — queued next
+
+One config switch that opens every harness with its permission gates down,
+so nothing upstream (orca included) has to know per-harness flags.
+Spellings verified against the current CLIs:
+
+- claude — `--dangerously-skip-permissions`
+- codex — `--dangerously-bypass-approvals-and-sandbox`
+- pi — tools already run unprompted (there are no permission gates to
+  bypass); its only prompt is project-local trust, so pi yolo maps to
+  `--approve` — confirm that scope at build time.
+
+Design intent:
+
+- `~/.config/agentsurface/config.json` (family XDG paths), per-harness:
+  `{"yolo": {"claude": true, "codex": true, "pi": true}}`, with `--yolo` /
+  `--no-yolo` as per-launch overrides. This is runner behavior, so the
+  flags stay unprefixed; `--x-*` remains surface-only.
+- Injected by the spec builders before passthrough, and skipped when the
+  passthrough already carries the same flag (codex's parser rejects a
+  duplicated boolean).
+- Funk stows the personal config enabling all three — the same pattern as
+  funk's other `.config` packages — which is what makes the setting
+  machine-managed.
+
+Consequence, same slice: orca stops sending permission args for our
+harnesses. Today they live in Orca's own settings — `agentDefaultArgs`
+inside `~/Library/Application Support/Orca/orca-data.json`, not in the
+stowed `funk/orca` package — as `claude: --dangerously-skip-permissions`
+and `codex: --dangerously-bypass-approvals-and-sandbox` (pi has no entry;
+it needs none). Bare `claude`/`codex`/`pi` are already agentsurface shims
+on PATH (ADR 0004), so orca launching a harness by name flows through
+agentsurface and picks yolo up from config; clearing those two entries —
+and stowing orca's settings under funk if we want the absence declared —
+finishes the move.
+
 ## Chat bus (S) — unexplored
 
 Nothing learned yet. Orca's orchestration (threaded messages, ask/reply)
@@ -129,13 +165,16 @@ the likely mechanism; quota-resume should key off agentusage observations.
 
 ## Suggested slice order (recommendation)
 
-1. **Open on surface, minimal** — the `--x-*` envelope and an Orca backend
+1. **Yolo mode** — small runner slice; unblocks dropping the permission
+   args from orca's agent settings.
+2. **Open on surface, minimal** — the `--x-*` envelope and an Orca backend
    for `open`; unlocks everything else that is surface-shaped.
-2. **Resume on surface** — closes the outline's "resuming (R+S)" item by
+3. **Resume on surface** — closes the outline's "resuming (R+S)" item by
    reusing slice 1's resolution plus the new landing path.
-3. **Status** — runner-level signals first (claude session registry,
+4. **Status** — runner-level signals first (claude session registry,
    store mtimes), surfaced through the same envelope.
-4. **Swap-aware claude resume** — small, independent; scan cswap profile
-   roots when detection misses.
-5. Run names on surface, land, controlling agents, chat bus, balance —
-   in whatever order usage demands.
+5. **Swap-aware claude resume** — small, independent; scan cswap profile
+   roots when detection misses (mostly moot while balanced claude
+   launches share history).
+6. Run names on surface, land, controlling agents, chat bus — as usage
+   demands.
