@@ -95,6 +95,7 @@ describe("surface", () => {
       cwd: realpathSync(root),
       command: ["claude", "--model", "fable", "--effort", "max", "fix the tests"],
       balance: null,
+      utility: false,
     });
   });
 

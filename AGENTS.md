@@ -18,9 +18,10 @@ harnesses actually write, not from their documentation.
 `src/` is flat, one module per concern:
 
 - `harness.ts` owns the three adapters: open/resume argv builders, the
-  per-harness effort sets, run-name support, and session store locations
-  with their relocating env vars. Every harness asymmetry lives here and
-  nowhere else.
+  per-harness effort sets, run-name support, utility-invocation
+  classification (ADR 0005), and session store locations with their
+  relocating env vars. Every harness asymmetry lives here and nowhere
+  else.
 - `resolve.ts` finds a session id across the stores and counts sessions;
   ids are validated glob-literal before they touch a pattern.
 - `balance.ts` composes the account-balancing prefix around a spec

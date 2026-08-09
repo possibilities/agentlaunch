@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { UsageError } from "../src/errors.ts";
-import { buildOpen, buildResume, parseHarnessName, sessionStore } from "../src/harness.ts";
+import {
+  buildOpen,
+  buildResume,
+  parseHarnessName,
+  sessionStore,
+  utilityInvocation,
+} from "../src/harness.ts";
 
 const NO_OPTIONS = { passthrough: [] };
 
@@ -92,6 +98,41 @@ describe("buildResume", () => {
     const spec = buildResume("codex", "abc-123", ["--last-ish"]);
     expect(spec.command).toEqual(["codex", "resume", "abc-123", "--last-ish"]);
     expect(spec.sessionId).toBe("abc-123");
+  });
+});
+
+describe("utilityInvocation", () => {
+  test("management and service words pass through", () => {
+    expect(utilityInvocation("codex", ["login", "--device-auth"])).toBe(true);
+    expect(utilityInvocation("codex", ["app-server", "--enable", "realtime"])).toBe(true);
+    expect(utilityInvocation("codex", ["mcp-server"])).toBe(true);
+    expect(utilityInvocation("codex", ["doctor"])).toBe(true);
+    expect(utilityInvocation("claude", ["mcp", "list"])).toBe(true);
+    expect(utilityInvocation("claude", ["setup-token"])).toBe(true);
+    expect(utilityInvocation("pi", ["auth", "status"])).toBe(true);
+  });
+
+  test("bare help and version flags pass through", () => {
+    expect(utilityInvocation("codex", ["--version"])).toBe(true);
+    expect(utilityInvocation("codex", ["-V"])).toBe(true);
+    expect(utilityInvocation("claude", ["--help"])).toBe(true);
+    expect(utilityInvocation("pi", ["-h"])).toBe(true);
+  });
+
+  test("session launches balance: bare, prompts, flags, session words", () => {
+    expect(utilityInvocation("codex", [])).toBe(false);
+    expect(utilityInvocation("codex", ["fix the failing tests"])).toBe(false);
+    expect(utilityInvocation("codex", ["--search"])).toBe(false);
+    expect(utilityInvocation("codex", ["exec", "hello"])).toBe(false);
+    expect(utilityInvocation("codex", ["review"])).toBe(false);
+    expect(utilityInvocation("codex", ["resume", "abc"])).toBe(false);
+    expect(utilityInvocation("codex", ["fork"])).toBe(false);
+    expect(utilityInvocation("claude", ["fix the failing tests"])).toBe(false);
+    expect(utilityInvocation("pi", ["-p", "hello"])).toBe(false);
+  });
+
+  test("flags ahead of a subcommand classify as a session", () => {
+    expect(utilityInvocation("codex", ["-c", "k=v", "login"])).toBe(false);
   });
 });
 

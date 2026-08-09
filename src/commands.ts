@@ -9,6 +9,7 @@ import {
   HARNESS_NAMES,
   parseHarnessName,
   sessionStore,
+  utilityInvocation,
 } from "./harness.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
@@ -180,9 +181,19 @@ async function finishLaunch(
     throw new UsageError("--x-account pins a balanced launch; drop --x-no-balance");
   }
 
+  // A utility invocation passes through unwrapped (ADR 0005): no account is
+  // spent, and the swap wrappers reject several of these commands outright.
+  // The launch sentinel still makes PATH shims exec the real binary.
+  const utility = utilityInvocation(spec.harness, spec.command.slice(1));
+  if (utility && account !== undefined) {
+    throw new UsageError(
+      `--x-account pins a session launch; "${spec.command[1]}" is a utility invocation that passes through`,
+    );
+  }
+
   let launchSpec = spec;
   let decision: BalanceDecision | null = null;
-  if (!balanceDisabled(context.env, noBalance)) {
+  if (!utility && !balanceDisabled(context.env, noBalance)) {
     const balanced = await balanceSpec(context.env, spec, {
       account,
       model: routingModel,
@@ -199,6 +210,7 @@ async function finishLaunch(
     cwd: context.cwd,
     command: launchSpec.command,
     balance: decision,
+    utility,
   };
   return { kind: "result", data, human: shellLine(launchSpec.command) };
 }

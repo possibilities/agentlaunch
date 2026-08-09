@@ -52,6 +52,14 @@ refused balance (no capacity, stale observations, missing tools) fails the
 launch loudly with a recovery — never a silent unbalanced launch. Dry runs
 balance without reserving or claiming anything.
 
+Utility invocations are the exception (ADR 0005): a leading management or
+service word — codex `login`, `app-server`, `mcp`…, claude `doctor`,
+`mcp`…, pi `auth`…, or a bare `--help`/`--version` — opens no account-bound
+session, so it passes through to the real binary unwrapped, even when the
+balancing stack is missing. Shimmed `codex login --device-auth` just logs
+in; `codex exec`, `review`, `resume`, `fork`, prompts, and flag launches
+still balance.
+
 On this machine, bare `claude`/`codex`/`pi` are funk-installed PATH shims
 that exec `agentsurface open <harness> -- "$@"` — every launch balances
 however it was typed. The `AGENTSURFACE_LAUNCH=1` sentinel marks

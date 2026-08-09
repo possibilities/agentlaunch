@@ -67,6 +67,80 @@ export function buildOpen(harness: HarnessName, request: OpenRequest): LaunchSpe
   return { harness, command, sessionId: null };
 }
 
+/**
+ * Management and service words per harness — everything in each CLI's
+ * command list that opens no account-bound model session. A first token in
+ * this set makes the invocation a utility invocation: balancing it is
+ * meaningless (no quota is spent on an account) and the swap wrappers
+ * reject several outright (codex `login` cannot run under an account pin).
+ * Session words stay out: codex exec/e/review/resume/fork, and every
+ * prompt/flag launch. Matches each CLI's own parsing — a leading
+ * subcommand word already outranks the prompt positional there, so a
+ * "prompt" equal to one of these words was never going to be a prompt.
+ * Verified against codex-cli 0.147.0, claude 2.x, pi; re-check on harness
+ * upgrades.
+ */
+const UTILITY_WORDS: Record<HarnessName, ReadonlySet<string>> = {
+  claude: new Set([
+    "agents",
+    "auth",
+    "auto-mode",
+    "doctor",
+    "gateway",
+    "import",
+    "install",
+    "mcp",
+    "plugin",
+    "plugins",
+    "project",
+    "setup-token",
+    "ultrareview",
+    "update",
+    "upgrade",
+    "help",
+  ]),
+  codex: new Set([
+    "login",
+    "logout",
+    "mcp",
+    "plugin",
+    "mcp-server",
+    "app-server",
+    "remote-control",
+    "app",
+    "completion",
+    "update",
+    "doctor",
+    "sandbox",
+    "debug",
+    "apply",
+    "a",
+    "archive",
+    "delete",
+    "unarchive",
+    "cloud",
+    "exec-server",
+    "features",
+    "help",
+  ]),
+  pi: new Set(["install", "remove", "uninstall", "update", "list", "config", "auth", "help"]),
+};
+
+const BARE_UTILITY_FLAGS = new Set(["-h", "--help", "-v", "-V", "--version"]);
+
+/**
+ * First-token classification of the argv after the binary. Flags ahead of a
+ * subcommand (`codex -c k=v login`) classify as a session — the shim path
+ * never produces that shape, and misclassifying toward balance fails the
+ * same way the raw CLI run would, never the other way around.
+ */
+export function utilityInvocation(harness: HarnessName, argvAfterBin: string[]): boolean {
+  const first = argvAfterBin[0];
+  if (first === undefined) return false;
+  if (BARE_UTILITY_FLAGS.has(first)) return true;
+  return UTILITY_WORDS[harness].has(first);
+}
+
 export function buildResume(
   harness: HarnessName,
   sessionId: string,

@@ -270,6 +270,48 @@ describe("balanced open", () => {
     expect(envelope.error?.code).toBe("balance_unavailable");
     expect(envelope.error?.recovery).toContain("AGENTSURFACE_NO_BALANCE");
   });
+
+  test("a utility invocation passes through without consulting balance", () => {
+    const world = makeWorld();
+    const result = run(world, [
+      "open",
+      "codex",
+      "--dry-run",
+      "--json",
+      "--",
+      "login",
+      "--device-auth",
+    ]);
+    expect(result.code).toBe(0);
+    const data = (JSON.parse(result.stdout) as AnyEnvelope).data as {
+      command: string[];
+      balance: null;
+      utility: boolean;
+    };
+    expect(data.command).toEqual(["codex", "login", "--device-auth"]);
+    expect(data.balance).toBeNull();
+    expect(data.utility).toBe(true);
+    expect(balanceCalls(world)).toEqual([]);
+  });
+
+  test("a utility invocation works even when the stack is missing entirely", () => {
+    const world = makeWorld();
+    rmSync(join(world.binDir, "agentusage"));
+    const result = run(world, ["open", "codex", "--dry-run", "--json", "--", "--version"], {
+      PATH: `${world.binDir}:${dirname(process.execPath)}`,
+    });
+    expect(result.code).toBe(0);
+    const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
+    expect(data.command).toEqual(["codex", "--version"]);
+  });
+
+  test("--x-account on a utility invocation is a usage fault, not a silent drop", () => {
+    const world = makeWorld();
+    const result = run(world, ["open", "codex", "--x-account", "acc_x", "--", "login"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("utility invocation");
+    expect(balanceCalls(world)).toEqual([]);
+  });
 });
 
 describe("balanced resume", () => {
