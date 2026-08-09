@@ -10,10 +10,18 @@
  */
 export interface Narrator {
   /** A decision worth seeing on every launch. */
-  say(line: string): void;
+  row(label: string, value: string): void;
   /** Mechanism, shown only under --x-verbose. */
-  detail(line: string): void;
+  detail(label: string, value: string): void;
   readonly verbose: boolean;
+}
+
+/** Wide enough for the longest label, so values line up in one column. */
+const LABEL_WIDTH = 8;
+
+/** Values are lists of facts, not sentences. */
+export function facts(...parts: (string | undefined)[]): string {
+  return parts.filter((part): part is string => part !== undefined && part !== "").join(" · ");
 }
 
 export interface NarratorOptions {
@@ -26,12 +34,15 @@ export interface NarratorOptions {
 export function createNarrator(options: NarratorOptions): Narrator {
   const write = options.write ?? ((line: string) => process.stderr.write(`${line}\n`));
   if (options.silent) {
-    return { say: () => {}, detail: () => {}, verbose: false };
+    return { row: () => {}, detail: () => {}, verbose: false };
   }
+  const row = (label: string, value: string): void => {
+    write(`${label.padEnd(LABEL_WIDTH)}${value}`);
+  };
   return {
-    say: (line) => write(line),
-    detail: (line) => {
-      if (options.verbose) write(`  ${line}`);
+    row,
+    detail: (label, value) => {
+      if (options.verbose) row(label, value);
     },
     verbose: options.verbose,
   };

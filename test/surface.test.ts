@@ -203,14 +203,18 @@ describe("surface", () => {
     expect(parsed.error?.code).toBe("session_not_found");
   });
 
-  test("the launch narrative goes to stderr, leaving stdout usable", () => {
+  test("the launch narrative goes to stderr as aligned rows, leaving stdout usable", () => {
     const result = run(["open", "claude", "--model", "fable", "--dry-run"]);
     expect(result.code).toBe(0);
     // stdout stays a runnable shell line, so --dry-run can be piped.
     expect(result.stdout.trim()).toBe("claude --model fable");
-    expect(result.stderr).toContain("Opening claude in ");
-    expect(result.stderr).toContain("with model fable");
-    expect(result.stderr).toContain("Dry run, so nothing is launched");
+    const rows = result.stderr.trimEnd().split("\n");
+    expect(rows[0]).toBe("open    claude · model fable");
+    expect(rows[1]).toMatch(/^cwd {5}\S/);
+    expect(rows).toContain("account skipped · balancing off (AGENTSURFACE_NO_BALANCE)");
+    expect(rows).toContain("dry run nothing launched · command on stdout");
+    // Every row shares one value column.
+    for (const row of rows) expect(row.slice(0, 8)).toMatch(/^\S.{0,6} +$|^\S{8}$/);
   });
 
   test("--json silences the narrative so the envelope stands alone", () => {
@@ -219,20 +223,20 @@ describe("surface", () => {
     expect(() => JSON.parse(result.stdout)).not.toThrow();
   });
 
-  test("--x-verbose adds mechanism, default keeps it out", () => {
+  test("--x-verbose adds mechanism rows, default keeps them out", () => {
     const quiet = run(["open", "claude", "--dry-run"]);
-    expect(quiet.stderr).not.toContain("No config at");
+    expect(quiet.stderr).not.toContain("config ");
     const loud = run(["open", "claude", "--dry-run", "--x-verbose"]);
-    expect(loud.stderr).toContain("No config at");
-    expect(loud.stderr).toContain("Balancing is off on this machine");
+    expect(loud.stderr).toContain("config  ");
+    expect(loud.stderr).toContain("missing · yolo off everywhere");
   });
 
   test("the narrative names the yolo and utility decisions", () => {
     const yolo = run(["open", "pi", "--yolo", "--dry-run"]);
-    expect(yolo.stderr).toContain("Yolo is on, so pi runs with --approve.");
+    expect(yolo.stderr).toContain("yolo    on · --approve");
     const utility = run(["open", "codex", "--yolo", "--dry-run", "--", "login"]);
-    expect(utility.stderr).toContain("utility invocation");
-    expect(utility.stderr).not.toContain("Yolo is on, so codex runs");
+    expect(utility.stderr).toContain("account skipped · login is a utility invocation");
+    expect(utility.stderr).not.toContain("yolo    on · --dangerously");
   });
 
   test("resume narrates which store owned the session", () => {
@@ -244,7 +248,7 @@ describe("surface", () => {
     const result = run(["resume", SESSION_ID, "--dry-run"], {
       CLAUDE_CONFIG_DIR: join(root, "claude"),
     });
-    expect(result.stderr).toContain(`Resuming session ${SESSION_ID}, which belongs to claude`);
+    expect(result.stderr).toContain(`resume  claude · ${SESSION_ID}`);
   });
 
   test("doctor --json reports all three stores", () => {

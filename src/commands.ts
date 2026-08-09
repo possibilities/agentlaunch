@@ -14,7 +14,7 @@ import {
   YOLO_FLAGS,
 } from "./harness.ts";
 import type { Narrator } from "./narrate.ts";
-import { shellLine, tildePath } from "./narrate.ts";
+import { facts, shellLine, tildePath } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
 
@@ -69,23 +69,20 @@ function narrateOpening(
   flags: ParsedFlags,
   prompt: string | undefined,
 ): void {
-  const qualifiers: string[] = [];
   const model = flags.values["model"];
   const effort = flags.values["effort"];
   const name = flags.values["name"];
-  if (model !== undefined) qualifiers.push(`model ${model}`);
-  if (effort !== undefined) qualifiers.push(`effort ${effort}`);
-  if (name !== undefined) qualifiers.push(`named ${name}`);
-  const tail = qualifiers.length > 0 ? ` with ${joinWords(qualifiers)}` : "";
-  context.narrator.say(`Opening ${harness} in ${tildePath(context.cwd, context.home)}${tail}.`);
-  if (prompt !== undefined) {
-    context.narrator.detail(`Starting prompt: ${truncate(prompt, 60)}`);
-  }
-}
-
-function joinWords(words: string[]): string {
-  if (words.length <= 1) return words[0] ?? "";
-  return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+  context.narrator.row(
+    "open",
+    facts(
+      harness,
+      model === undefined ? undefined : `model ${model}`,
+      effort === undefined ? undefined : `effort ${effort}`,
+      name === undefined ? undefined : `name ${name}`,
+    ),
+  );
+  context.narrator.row("cwd", tildePath(context.cwd, context.home));
+  if (prompt !== undefined) context.narrator.detail("prompt", truncate(prompt, 60));
 }
 
 function truncate(text: string, limit: number): string {
@@ -119,11 +116,10 @@ export async function resumeCommand(
   let sessionPath: string | null = null;
   if (harnessFlag !== undefined) {
     harness = parseHarnessName(harnessFlag);
-    context.narrator.say(`Resuming session ${sessionId} as ${harness}, named by --harness.`);
+    context.narrator.row("resume", facts(harness, sessionId, "by --harness"));
+    context.narrator.row("cwd", tildePath(context.cwd, context.home));
   } else {
-    context.narrator.detail(
-      `Looking for session ${sessionId} in the claude, codex, and pi session stores.`,
-    );
+    context.narrator.detail("scan", "claude, codex, and pi session stores");
     const matches = await findSessions(sessionId, context.env, context.home);
     const first = matches[0];
     if (first === undefined) {
@@ -144,15 +140,12 @@ export async function resumeCommand(
     }
     harness = first.harness;
     sessionPath = first.path;
-    context.narrator.say(
-      `Resuming session ${sessionId}, which belongs to ${harness}, in ${tildePath(context.cwd, context.home)}.`,
-    );
-    context.narrator.detail(`Session file: ${tildePath(first.path, context.home)}`);
+    context.narrator.row("resume", facts(harness, sessionId));
+    context.narrator.row("cwd", tildePath(context.cwd, context.home));
+    context.narrator.detail("session", tildePath(first.path, context.home));
   }
   const model = await resumeRoutingModel(context, harness, sessionId, sessionPath, passthrough);
-  if (model !== undefined) {
-    context.narrator.detail(`Routing on model ${model}.`);
-  }
+  if (model !== undefined) context.narrator.detail("model", `${model} · drives routing`);
   const yolo = resolveYolo(context, flags, harness);
   return finishLaunch(
     context,
@@ -171,14 +164,16 @@ function resolveYolo(context: Context, flags: ParsedFlags, harness: HarnessName)
   const off = flags.bools.has("no-yolo");
   if (on && off) throw new UsageError("--yolo conflicts with --no-yolo; pick one");
   if (on || off) {
-    context.narrator.detail(`Yolo ${on ? "on" : "off"} by flag, so the config is not consulted.`);
+    context.narrator.detail("config", "not consulted · yolo set by flag");
     return on;
   }
   const config = loadConfig(context.env, context.home);
   context.narrator.detail(
-    config.exists
-      ? `Config ${tildePath(config.path, context.home)}: yolo ${describeYolo(config.yolo)}.`
-      : `No config at ${tildePath(config.path, context.home)}, so yolo is off everywhere.`,
+    "config",
+    facts(
+      tildePath(config.path, context.home),
+      config.exists ? describeYolo(config.yolo) : "missing · yolo off everywhere",
+    ),
   );
   return config.yolo[harness];
 }
@@ -322,21 +317,14 @@ async function finishLaunch(
   let launchSpec = spec;
   let decision: BalanceDecision | null = null;
   if (utility) {
-    context.narrator.say(
-      `${spec.harness} ${spec.command[1]} is a utility invocation, so it launches unwrapped.`,
-    );
+    context.narrator.row("account", `skipped · ${spec.command[1]} is a utility invocation`);
   } else if (balanceDisabled(context.env, noBalance)) {
-    context.narrator.say(
-      noBalance
-        ? "Balancing is off for this launch, so the harness runs on whatever account it already has."
-        : "Balancing is off on this machine (AGENTSURFACE_NO_BALANCE), so the harness runs unwrapped.",
+    context.narrator.row(
+      "account",
+      `skipped · balancing off ${noBalance ? "for this launch" : "(AGENTSURFACE_NO_BALANCE)"}`,
     );
   } else {
-    context.narrator.detail(
-      account === undefined
-        ? "Asking agentusage which account has capacity."
-        : `Pinning the launch to ${account}; the swap tool still judges it.`,
-    );
+    if (account !== undefined) context.narrator.detail("pin", `${account} · still gated`);
     const balanced = await balanceSpec(context.env, spec, {
       account,
       model: routingModel,
@@ -345,14 +333,14 @@ async function finishLaunch(
     });
     launchSpec = balanced.spec;
     decision = balanced.decision;
-    context.narrator.say(describeAccount(balanced.decision));
+    context.narrator.row("account", describeAccount(balanced.decision));
   }
 
   if (!dryRun) {
-    context.narrator.say(`Launching: ${shellLine(launchSpec.command)}`);
+    context.narrator.row("launch", shellLine(launchSpec.command));
     return { kind: "launch", spec: launchSpec };
   }
-  context.narrator.say("Dry run, so nothing is launched; the command follows on stdout.");
+  context.narrator.row("dry run", "nothing launched · command on stdout");
   const data = {
     harness: spec.harness,
     session_id: spec.sessionId,
@@ -369,27 +357,28 @@ async function finishLaunch(
  * do, so it is narrated even when nothing was injected. */
 function narrateYolo(context: Context, spec: LaunchSpec, yolo: boolean, utility: boolean): void {
   if (!yolo) {
-    context.narrator.detail(`Yolo is off, so ${spec.harness} keeps its permission prompts.`);
+    context.narrator.detail("yolo", "off · permission prompts stay on");
     return;
   }
   if (utility) {
-    context.narrator.detail("Yolo is on, but a utility invocation never carries the flag.");
+    context.narrator.detail("yolo", "on · never applied to a utility invocation");
     return;
   }
   const injected = YOLO_FLAGS[spec.harness];
-  context.narrator.say(
+  context.narrator.row(
+    "yolo",
     spec.command.includes(injected)
-      ? `Yolo is on, so ${spec.harness} runs with ${injected}.`
-      : `Yolo is on for ${spec.harness}, but ${injected} was already forwarded, so nothing was added.`,
+      ? facts("on", injected)
+      : facts("on", `${injected} already forwarded`),
   );
 }
 
 function describeAccount(decision: BalanceDecision): string {
-  const where =
+  return facts(
     decision.route !== null
       ? `claude-swap slot ${decision.route.slot}`
-      : (decision.accountKey ?? "an account the swap tool picked");
-  const lease = decision.leaseId === null ? "" : ` on lease ${decision.leaseId}`;
-  const why = decision.reason === null ? "" : ` (${decision.reason})`;
-  return `Balanced onto ${where}${lease}${why}.`;
+      : (decision.accountKey ?? "chosen by the swap tool"),
+    decision.leaseId === null ? undefined : `lease ${decision.leaseId}`,
+    decision.reason ?? undefined,
+  );
 }

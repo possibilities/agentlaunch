@@ -197,7 +197,7 @@ async function runBalanceJson(
   argv: string[],
   narrator: Narrator,
 ): Promise<Record<string, unknown>> {
-  narrator.detail(`Running: ${shellLine(argv)}`);
+  narrator.detail("balance", shellLine(argv));
   const [bin, ...rest] = argv as [string, ...string[]];
   const resolved = Bun.which(bin);
   if (resolved === null) {

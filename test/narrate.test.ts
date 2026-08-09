@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createNarrator, shellLine, tildePath } from "../src/narrate.ts";
+import { createNarrator, facts, shellLine, tildePath } from "../src/narrate.ts";
 
 function collect(options: { silent: boolean; verbose: boolean }): {
   lines: string[];
@@ -11,27 +11,37 @@ function collect(options: { silent: boolean; verbose: boolean }): {
 }
 
 describe("createNarrator", () => {
-  test("says steps and withholds details by default", () => {
+  test("rows align on one column and details stay out by default", () => {
     const { lines, narrator } = collect({ silent: false, verbose: false });
-    narrator.say("Opening claude.");
-    narrator.detail("Resolved claude to /usr/bin/claude.");
-    expect(lines).toEqual(["Opening claude."]);
+    narrator.row("open", "claude");
+    narrator.row("dry run", "nothing launched");
+    narrator.detail("bin", "/usr/bin/claude");
+    expect(lines).toEqual(["open    claude", "dry run nothing launched"]);
     expect(narrator.verbose).toBe(false);
   });
 
-  test("verbose adds indented detail", () => {
+  test("verbose adds detail rows in the same shape", () => {
     const { lines, narrator } = collect({ silent: false, verbose: true });
-    narrator.say("Opening claude.");
-    narrator.detail("Resolved claude to /usr/bin/claude.");
-    expect(lines).toEqual(["Opening claude.", "  Resolved claude to /usr/bin/claude."]);
+    narrator.row("open", "claude");
+    narrator.detail("bin", "/usr/bin/claude");
+    expect(lines).toEqual(["open    claude", "bin     /usr/bin/claude"]);
   });
 
   test("silent withholds everything, even verbose detail", () => {
     const { lines, narrator } = collect({ silent: true, verbose: true });
-    narrator.say("Opening claude.");
-    narrator.detail("Resolved claude.");
+    narrator.row("open", "claude");
+    narrator.detail("bin", "/usr/bin/claude");
     expect(lines).toEqual([]);
     expect(narrator.verbose).toBe(false);
+  });
+});
+
+describe("facts", () => {
+  test("joins present facts and drops the absent ones", () => {
+    expect(facts("claude", "model fable")).toBe("claude · model fable");
+    expect(facts("claude", undefined, "effort max")).toBe("claude · effort max");
+    expect(facts("claude", "")).toBe("claude");
+    expect(facts(undefined, undefined)).toBe("");
   });
 });
 

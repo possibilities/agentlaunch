@@ -232,7 +232,9 @@ Worth repeating, because guessing here is expensive:
   `--json`; usage faults exit before a command runs and are never
   envelopes.
 - Narration goes to stderr, results to stdout (ADR 0007). stdout must stay
-  pipeable.
+  pipeable. The narrative is labelled rows (`label` padded to 8, then facts
+  joined by `·`) — never prose sentences, so it stays scannable as launch
+  features accumulate. A new launch-path feature adds a row.
 - `bun run check` is the commit gate; `bash scripts/smoke.sh` drives every
   documented command against a throwaway HOME with dry runs only, so it
   can never launch a real harness or spend a real account.

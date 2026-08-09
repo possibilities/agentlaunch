@@ -67,11 +67,11 @@ Yolo mode drops the harness's permission gates when the personal config
 --dangerously-bypass-approvals-and-sandbox, pi --approve. Utility
 invocations after -- (codex login, claude mcp, …) never get the flag.
 
-Every launch narrates its decisions to stderr before the harness starts —
-where it opens, whether yolo applied, which account balancing chose, and
-the final command. stdout stays the result, so --dry-run remains a
-runnable line and --json a parseable envelope (which silences the
-narrative). --x-verbose adds the mechanism behind each step.
+Every launch reports its decisions to stderr as labelled rows before the
+harness starts: open, cwd, yolo, account, launch. stdout stays the result,
+so --dry-run remains a runnable line and --json a parseable envelope
+(which silences the rows). --x-verbose adds mechanism rows: config,
+balance, session, bin, env.
 
 Examples:
   agentsurface open claude --model fable --effort max "fix the failing tests"
@@ -163,10 +163,11 @@ Rules
     refused balance (no capacity, stale observation, missing stack) is a
     domain error whose recovery names the fix — never a silent unbalanced
     launch.
-  - Every launch narrates its decisions to stderr before the harness
-    starts; --x-verbose adds mechanism. stdout carries only the result, so
-    a dry run stays pipeable. --json silences the narrative entirely,
-    because the envelope already says everything the story would.
+  - Every launch reports its decisions to stderr as "label value" rows
+    (open, cwd, yolo, account, launch); --x-verbose adds mechanism rows
+    (config, balance, session, bin, env). stdout carries only the result,
+    so a dry run stays pipeable. --json silences the rows entirely,
+    because the envelope already carries every fact they report.
   - Yolo: ~/.config/agentsurface/config.json ({"yolo": true} or a
     per-harness map) injects the permission-bypass flag at spec build —
     claude --dangerously-skip-permissions, codex

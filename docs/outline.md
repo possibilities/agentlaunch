@@ -141,18 +141,18 @@ the overlay, not edited once by hand.
 
 ## Launch narrative (R) — **built** (slice 4)
 
-Every open and resume tells its story on stderr before the harness starts:
-where it opens, whether yolo applied, which account balancing chose and
-agentusage's own reason for it, and the final command. `--x-verbose` adds
-mechanism (config consulted, `agentusage` argv, skip reasons, resolved
-binary, sentinel). stdout stays the result so `--dry-run` is still
-pipeable; `--json` silences the narrative because the envelope already
-carries every fact (ADR 0007).
+Every open and resume reports its decisions on stderr as labelled rows —
+`open`, `cwd`, `yolo`, `account`, `launch` — with agentusage's own reason
+carried through on the account row. `--x-verbose` adds mechanism rows
+(`config`, `balance`, `session`, `bin`, `env`). stdout stays the result so
+`--dry-run` is still pipeable; `--json` silences the rows because the
+envelope already carries every fact (ADR 0007).
 
 The point is legibility: bare `claude` now balances accounts and injects
-permission flags invisibly, and the story is what makes that inspectable
-without `--dry-run`. Each new launch-path feature should add a line —
-that is the extension point.
+permission flags invisibly, and the rows are what make that inspectable
+without `--dry-run`. Each new launch-path feature should add a row — that
+is the extension point. Rows, not prose: a label, then facts joined by
+`·`, so the output stays scannable as it grows.
 
 Naming settled here: `--x-*` is agentsurface's own controls, not
 surface-only. Surface flags will be a subset. Harness-shaped options

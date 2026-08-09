@@ -34,9 +34,9 @@ harnesses actually write, not from their documentation.
 - `config.ts` reads `~/.config/agentsurface/config.json` strictly — a
   malformed yolo config fails the launch rather than launching gated;
   only doctor downgrades that to a report.
-- `narrate.ts` is the launch story and the two helpers that shape it
-  (`tildePath`, `shellLine`). Everything it emits goes to stderr; nothing
-  in it may write stdout (ADR 0007).
+- `narrate.ts` is the launch narrative — labelled rows and the helpers
+  that shape them (`facts`, `tildePath`, `shellLine`). Everything it emits
+  goes to stderr; nothing in it may write stdout (ADR 0007).
 - `launch.ts` spawns a spec with inherited stdio and reports the child's
   exit as our own, spelling fatal signals as 128+n.
 - `commands.ts` returns either a launch or a printable result per command;
@@ -67,7 +67,8 @@ the adapters; append a new numbered record rather than editing an old one.
   `--x-verbose` are runner controls. Harness-shaped options (`--model`,
   `--effort`, `--name`, `--yolo`) stay unprefixed.
 - Narration goes to stderr and results go to stdout. A new step in a launch
-  path should say what it decided, not what it is about to try.
+  path adds one row saying what it decided, not what it is about to try;
+  rows are `label` + facts joined by `·`, never prose.
 - Pi is resumed with `--session <id>`; pi's `--resume` is a picker boolean.
   (cass emits the broken `pi --resume <id>` form — do not copy commands
   from it.)

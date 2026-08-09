@@ -138,7 +138,7 @@ if [[ "$(cat "$WORK/out")" != "claude --model fable --dangerously-skip-permissio
   cat "$WORK/out" >&2
   exit 1
 fi
-grep -q "Opening claude in " "$WORK/err" || { echo "FAIL: no narrative on stderr" >&2; exit 1; }
+grep -q "^open    claude · model fable$" "$WORK/err" || { echo "FAIL: no narrative on stderr" >&2; exit 1; }
 expect_exit 0 run open claude --dry-run --json --x-verbose
 if [[ -s "$WORK/err" ]]; then
   echo "FAIL: --json did not silence the narrative" >&2
@@ -146,6 +146,6 @@ if [[ -s "$WORK/err" ]]; then
   exit 1
 fi
 expect_exit 0 run open claude --dry-run --x-verbose
-grep -q "Config " "$WORK/err" || { echo "FAIL: --x-verbose printed no mechanism" >&2; exit 1; }
+grep -q "^config  " "$WORK/err" || { echo "FAIL: --x-verbose printed no mechanism" >&2; exit 1; }
 
 echo "smoke: all commands behaved"

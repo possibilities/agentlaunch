@@ -22,8 +22,8 @@ export async function launch(spec: LaunchSpec, narrator: Narrator): Promise<numb
       `install ${bin} or run agentsurface from a shell where it resolves`,
     );
   }
-  narrator.detail(`Resolved ${bin} to ${resolved}.`);
-  narrator.detail("Marking descendants with AGENTSURFACE_LAUNCH=1 so PATH shims do not re-enter.");
+  narrator.detail("bin", resolved);
+  narrator.detail("env", "AGENTSURFACE_LAUNCH=1 · PATH shims exec the real binary");
   const child = Bun.spawn([resolved, ...rest], {
     stdin: "inherit",
     stdout: "inherit",
