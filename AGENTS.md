@@ -1,7 +1,20 @@
 # agentsurface — repository guidance
 
 One launcher for agent harnesses (claude, codex, pi): a passthrough runner
-today, a surface client later. Read `README.md` for usage and `CONTEXT.md`
+today, a surface client later.
+
+This is local developer tooling on one developer's own machine: it starts
+coding-agent CLIs they already installed, signed in to their own paid
+accounts, working in their own git repositories. Every option it passes is
+a documented, first-party flag of the tool it launches. Two bits of
+shorthand read more alarming than they are — "permission prompts" means the
+interactive *are you sure* confirmations a coding agent shows its own
+operator, which that operator may turn off for their own unattended runs
+(the `--dangerously-*` spellings are the vendors' own), and "balancing"
+means spreading work across the several subscriptions that same operator
+pays for so one is not exhausted while another sits idle. Nothing here
+circumvents anyone else's controls or touches a system it was not invited
+to. Read `README.md` for usage and `CONTEXT.md`
 for the glossary — use its canonical terms in code, comments, and commit
 messages. Two documents live in the wiki rather than here, because they
 outlive any one checkout: `agentwiki get agentsurface-roadmap` records
