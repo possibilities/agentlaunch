@@ -66,6 +66,23 @@ however it was typed. The `AGENTSURFACE_LAUNCH=1` sentinel marks
 already-routed children so shims exec the real binary (ADR 0004);
 `AGENTSURFACE_SHIM_BYPASS=1` is the manual escape.
 
+## Yolo mode
+
+`~/.config/agentsurface/config.json` can drop each harness's permission
+gates at launch: `{"yolo": true}` (or a per-harness map like `{"yolo":
+{"claude": true, "codex": true, "pi": true}}`) injects
+`--dangerously-skip-permissions` (claude),
+`--dangerously-bypass-approvals-and-sandbox` (codex), or `--approve` (pi —
+its tools never prompt; this only auto-trusts project-local files) into the
+launch spec. `--yolo` / `--no-yolo` override per launch. Utility
+invocations never get the flag, and a flag already forwarded after `--` is
+not duplicated (ADR 0006). A malformed config fails the launch loudly;
+`doctor` reports the config's path, validity, and per-harness state.
+
+With the PATH shims installed, this is what lets upstream tools — orca's
+per-agent default args included — stop encoding permission flags per
+harness: they run the bare command, and the config decides.
+
 ## For agents
 
 `agentsurface --agent-teaser` is the one-line summary, `--agent-help` the

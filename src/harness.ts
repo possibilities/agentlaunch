@@ -25,6 +25,7 @@ export interface OpenRequest {
   effort?: string | undefined;
   name?: string | undefined;
   prompt?: string | undefined;
+  yolo?: boolean | undefined;
   passthrough: string[];
 }
 
@@ -42,8 +43,32 @@ const RUN_NAMES_SUPPORTED: Record<HarnessName, boolean> = {
   pi: true,
 };
 
+/** One flag per harness that drops its permission gates. Pi has no gates
+ * on tools at all; --approve only auto-trusts project-local files. */
+const YOLO_FLAGS: Record<HarnessName, string> = {
+  claude: "--dangerously-skip-permissions",
+  codex: "--dangerously-bypass-approvals-and-sandbox",
+  pi: "--approve",
+};
+
+/** Yolo never touches a utility invocation (`codex login` would reject the
+ * flag, and a flag ahead of the word would defeat first-token
+ * classification) and never duplicates a flag the caller already
+ * forwarded. */
+function yoloArguments(
+  harness: HarnessName,
+  yolo: boolean | undefined,
+  argvWithoutYolo: string[],
+): string[] {
+  if (yolo !== true) return [];
+  if (utilityInvocation(harness, argvWithoutYolo)) return [];
+  const flag = YOLO_FLAGS[harness];
+  if (argvWithoutYolo.includes(flag)) return [];
+  return [flag];
+}
+
 export function buildOpen(harness: HarnessName, request: OpenRequest): LaunchSpec {
-  const { model, effort, name, prompt, passthrough } = request;
+  const { model, effort, name, prompt, passthrough, yolo } = request;
   if (effort !== undefined && !EFFORT_LEVELS[harness].includes(effort)) {
     throw new UsageError(
       `${harness} effort must be one of ${EFFORT_LEVELS[harness].join(", ")} (got "${effort}")`,
@@ -52,18 +77,18 @@ export function buildOpen(harness: HarnessName, request: OpenRequest): LaunchSpe
   if (name !== undefined && !RUN_NAMES_SUPPORTED[harness]) {
     throw new UsageError(`${harness} does not support run names; omit --name`);
   }
-  const command: string[] = [harness];
-  if (model !== undefined) command.push("--model", model);
+  const own: string[] = [];
+  if (model !== undefined) own.push("--model", model);
   if (effort !== undefined) {
-    if (harness === "claude") command.push("--effort", effort);
+    if (harness === "claude") own.push("--effort", effort);
     // Codex has no effort flag; only the TOML config override reaches it.
-    if (harness === "codex") command.push("-c", `model_reasoning_effort="${effort}"`);
-    if (harness === "pi") command.push("--thinking", effort);
+    if (harness === "codex") own.push("-c", `model_reasoning_effort="${effort}"`);
+    if (harness === "pi") own.push("--thinking", effort);
   }
-  if (name !== undefined) command.push("--name", name);
-  command.push(...passthrough);
+  if (name !== undefined) own.push("--name", name);
   // The prompt stays last so passthrough flags cannot capture it as a value.
-  if (prompt !== undefined) command.push(prompt);
+  const tail = prompt === undefined ? [...passthrough] : [...passthrough, prompt];
+  const command = [harness, ...own, ...yoloArguments(harness, yolo, [...own, ...tail]), ...tail];
   return { harness, command, sessionId: null };
 }
 
@@ -145,15 +170,19 @@ export function buildResume(
   harness: HarnessName,
   sessionId: string,
   passthrough: string[],
+  yolo = false,
 ): LaunchSpec {
   // Pi's --resume is a boolean that opens a picker; --session is its by-id
   // spelling. Emitting pi --resume <id> would strand the id as a prompt.
-  const command =
+  const base =
     harness === "claude"
-      ? ["claude", "--resume", sessionId, ...passthrough]
+      ? ["claude", "--resume", sessionId]
       : harness === "codex"
-        ? ["codex", "resume", sessionId, ...passthrough]
-        : ["pi", "--session", sessionId, ...passthrough];
+        ? ["codex", "resume", sessionId]
+        : ["pi", "--session", sessionId];
+  const flag = YOLO_FLAGS[harness];
+  const inject = yolo && !passthrough.includes(flag);
+  const command = [...base, ...(inject ? [flag] : []), ...passthrough];
   return { harness, command, sessionId };
 }
 

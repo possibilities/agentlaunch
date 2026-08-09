@@ -96,7 +96,50 @@ describe("surface", () => {
       command: ["claude", "--model", "fable", "--effort", "max", "fix the tests"],
       balance: null,
       utility: false,
+      yolo: false,
     });
+  });
+
+  test("config-file yolo injects the flag and per-launch flags override", () => {
+    const root = mkdtempSync(join(tmpdir(), "agentsurface-yolo-"));
+    roots.push(root);
+    const home = join(root, "home");
+    mkdirSync(join(home, ".config", "agentsurface"), { recursive: true });
+    writeFileSync(
+      join(home, ".config", "agentsurface", "config.json"),
+      JSON.stringify({ yolo: { claude: true } }),
+    );
+    const on = run(["open", "claude", "--dry-run", "--json"], { HOME: home });
+    expect(envelope(on).data?.["command"]).toEqual(["claude", "--dangerously-skip-permissions"]);
+    expect(envelope(on).data?.["yolo"]).toBe(true);
+    const off = run(["open", "claude", "--no-yolo", "--dry-run", "--json"], { HOME: home });
+    expect(envelope(off).data?.["command"]).toEqual(["claude"]);
+    const forced = run(["open", "pi", "--yolo", "--dry-run", "--json"]);
+    expect(envelope(forced).data?.["command"]).toEqual(["pi", "--approve"]);
+    const both = run(["open", "pi", "--yolo", "--no-yolo", "--dry-run"]);
+    expect(both.code).toBe(2);
+  });
+
+  test("utility invocations stay bare under yolo", () => {
+    const result = run(["open", "codex", "--yolo", "--dry-run", "--json", "--", "login"]);
+    const parsed = envelope(result);
+    expect(parsed.data?.["command"]).toEqual(["codex", "login"]);
+    expect(parsed.data?.["utility"]).toBe(true);
+  });
+
+  test("a malformed config fails the launch and doctor reports it", () => {
+    const root = mkdtempSync(join(tmpdir(), "agentsurface-badconf-"));
+    roots.push(root);
+    const home = join(root, "home");
+    mkdirSync(join(home, ".config", "agentsurface"), { recursive: true });
+    writeFileSync(join(home, ".config", "agentsurface", "config.json"), "not json");
+    const launch = run(["open", "claude", "--dry-run", "--json"], { HOME: home });
+    expect(launch.code).toBe(1);
+    expect(envelope(launch).error?.code).toBe("config_invalid");
+    const doctor = run(["doctor", "--json"], { HOME: home });
+    expect(doctor.code).toBe(0);
+    const config = envelope(doctor).data?.["config"] as { valid: boolean };
+    expect(config.valid).toBe(false);
   });
 
   test("open --dry-run without --json prints a shell line", () => {

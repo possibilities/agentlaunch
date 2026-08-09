@@ -46,18 +46,25 @@ Options:
                        pi      off|minimal|low|medium|high|xhigh|max
                      (spelled --thinking on pi, -c model_reasoning_effort= on codex)
   --name <name>      Run name; claude and pi only, codex is refused
+  --yolo, --no-yolo  Override the config's yolo (permission bypass) default
   --x-account <sel>  Pin the balanced launch to one account (claude: route or
                      cN; codex/pi: account key or email) — still gated
   --x-no-balance     Launch unbalanced (raw harness command, no account pick)
   --dry-run          Print the command instead of launching; balances without
                      reserving or claiming anything
   --json             With --dry-run, print the envelope (data: harness,
-                     session_id, cwd, command, balance)
+                     session_id, cwd, command, balance, utility, yolo)
 
 Launches are balanced by default: agentusage picks the account and the
 command is wrapped as cswap run <slot> --share-history -- … (claude) or
 codex-swap [pi] run --claim <lease> -- … (codex, pi). Set
 AGENTSURFACE_NO_BALANCE=1 to default a machine to unbalanced.
+
+Yolo mode drops the harness's permission gates when the personal config
+(~/.config/agentsurface/config.json) enables it: claude
+--dangerously-skip-permissions, codex
+--dangerously-bypass-approvals-and-sandbox, pi --approve. Utility
+invocations after -- (codex login, claude mcp, …) never get the flag.
 
 Examples:
   agentsurface open claude --model fable --effort max "fix the failing tests"
@@ -72,10 +79,13 @@ errors that say which harnesses matched.
 
 Options:
   --harness <name>   claude|codex|pi — skip store detection
+  --yolo, --no-yolo  Override the config's yolo (permission bypass) default
   --x-account <sel>  Pin the balanced launch to one account
   --x-no-balance     Launch unbalanced (raw harness command)
   --dry-run          Print the command instead of launching
   --json             With --dry-run, print the envelope
+
+Resumes inject yolo exactly like opens, from the same config.
 
 Resumes balance like opens: cross-account resume is safe because claude
 launches share history (--share-history), codex keeps one canonical
@@ -95,7 +105,9 @@ by-id resume.
 
 Report, per harness: the binary on PATH, the session store root, whether it
 exists, how many sessions it holds, and whether a relocating env override
-(CLAUDE_CONFIG_DIR, CODEX_HOME, PI_CODING_AGENT_DIR) is active.
+(CLAUDE_CONFIG_DIR, CODEX_HOME, PI_CODING_AGENT_DIR) is active. Also the
+personal config (~/.config/agentsurface/config.json): its path, validity,
+and per-harness yolo state.
 `,
   help: `agentsurface help [command]
 
@@ -116,9 +128,11 @@ What it is
 
 Commands
   agentsurface open <harness> [prompt] [--model <m>] [--effort <level>]
-                    [--name <n>] [--dry-run [--json]] [-- <harness args>]
+                    [--name <n>] [--yolo|--no-yolo] [--dry-run [--json]]
+                    [-- <harness args>]
   agentsurface resume <session-id> [--harness claude|codex|pi]
-                    [--dry-run [--json]] [-- <harness args>]
+                    [--yolo|--no-yolo] [--dry-run [--json]]
+                    [-- <harness args>]
   agentsurface doctor [--json]
 
 Rules
@@ -141,9 +155,16 @@ Rules
     refused balance (no capacity, stale observation, missing stack) is a
     domain error whose recovery names the fix — never a silent unbalanced
     launch.
+  - Yolo: ~/.config/agentsurface/config.json ({"yolo": true} or a
+    per-harness map) injects the permission-bypass flag at spec build —
+    claude --dangerously-skip-permissions, codex
+    --dangerously-bypass-approvals-and-sandbox, pi --approve. --yolo /
+    --no-yolo override per launch. Utility invocations and flags already
+    present after -- are never double-flagged. A malformed config fails
+    the launch (config_invalid); doctor reports it instead.
   - --dry-run prints the command instead of launching; add --json for the
     {schema_version, ok, error, data} envelope whose data carries
-    {harness, session_id, cwd, command, balance}. Dry runs balance without
+    {harness, session_id, cwd, command, balance, utility, yolo}. Dry runs balance without
     reserving: codex/pi print the --account spelling since no lease was
     claimed. --json without --dry-run on a launch command is a usage fault,
     because launching is interactive.

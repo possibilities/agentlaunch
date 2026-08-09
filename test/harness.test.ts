@@ -136,6 +136,79 @@ describe("utilityInvocation", () => {
   });
 });
 
+describe("yolo", () => {
+  test("open injects the per-harness flag between our flags and passthrough", () => {
+    expect(
+      buildOpen("claude", {
+        model: "fable",
+        yolo: true,
+        passthrough: ["--permission-mode", "plan"],
+      }).command,
+    ).toEqual([
+      "claude",
+      "--model",
+      "fable",
+      "--dangerously-skip-permissions",
+      "--permission-mode",
+      "plan",
+    ]);
+    expect(buildOpen("codex", { yolo: true, passthrough: [] }).command).toEqual([
+      "codex",
+      "--dangerously-bypass-approvals-and-sandbox",
+    ]);
+    expect(buildOpen("pi", { yolo: true, passthrough: [] }).command).toEqual(["pi", "--approve"]);
+  });
+
+  test("resume injects after the session reference", () => {
+    expect(buildResume("claude", "abc-123", [], true).command).toEqual([
+      "claude",
+      "--resume",
+      "abc-123",
+      "--dangerously-skip-permissions",
+    ]);
+    expect(buildResume("codex", "abc-123", [], true).command).toEqual([
+      "codex",
+      "resume",
+      "abc-123",
+      "--dangerously-bypass-approvals-and-sandbox",
+    ]);
+    expect(buildResume("pi", "abc-123", [], true).command).toEqual([
+      "pi",
+      "--session",
+      "abc-123",
+      "--approve",
+    ]);
+  });
+
+  test("utility invocations never get the flag", () => {
+    expect(
+      buildOpen("codex", { yolo: true, passthrough: ["login", "--device-auth"] }).command,
+    ).toEqual(["codex", "login", "--device-auth"]);
+    expect(buildOpen("claude", { yolo: true, passthrough: ["mcp", "list"] }).command).toEqual([
+      "claude",
+      "mcp",
+      "list",
+    ]);
+  });
+
+  test("an already-forwarded flag is not duplicated", () => {
+    expect(
+      buildOpen("claude", { yolo: true, passthrough: ["--dangerously-skip-permissions"] }).command,
+    ).toEqual(["claude", "--dangerously-skip-permissions"]);
+    expect(buildResume("pi", "abc", ["--approve"], true).command).toEqual([
+      "pi",
+      "--session",
+      "abc",
+      "--approve",
+    ]);
+  });
+
+  test("yolo off or absent injects nothing", () => {
+    expect(buildOpen("claude", { yolo: false, passthrough: [] }).command).toEqual(["claude"]);
+    expect(buildResume("codex", "abc", []).command).toEqual(["codex", "resume", "abc"]);
+  });
+});
+
 describe("sessionStore", () => {
   const home = "/home/user";
 

@@ -111,4 +111,24 @@ expect_exit 0 run_balanced open claude --x-no-balance --dry-run
 expect_out "claude"
 expect_exit 2 run_balanced open claude --x-account c1 --x-no-balance --dry-run
 
+# Yolo mode from the personal config, dry runs only
+mkdir -p "$WORK/home/.config/agentsurface"
+printf '{"yolo":{"claude":true,"codex":true,"pi":true}}\n' >"$WORK/home/.config/agentsurface/config.json"
+expect_exit 0 run open claude --dry-run
+expect_out "claude --dangerously-skip-permissions"
+expect_exit 0 run open codex --dry-run
+expect_out "codex --dangerously-bypass-approvals-and-sandbox"
+expect_exit 0 run open pi --dry-run
+expect_out "pi --approve"
+expect_exit 0 run resume "$SESSION_ID" --dry-run
+expect_out "claude --resume $SESSION_ID --dangerously-skip-permissions"
+expect_exit 0 run open claude --no-yolo --dry-run
+if grep -q -- "--dangerously" "$WORK/out"; then
+  echo "FAIL: --no-yolo still injected the flag" >&2
+  exit 1
+fi
+expect_exit 0 run open codex --dry-run -- login
+expect_out "codex login"
+expect_exit 2 run open pi --yolo --no-yolo --dry-run
+
 echo "smoke: all commands behaved"

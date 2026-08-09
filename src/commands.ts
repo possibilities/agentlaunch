@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { type BalanceDecision, balanceDisabled, balanceSpec } from "./balance.ts";
+import { configPath, loadConfig } from "./config.ts";
 import { CliError, UsageError } from "./errors.ts";
 import type { ParsedFlags } from "./flags.ts";
 import type { HarnessName, LaunchSpec } from "./harness.ts";
@@ -37,16 +38,24 @@ export async function openCommand(
     throw new UsageError("open takes at most one prompt; quote it, and put harness flags after --");
   }
   const harness = parseHarnessName(harnessName);
+  const yolo = resolveYolo(context, flags, harness);
   const spec = buildOpen(harness, {
     model: flags.values["model"],
     effort: flags.values["effort"],
     name: flags.values["name"],
     prompt,
+    yolo,
     passthrough,
   });
   // Shimmed launches carry their model in the passthrough, not our flag;
   // routing must see it either way.
-  return finishLaunch(context, flags, spec, flags.values["model"] ?? modelFromArgs(passthrough));
+  return finishLaunch(
+    context,
+    flags,
+    spec,
+    flags.values["model"] ?? modelFromArgs(passthrough),
+    yolo,
+  );
 }
 
 /** First --model value in forwarded args, either spelling; else undefined. */
@@ -98,7 +107,26 @@ export async function resumeCommand(
     sessionPath = first.path;
   }
   const model = await resumeRoutingModel(context, harness, sessionId, sessionPath, passthrough);
-  return finishLaunch(context, flags, buildResume(harness, sessionId, passthrough), model);
+  const yolo = resolveYolo(context, flags, harness);
+  return finishLaunch(
+    context,
+    flags,
+    buildResume(harness, sessionId, passthrough, yolo),
+    model,
+    yolo,
+  );
+}
+
+/** Per-launch flags beat the config; the config file decides the default.
+ * Explicit flags also skip the config read, so --no-yolo (and --yolo) still
+ * work while the file is malformed. */
+function resolveYolo(context: Context, flags: ParsedFlags, harness: HarnessName): boolean {
+  const on = flags.bools.has("yolo");
+  const off = flags.bools.has("no-yolo");
+  if (on && off) throw new UsageError("--yolo conflicts with --no-yolo; pick one");
+  if (on) return true;
+  if (off) return false;
+  return loadConfig(context.env, context.home).yolo[harness];
 }
 
 /**
@@ -162,7 +190,46 @@ export async function doctorCommand(context: Context, flags: ParsedFlags): Promi
       `  env    ${store.override} ${store.overrideActive ? "(active)" : "(not set)"}`,
     );
   }
-  return { kind: "result", data: { harnesses: reports }, human: lines.join("\n") };
+  const config = configReport(context);
+  lines.push(
+    "config",
+    `  path   ${config.path} ${config.exists ? "" : "(missing)"}`.trimEnd(),
+    config.valid
+      ? `  yolo   ${HARNESS_NAMES.map((h) => `${h} ${config.yolo?.[h] ? "on" : "off"}`).join(", ")}`
+      : `  yolo   INVALID: ${config.error}`,
+  );
+  return { kind: "result", data: { harnesses: reports, config }, human: lines.join("\n") };
+}
+
+interface ConfigReport {
+  path: string;
+  exists: boolean;
+  valid: boolean;
+  yolo: Record<HarnessName, boolean> | null;
+  error: string | null;
+}
+
+/** Doctor reports a malformed config instead of dying on it — diagnosis is
+ * its whole job. */
+function configReport(context: Context): ConfigReport {
+  try {
+    const config = loadConfig(context.env, context.home);
+    return {
+      path: config.path,
+      exists: config.exists,
+      valid: true,
+      yolo: config.yolo,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      path: configPath(context.env, context.home),
+      exists: true,
+      valid: false,
+      yolo: null,
+      error: (error as Error).message,
+    };
+  }
 }
 
 async function finishLaunch(
@@ -170,6 +237,7 @@ async function finishLaunch(
   flags: ParsedFlags,
   spec: LaunchSpec,
   routingModel: string | undefined,
+  yolo: boolean,
 ): Promise<Outcome> {
   const dryRun = flags.bools.has("dry-run");
   if (flags.bools.has("json") && !dryRun) {
@@ -211,6 +279,7 @@ async function finishLaunch(
     command: launchSpec.command,
     balance: decision,
     utility,
+    yolo,
   };
   return { kind: "result", data, human: shellLine(launchSpec.command) };
 }

@@ -28,6 +28,9 @@ harnesses actually write, not from their documentation.
   (ADR 0003): shells `agentusage balance --json`, wraps with cswap /
   codex-swap [pi] run, never edits the harness argv after the wrapper's
   `--`.
+- `config.ts` reads `~/.config/agentsurface/config.json` strictly — a
+  malformed yolo config fails the launch rather than launching gated;
+  only doctor downgrades that to a report.
 - `launch.ts` spawns a spec with inherited stdio and reports the child's
   exit as our own, spelling fatal signals as 128+n.
 - `commands.ts` returns either a launch or a printable result per command;
