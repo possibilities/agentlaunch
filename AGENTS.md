@@ -3,10 +3,13 @@
 One launcher for agent harnesses (claude, codex, pi): a passthrough runner
 today, a surface client later. Read `README.md` for usage and `CONTEXT.md`
 for the glossary — use its canonical terms in code, comments, and commit
-messages. `docs/outline.md` is the roadmap and records which slices exist;
-`docs/context.md` is the companion dump of what building them taught —
-harness asymmetries, the account stack, Orca's internals, and how each was
-verified. Read it before the next slice.
+messages. Two documents live in the wiki rather than here, because they
+outlive any one checkout: `agentwiki get agentsurface-roadmap` records
+which slices exist and what is next, and `agentwiki get
+agentsurface-build-context` is the companion dump of what building them
+taught — harness asymmetries, the account stack, Orca's internals, and how
+each fact was verified. Read both before the next slice, and update them
+there when a slice lands.
 
 ## Commands
 
