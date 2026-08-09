@@ -20,7 +20,7 @@
     "format": "biome check --write src test scripts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "generate:schema": "bun run scripts/generate-schema.ts && biome check --write catalog.schema.json",
+    "generate:schemas": "bun run scripts/generate-schema.ts && biome check --write catalog.schema.json config.schema.json",
     "check": "bun run lint && bun run typecheck && bun run test"
   },
   "devDependencies": {

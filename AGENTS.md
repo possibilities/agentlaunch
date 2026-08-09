@@ -44,11 +44,13 @@ the harnesses actually write, not from their documentation.
   utility-invocation classification (ADR 0005), and session store
   locations with their relocating env vars. Every harness asymmetry lives
   here and nowhere else.
-- `catalog-schema.ts` is the catalog's zod source of truth (fleet
-  conventions: strict objects, every field described, `$schema` stripped
-  by the loader); `scripts/generate-schema.ts` emits `catalog.schema.json`
-  from it, `bun run generate:schema` regenerates, and a drift test fails
-  when the checked-in file lags.
+- `catalog-schema.ts` and `config-schema.ts` are the zod sources of truth
+  for the two user-editable files (fleet conventions: strict objects, every
+  field described, no `.default()`, `$schema` stripped by the loader);
+  `scripts/generate-schema.ts` emits `catalog.schema.json` and
+  `config.schema.json` from them, `bun run generate:schemas` regenerates,
+  and a drift test per file fails when a checked-in file lags. Both
+  published files are build artifacts — edit the zod, never the JSON.
 - `catalog.ts` loads the built-in or custom catalog (replacement, never
   merge), expands families into per-harness offerings, validates the
   cross-entry invariants where they are declared, and resolves
@@ -60,10 +62,11 @@ the harnesses actually write, not from their documentation.
   (ADR 0003): shells `agentusage balance --json`, wraps with cswap /
   codex-swap [pi] run, never edits the harness argv after the wrapper's
   `--`.
-- `config.ts` reads `~/.config/agentsurface/config.json` strictly — yolo
-  defaults on (ADR 0009), and a malformed disabling config fails the
-  launch rather than launching with the gates down; only x-doctor
-  downgrades that to a report.
+- `config.ts` reads `~/.config/agentsurface/config.json`, validating it
+  with `config-schema.ts` — yolo defaults on (ADR 0009), and a malformed
+  disabling config fails the launch rather than launching with the gates
+  down; only x-doctor downgrades that to a report. The defaults live in the
+  loader, not the schema, so an omitted key survives the parse as omitted.
 - `narrate.ts` is the launch narrative — labelled rows and the helpers
   that shape them (`facts`, `tildePath`, `shellLine`). Everything it emits
   goes to stderr; nothing in it may write stdout (ADR 0007).

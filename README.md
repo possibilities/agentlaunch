@@ -43,7 +43,7 @@ ambiguous. `--x-dry-run` prints the command instead of launching; add
 harnesses, their models, and their effort sets (ADR 0010); a custom
 `~/.config/agentsurface/catalog.json` replaces it outright — no merging.
 `catalog.schema.json` describes the file for editors, generated from the
-zod source of truth (`bun run generate:schema`).
+zod source of truth (`bun run generate:schemas`).
 
 - **Families** define a model list once: the `gpt` family is included as-is
   by codex and through the `openai-codex` provider by pi, so `gpt-5.6`
@@ -86,7 +86,9 @@ already forwarded is never duplicated (pi's `-a` alias included), pi's own
 flag. A malformed config fails the launch loudly; `x-doctor` reports the
 config's path, validity, and per-harness state. `config.schema.json` in
 this repo describes the file for editors — name it in a `"$schema"` key,
-which the loader accepts and ignores.
+which the loader accepts and ignores — and is generated from the same zod
+schema the loader validates with (`bun run generate:schemas`), so what it
+documents is what the launcher accepts.
 
 With the PATH shims installed, this is what lets upstream tools — orca's
 per-agent default args included — stop encoding permission flags per
