@@ -115,5 +115,7 @@ harness's own code.
     bash scripts/smoke.sh  # every documented command against a throwaway HOME
 
 `AGENTS.md` carries repository guidance, `CONTEXT.md` the glossary,
-`docs/adr/` the load-bearing decisions, and `docs/outline.md` the roadmap of
-slices built and pending.
+`docs/adr/` the load-bearing decisions, `docs/outline.md` the roadmap of
+slices built and pending, and `docs/context.md` what building them taught
+— harness asymmetries, the account stack, Orca's internals, and how each
+fact was verified.

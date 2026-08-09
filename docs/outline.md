@@ -4,6 +4,12 @@ The original feature outline, enriched with what building each slice
 taught us. R = runner-level (no surface needed), S = needs a surface.
 One slice at a time; status lives here.
 
+Built so far: slice 1 the runner (open, resume, doctor), slice 2 account
+balancing on by default, slice 3 yolo mode, slice 4 the launch narrative.
+Everything below that is not marked built is still ahead. `docs/context.md`
+is the companion dump — the facts and gotchas behind these entries, for
+whoever builds the next slice.
+
 ## Open harness in place (R) — **built** (slice 1)
 
 `agentsurface open <harness> [prompt] [--model m] [--effort e] [--name n]
@@ -133,6 +139,25 @@ those three entries empty, which is what keeps the removal durable — Orca
 rewrites its own state file constantly, so the value has to be owned by
 the overlay, not edited once by hand.
 
+## Launch narrative (R) — **built** (slice 4)
+
+Every open and resume tells its story on stderr before the harness starts:
+where it opens, whether yolo applied, which account balancing chose and
+agentusage's own reason for it, and the final command. `--x-verbose` adds
+mechanism (config consulted, `agentusage` argv, skip reasons, resolved
+binary, sentinel). stdout stays the result so `--dry-run` is still
+pipeable; `--json` silences the narrative because the envelope already
+carries every fact (ADR 0007).
+
+The point is legibility: bare `claude` now balances accounts and injects
+permission flags invisibly, and the story is what makes that inspectable
+without `--dry-run`. Each new launch-path feature should add a line —
+that is the extension point.
+
+Naming settled here: `--x-*` is agentsurface's own controls, not
+surface-only. Surface flags will be a subset. Harness-shaped options
+(`--model`, `--effort`, `--name`, `--yolo`) stay unprefixed.
+
 ## Chat bus (S) — unexplored
 
 Nothing learned yet. Orca's orchestration (threaded messages, ask/reply)
@@ -165,16 +190,39 @@ Steering/queuing, dismissing dialogs, resuming when quota available.
 Surface-side terminal control (Orca can read/wait/send terminals today) is
 the likely mechanism; quota-resume should key off agentusage observations.
 
+- **Trust dialog avoidance.** A harness opening an unfamiliar directory
+  asks whether to trust it before it will do anything, and a launch that
+  stops on that prompt is a launch nobody is watching. Distinct from yolo
+  (slice 3): yolo drops *tool* permission gates, while trust is about the
+  *workspace*, and each harness gates it differently — codex has hook
+  trust and `--dangerously-bypass-approvals-and-sandbox` (which covers
+  approvals, not necessarily first-run workspace trust), claude skips its
+  workspace-trust dialog only in non-interactive mode, and pi's
+  `--approve` is exactly a project-local trust decision, which is why pi's
+  yolo already covers most of this. Worth auditing per harness: which
+  dialog can be pre-answered by a flag, which by seeding state on disk,
+  and which only by answering it on the surface. The ones that can be
+  pre-answered belong in the runner beside yolo; the rest are surface
+  control.
+
 ## Suggested slice order (recommendation)
 
-1. **Open on surface, minimal** — the `--x-*` envelope and an Orca backend
+1. **Trust dialog avoidance** — small, runner-shaped, and the last thing
+   between an unattended launch and a stuck one. Audit first; the answer
+   may be one flag per harness beside yolo.
+2. **Open on surface, minimal** — the `--x-*` envelope and an Orca backend
    for `open`; unlocks everything else that is surface-shaped.
-2. **Resume on surface** — closes the outline's "resuming (R+S)" item by
+3. **Resume on surface** — closes the outline's "resuming (R+S)" item by
    reusing slice 1's resolution plus the new landing path.
-3. **Status** — runner-level signals first (claude session registry,
+4. **Status** — runner-level signals first (claude session registry,
    store mtimes), surfaced through the same envelope.
-4. **Swap-aware claude resume** — small, independent; scan cswap profile
+5. **Swap-aware claude resume** — small, independent; scan cswap profile
    roots when detection misses (mostly moot while balanced claude
    launches share history).
-5. Run names on surface, land, controlling agents, chat bus — as usage
+6. Run names on surface, land, controlling agents, chat bus — as usage
    demands.
+
+Two loose ends that are not slices: the spark lane still refuses
+(`no-spark-capacity`) until a spark 5h window is ever observed, and
+`funk configure-orca` is parked on one manual run (quit Orca once) to
+apply the emptied `agentDefaultArgs`.
