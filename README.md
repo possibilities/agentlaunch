@@ -52,6 +52,12 @@ refused balance (no capacity, stale observations, missing tools) fails the
 launch loudly with a recovery — never a silent unbalanced launch. Dry runs
 balance without reserving or claiming anything.
 
+On this machine, bare `claude`/`codex`/`pi` are funk-installed PATH shims
+that exec `agentsurface open <harness> -- "$@"` — every launch balances
+however it was typed. The `AGENTSURFACE_LAUNCH=1` sentinel marks
+already-routed children so shims exec the real binary (ADR 0004);
+`AGENTSURFACE_SHIM_BYPASS=1` is the manual escape.
+
 ## For agents
 
 `agentsurface --agent-teaser` is the one-line summary, `--agent-help` the

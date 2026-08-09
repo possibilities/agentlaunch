@@ -377,3 +377,26 @@ describe("compose units", () => {
     expect(normalizePiModel("pi", undefined)).toBeUndefined();
   });
 });
+
+describe("shim support", () => {
+  test("a passthrough --model drives routing when the flag is absent", () => {
+    const world = makeWorld();
+    const result = run(world, ["open", "claude", "--dry-run", "--", "--model", "fable", "-p"]);
+    expect(result.code).toBe(0);
+    expect(balanceCalls(world)).toEqual(["balance claude --json --model fable --dry-run"]);
+  });
+
+  test("real launches carry the AGENTSURFACE_LAUNCH sentinel", () => {
+    const world = makeWorld();
+    const probe = join(world.binDir, "claude");
+    const out = join(world.root, "sentinel.txt");
+    writeFileSync(
+      probe,
+      `#!/usr/bin/env bash\nprintf '%s' "\${AGENTSURFACE_LAUNCH:-unset}" > ${JSON.stringify(out)}\n`,
+    );
+    chmodSync(probe, 0o755);
+    const result = run(world, ["open", "claude", "--x-no-balance"]);
+    expect(result.code).toBe(0);
+    expect(readFileSync(out, "utf8")).toBe("1");
+  });
+});

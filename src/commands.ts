@@ -43,7 +43,19 @@ export async function openCommand(
     prompt,
     passthrough,
   });
-  return finishLaunch(context, flags, spec, flags.values["model"]);
+  // Shimmed launches carry their model in the passthrough, not our flag;
+  // routing must see it either way.
+  return finishLaunch(context, flags, spec, flags.values["model"] ?? modelFromArgs(passthrough));
+}
+
+/** First --model value in forwarded args, either spelling; else undefined. */
+function modelFromArgs(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--model") return args[i + 1];
+    if (arg.startsWith("--model=")) return arg.slice("--model=".length);
+  }
+  return undefined;
 }
 
 export async function resumeCommand(
@@ -102,11 +114,8 @@ async function resumeRoutingModel(
   sessionPath: string | null,
   passthrough: string[],
 ): Promise<string | undefined> {
-  for (let i = 0; i < passthrough.length; i++) {
-    const arg = passthrough[i]!;
-    if (arg === "--model") return passthrough[i + 1];
-    if (arg.startsWith("--model=")) return arg.slice("--model=".length);
-  }
+  const explicit = modelFromArgs(passthrough);
+  if (explicit !== undefined) return explicit;
   if (harness !== "claude") return undefined;
   const path =
     sessionPath ??

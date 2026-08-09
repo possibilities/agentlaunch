@@ -25,6 +25,9 @@ export async function launch(spec: LaunchSpec): Promise<number> {
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",
+    // The sentinel marks every descendant as already-routed: PATH shims
+    // exec the real harness instead of re-entering agentsurface (ADR 0004).
+    env: { ...process.env, AGENTSURFACE_LAUNCH: "1" },
   });
   // The terminal delivers Ctrl-C to the whole foreground group; swallowing
   // our copy keeps the wrapper alive so the harness decides what an
