@@ -1,0 +1,165 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import packageDefinition from "../package.json";
+import type { Envelope } from "../src/envelope.ts";
+import { VERSION } from "../src/help.ts";
+
+const MAIN = join(import.meta.dir, "..", "src", "main.ts");
+const SESSION_ID = "05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60";
+
+let roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
+  roots = [];
+});
+
+interface RunResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+}
+
+/** Every spawn gets a private HOME and empty session stores, so no test can
+ * see this machine's real sessions — or launch a real harness. */
+function run(args: string[], extraEnv: Record<string, string> = {}, cwd?: string): RunResult {
+  const root = mkdtempSync(join(tmpdir(), "agentsurface-cli-"));
+  roots.push(root);
+  const result = Bun.spawnSync({
+    cmd: ["bun", MAIN, ...args],
+    cwd: cwd ?? root,
+    env: {
+      PATH: process.env["PATH"] ?? "",
+      HOME: join(root, "home"),
+      CLAUDE_CONFIG_DIR: join(root, "claude"),
+      CODEX_HOME: join(root, "codex"),
+      PI_CODING_AGENT_DIR: join(root, "pi"),
+      ...extraEnv,
+    },
+  });
+  return {
+    code: result.exitCode,
+    stdout: result.stdout.toString(),
+    stderr: result.stderr.toString(),
+  };
+}
+
+function envelope(result: RunResult): Envelope<Record<string, unknown>> {
+  return JSON.parse(result.stdout) as Envelope<Record<string, unknown>>;
+}
+
+describe("surface", () => {
+  test("VERSION is pinned to package.json", () => {
+    expect(VERSION).toBe(packageDefinition.version);
+    expect(run(["--version"]).stdout.trim()).toBe(VERSION);
+  });
+
+  test("help lands on stdout and unknown commands are usage faults", () => {
+    expect(run([]).stdout).toContain("agentsurface — one launcher");
+    expect(run(["--agent-teaser"]).stdout).toContain("Open and resume agent harnesses");
+    expect(run(["--agent-help"]).stdout).toContain("agent runbook");
+    const unknown = run(["land"]);
+    expect(unknown.code).toBe(2);
+    expect(unknown.stderr).toContain('unknown command "land"');
+  });
+
+  test("open --dry-run --json emits the launch spec envelope", () => {
+    const root = mkdtempSync(join(tmpdir(), "agentsurface-cwd-"));
+    roots.push(root);
+    const result = run(
+      [
+        "open",
+        "claude",
+        "fix the tests",
+        "--model",
+        "fable",
+        "--effort",
+        "max",
+        "--dry-run",
+        "--json",
+      ],
+      {},
+      root,
+    );
+    expect(result.code).toBe(0);
+    const parsed = envelope(result);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data).toEqual({
+      harness: "claude",
+      session_id: null,
+      cwd: realpathSync(root),
+      command: ["claude", "--model", "fable", "--effort", "max", "fix the tests"],
+    });
+  });
+
+  test("open --dry-run without --json prints a shell line", () => {
+    const result = run(["open", "codex", "two words", "--effort", "xhigh", "--dry-run"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout.trim()).toBe(`codex -c 'model_reasoning_effort="xhigh"' 'two words'`);
+  });
+
+  test("passthrough after -- reaches the harness verbatim", () => {
+    const result = run([
+      "open",
+      "claude",
+      "--dry-run",
+      "--json",
+      "--",
+      "--permission-mode",
+      "plan",
+      "-h",
+    ]);
+    const parsed = envelope(result);
+    expect(parsed.data?.["command"]).toEqual(["claude", "--permission-mode", "plan", "-h"]);
+  });
+
+  test("launch-command --json without --dry-run is a usage fault", () => {
+    const result = run(["open", "claude", "--json"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("--json needs --dry-run");
+  });
+
+  test("per-harness effort validation is a usage fault", () => {
+    const result = run(["open", "codex", "--effort", "max"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("codex effort must be one of");
+  });
+
+  test("resume detects the owning store and spells pi resume as --session", () => {
+    const root = mkdtempSync(join(tmpdir(), "agentsurface-store-"));
+    roots.push(root);
+    const projects = join(root, "claude", "projects", "-somewhere");
+    mkdirSync(projects, { recursive: true });
+    writeFileSync(join(projects, `${SESSION_ID}.jsonl`), "{}\n");
+    const found = run(["resume", SESSION_ID, "--dry-run", "--json"], {
+      CLAUDE_CONFIG_DIR: join(root, "claude"),
+    });
+    expect(found.code).toBe(0);
+    expect(envelope(found).data?.["command"]).toEqual(["claude", "--resume", SESSION_ID]);
+
+    const forced = run(["resume", SESSION_ID, "--harness", "pi", "--dry-run", "--json"]);
+    expect(envelope(forced).data?.["command"]).toEqual(["pi", "--session", SESSION_ID]);
+  });
+
+  test("resume misses are domain errors, not launches", () => {
+    const human = run(["resume", SESSION_ID]);
+    expect(human.code).toBe(1);
+    expect(human.stderr).toContain("is not in the claude, codex, or pi session stores");
+
+    const machine = run(["resume", SESSION_ID, "--dry-run", "--json"]);
+    expect(machine.code).toBe(1);
+    const parsed = envelope(machine);
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error?.code).toBe("session_not_found");
+  });
+
+  test("doctor --json reports all three stores", () => {
+    const result = run(["doctor", "--json"]);
+    expect(result.code).toBe(0);
+    const parsed = envelope(result);
+    const harnesses = parsed.data?.["harnesses"] as Array<{ harness: string }>;
+    expect(harnesses.map((report) => report.harness)).toEqual(["claude", "codex", "pi"]);
+  });
+});
