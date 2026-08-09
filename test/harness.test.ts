@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { UsageError } from "../src/errors.ts";
 import {
+  applyYolo,
   buildOpen,
   buildResume,
   parseHarnessName,
@@ -8,7 +9,9 @@ import {
   utilityInvocation,
 } from "../src/harness.ts";
 
-const NO_OPTIONS = { passthrough: [] };
+const ON = { on: true, explicitOff: false };
+const OFF = { on: false, explicitOff: false };
+const EXPLICIT_OFF = { on: false, explicitOff: true };
 
 describe("parseHarnessName", () => {
   test("accepts the three harnesses", () => {
@@ -23,67 +26,16 @@ describe("parseHarnessName", () => {
 });
 
 describe("buildOpen", () => {
-  test("bare open is just the harness binary", () => {
-    expect(buildOpen("claude", NO_OPTIONS).command).toEqual(["claude"]);
-    expect(buildOpen("codex", NO_OPTIONS).command).toEqual(["codex"]);
-    expect(buildOpen("pi", NO_OPTIONS).command).toEqual(["pi"]);
-  });
-
-  test("claude gets --model, --effort, --name, then prompt last", () => {
-    const spec = buildOpen("claude", {
-      model: "fable",
-      effort: "max",
-      name: "fix-tests",
-      prompt: "fix the failing tests",
-      passthrough: ["--permission-mode", "plan"],
-    });
-    expect(spec.command).toEqual([
+  test("the command is the harness followed by the forwarded tokens, verbatim", () => {
+    expect(buildOpen("claude", []).command).toEqual(["claude"]);
+    expect(buildOpen("claude", ["fix it", "--model", "fable"]).command).toEqual([
       "claude",
+      "fix it",
       "--model",
       "fable",
-      "--effort",
-      "max",
-      "--name",
-      "fix-tests",
-      "--permission-mode",
-      "plan",
-      "fix the failing tests",
     ]);
-    expect(spec.sessionId).toBeNull();
-  });
-
-  test("codex spells effort as a TOML config override", () => {
-    const spec = buildOpen("codex", { model: "gpt-5.6-sol", effort: "xhigh", passthrough: [] });
-    expect(spec.command).toEqual([
-      "codex",
-      "--model",
-      "gpt-5.6-sol",
-      "-c",
-      'model_reasoning_effort="xhigh"',
-    ]);
-  });
-
-  test("pi spells effort as --thinking", () => {
-    const spec = buildOpen("pi", { effort: "high", name: "poke", passthrough: [] });
-    expect(spec.command).toEqual(["pi", "--thinking", "high", "--name", "poke"]);
-  });
-
-  test("effort values are validated per harness", () => {
-    expect(() => buildOpen("codex", { effort: "max", passthrough: [] })).toThrow(
-      /codex effort must be one of minimal, low, medium, high, xhigh/,
-    );
-    expect(() => buildOpen("claude", { effort: "off", passthrough: [] })).toThrow(UsageError);
-    expect(buildOpen("pi", { effort: "off", passthrough: [] }).command).toEqual([
-      "pi",
-      "--thinking",
-      "off",
-    ]);
-  });
-
-  test("codex refuses run names", () => {
-    expect(() => buildOpen("codex", { name: "nope", passthrough: [] })).toThrow(
-      /codex does not support run names/,
-    );
+    expect(buildOpen("codex", ["--", "--weird"]).command).toEqual(["codex", "--", "--weird"]);
+    expect(buildOpen("claude", []).sessionId).toBeNull();
   });
 });
 
@@ -94,7 +46,7 @@ describe("buildResume", () => {
     expect(buildResume("pi", "abc-123", []).command).toEqual(["pi", "--session", "abc-123"]);
   });
 
-  test("passthrough lands after the id and the spec carries the id", () => {
+  test("forwarded tokens land after the id and the spec carries the id", () => {
     const spec = buildResume("codex", "abc-123", ["--last-ish"]);
     expect(spec.command).toEqual(["codex", "resume", "abc-123", "--last-ish"]);
     expect(spec.sessionId).toBe("abc-123");
@@ -136,76 +88,61 @@ describe("utilityInvocation", () => {
   });
 });
 
-describe("yolo", () => {
-  test("open injects the per-harness flag between our flags and passthrough", () => {
-    expect(
-      buildOpen("claude", {
-        model: "fable",
-        yolo: true,
-        passthrough: ["--permission-mode", "plan"],
-      }).command,
-    ).toEqual([
-      "claude",
+describe("applyYolo", () => {
+  test("on injects the canonical spelling at the head of the stream", () => {
+    expect(applyYolo("claude", ["--model", "fable"], ON, false).tokens).toEqual([
+      "--dangerously-skip-permissions",
       "--model",
       "fable",
-      "--dangerously-skip-permissions",
-      "--permission-mode",
-      "plan",
     ]);
-    expect(buildOpen("codex", { yolo: true, passthrough: [] }).command).toEqual([
-      "codex",
+    expect(applyYolo("codex", [], ON, false).injected).toBe(
       "--dangerously-bypass-approvals-and-sandbox",
-    ]);
-    expect(buildOpen("pi", { yolo: true, passthrough: [] }).command).toEqual(["pi", "--approve"]);
+    );
+    expect(applyYolo("pi", [], ON, false).tokens).toEqual(["--approve"]);
   });
 
-  test("resume injects after the session reference", () => {
-    expect(buildResume("claude", "abc-123", [], true).command).toEqual([
-      "claude",
-      "--resume",
-      "abc-123",
-      "--dangerously-skip-permissions",
-    ]);
-    expect(buildResume("codex", "abc-123", [], true).command).toEqual([
-      "codex",
-      "resume",
-      "abc-123",
-      "--dangerously-bypass-approvals-and-sandbox",
-    ]);
-    expect(buildResume("pi", "abc-123", [], true).command).toEqual([
-      "pi",
-      "--session",
-      "abc-123",
-      "--approve",
-    ]);
+  test("a forwarded spelling is never duplicated, aliases included", () => {
+    const canonical = applyYolo("claude", ["--dangerously-skip-permissions"], ON, false);
+    expect(canonical.tokens).toEqual(["--dangerously-skip-permissions"]);
+    expect(canonical.injected).toBeNull();
+    expect(canonical.present).toBe("--dangerously-skip-permissions");
+    const short = applyYolo("pi", ["-a"], ON, false);
+    expect(short.tokens).toEqual(["-a"]);
+    expect(short.injected).toBeNull();
+  });
+
+  test("pi's own negative wins over injection", () => {
+    const negative = applyYolo("pi", ["--no-approve"], ON, false);
+    expect(negative.tokens).toEqual(["--no-approve"]);
+    expect(negative.injected).toBeNull();
+    expect(negative.presentNegative).toBe(true);
   });
 
   test("utility invocations never get the flag", () => {
-    expect(
-      buildOpen("codex", { yolo: true, passthrough: ["login", "--device-auth"] }).command,
-    ).toEqual(["codex", "login", "--device-auth"]);
-    expect(buildOpen("claude", { yolo: true, passthrough: ["mcp", "list"] }).command).toEqual([
+    expect(applyYolo("codex", ["login", "--device-auth"], ON, true).tokens).toEqual([
+      "login",
+      "--device-auth",
+    ]);
+  });
+
+  test("config-off declines to inject but strips nothing", () => {
+    const kept = applyYolo("claude", ["--dangerously-skip-permissions"], OFF, false);
+    expect(kept.tokens).toEqual(["--dangerously-skip-permissions"]);
+    expect(kept.redacted).toEqual([]);
+  });
+
+  test("an explicit off redacts forwarded spellings and reports them", () => {
+    const redacted = applyYolo(
       "claude",
-      "mcp",
-      "list",
-    ]);
-  });
-
-  test("an already-forwarded flag is not duplicated", () => {
-    expect(
-      buildOpen("claude", { yolo: true, passthrough: ["--dangerously-skip-permissions"] }).command,
-    ).toEqual(["claude", "--dangerously-skip-permissions"]);
-    expect(buildResume("pi", "abc", ["--approve"], true).command).toEqual([
-      "pi",
-      "--session",
-      "abc",
-      "--approve",
-    ]);
-  });
-
-  test("yolo off or absent injects nothing", () => {
-    expect(buildOpen("claude", { yolo: false, passthrough: [] }).command).toEqual(["claude"]);
-    expect(buildResume("codex", "abc", []).command).toEqual(["codex", "resume", "abc"]);
+      ["--dangerously-skip-permissions", "--model", "fable"],
+      EXPLICIT_OFF,
+      false,
+    );
+    expect(redacted.tokens).toEqual(["--model", "fable"]);
+    expect(redacted.redacted).toEqual(["--dangerously-skip-permissions"]);
+    const alias = applyYolo("pi", ["-a", "hello"], EXPLICIT_OFF, false);
+    expect(alias.tokens).toEqual(["hello"]);
+    expect(alias.redacted).toEqual(["-a"]);
   });
 });
 

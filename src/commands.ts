@@ -2,19 +2,19 @@ import { existsSync } from "node:fs";
 import { type BalanceDecision, balanceDisabled, balanceSpec } from "./balance.ts";
 import { configPath, loadConfig } from "./config.ts";
 import { CliError, UsageError } from "./errors.ts";
-import type { ParsedFlags } from "./flags.ts";
-import type { HarnessName, LaunchSpec } from "./harness.ts";
+import type { HarnessName, LaunchSpec, YoloApplication, YoloDecision } from "./harness.ts";
 import {
+  applyYolo,
   buildOpen,
   buildResume,
   HARNESS_NAMES,
   parseHarnessName,
   sessionStore,
   utilityInvocation,
-  YOLO_FLAGS,
 } from "./harness.ts";
 import type { Narrator } from "./narrate.ts";
 import { facts, shellLine, tildePath } from "./narrate.ts";
+import type { Partitioned } from "./partition.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
 
@@ -29,94 +29,56 @@ export type Outcome =
   | { kind: "launch"; spec: LaunchSpec }
   | { kind: "result"; data: unknown; human: string };
 
-export async function openCommand(
-  context: Context,
-  flags: ParsedFlags,
-  passthrough: string[],
-): Promise<Outcome> {
-  const [harnessName, prompt, ...extra] = flags.positional;
-  if (harnessName === undefined) {
-    throw new UsageError("open requires a harness: claude, codex, or pi");
-  }
-  if (extra.length > 0) {
-    throw new UsageError("open takes at most one prompt; quote it, and put harness flags after --");
-  }
-  const harness = parseHarnessName(harnessName);
-  narrateOpening(context, harness, flags, prompt);
-  const yolo = resolveYolo(context, flags, harness);
-  const spec = buildOpen(harness, {
-    model: flags.values["model"],
-    effort: flags.values["effort"],
-    name: flags.values["name"],
-    prompt,
-    yolo,
-    passthrough,
-  });
-  // Shimmed launches carry their model in the passthrough, not our flag;
-  // routing must see it either way.
-  return finishLaunch(
-    context,
-    flags,
-    spec,
-    flags.values["model"] ?? modelFromArgs(passthrough),
-    yolo,
-  );
-}
-
-function narrateOpening(
+export async function launchCommand(
   context: Context,
   harness: HarnessName,
-  flags: ParsedFlags,
-  prompt: string | undefined,
-): void {
-  const model = flags.values["model"];
-  const effort = flags.values["effort"];
-  const name = flags.values["name"];
-  context.narrator.row(
-    "open",
-    facts(
-      harness,
-      model === undefined ? undefined : `model ${model}`,
-      effort === undefined ? undefined : `effort ${effort}`,
-      name === undefined ? undefined : `name ${name}`,
-    ),
-  );
+  parts: Partitioned,
+): Promise<Outcome> {
+  const tokens = parts.harness;
+  const head = tokens[0];
+  if (head?.startsWith("x-")) {
+    throw new UsageError(
+      `unknown x command "${head}" — bare x-* words in command position are agentsurface's own; a prompt starting with "x-" needs the harness's -p spelling`,
+    );
+  }
+  context.narrator.row("open", harness);
   context.narrator.row("cwd", tildePath(context.cwd, context.home));
-  if (prompt !== undefined) context.narrator.detail("prompt", truncate(prompt, 60));
+  const utility = utilityInvocation(harness, tokens);
+  const yolo = resolveYolo(context, parts, harness);
+  const applied = applyYolo(harness, tokens, yolo, utility);
+  return finishLaunch(
+    context,
+    parts,
+    buildOpen(harness, applied.tokens),
+    modelFromArgs(tokens),
+    yolo,
+    applied,
+    utility,
+  );
 }
 
-function truncate(text: string, limit: number): string {
-  const flat = text.replaceAll(/\s+/g, " ").trim();
-  return flat.length <= limit ? flat : `${flat.slice(0, limit - 1)}…`;
-}
-
-/** First --model value in forwarded args, either spelling; else undefined. */
+/** First model value in the forwarded tokens — --model, --model=, or
+ * codex's -m short. Read for account routing only; the tokens themselves
+ * are forwarded untouched. */
 function modelFromArgs(args: string[]): string | undefined {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === "--model") return args[i + 1];
+    if (arg === "--model" || arg === "-m") return args[i + 1];
     if (arg.startsWith("--model=")) return arg.slice("--model=".length);
   }
   return undefined;
 }
 
-export async function resumeCommand(
-  context: Context,
-  flags: ParsedFlags,
-  passthrough: string[],
-): Promise<Outcome> {
-  const [sessionId, ...extra] = flags.positional;
-  if (sessionId === undefined) throw new UsageError("resume requires a session id");
-  if (extra.length > 0) {
-    throw new UsageError("resume takes one session id; harness flags go after --");
-  }
+export async function resumeCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  const [sessionId, ...forwarded] = parts.harness;
+  if (sessionId === undefined) throw new UsageError("x-resume requires a session id");
   assertSessionId(sessionId);
-  const harnessFlag = flags.values["harness"];
+  const harnessFlag = parts.values["x-harness"];
   let harness: HarnessName;
   let sessionPath: string | null = null;
   if (harnessFlag !== undefined) {
     harness = parseHarnessName(harnessFlag);
-    context.narrator.row("resume", facts(harness, sessionId, "by --harness"));
+    context.narrator.row("resume", facts(harness, sessionId, "by --x-harness"));
     context.narrator.row("cwd", tildePath(context.cwd, context.home));
   } else {
     context.narrator.detail("scan", "claude, codex, and pi session stores");
@@ -126,7 +88,7 @@ export async function resumeCommand(
       throw new CliError(
         "session_not_found",
         `session "${sessionId}" is not in the claude, codex, or pi session stores`,
-        `pass --harness claude|codex|pi to skip detection`,
+        `pass --x-harness claude|codex|pi to skip detection`,
       );
     }
     if (matches.length > 1) {
@@ -135,7 +97,7 @@ export async function resumeCommand(
         `session "${sessionId}" exists in more than one store: ${matches
           .map((match) => match.harness)
           .join(", ")}`,
-        `pass --harness to pick one`,
+        `pass --x-harness to pick one`,
       );
     }
     harness = first.harness;
@@ -144,38 +106,49 @@ export async function resumeCommand(
     context.narrator.row("cwd", tildePath(context.cwd, context.home));
     context.narrator.detail("session", tildePath(first.path, context.home));
   }
-  const model = await resumeRoutingModel(context, harness, sessionId, sessionPath, passthrough);
+  const model = await resumeRoutingModel(context, harness, sessionId, sessionPath, forwarded);
   if (model !== undefined) context.narrator.detail("model", `${model} · drives routing`);
-  const yolo = resolveYolo(context, flags, harness);
+  const yolo = resolveYolo(context, parts, harness);
+  const applied = applyYolo(harness, forwarded, yolo, false);
   return finishLaunch(
     context,
-    flags,
-    buildResume(harness, sessionId, passthrough, yolo),
+    parts,
+    buildResume(harness, sessionId, applied.tokens),
     model,
     yolo,
+    applied,
+    false,
   );
 }
 
-/** Per-launch flags beat the config; the config file decides the default.
- * Explicit flags also skip the config read, so --no-yolo (and --yolo) still
+/** Per-launch flags beat the config; without either, yolo is on (ADR 0009).
+ * Explicit flags skip the config read, so --x-no-yolo (and --x-yolo) still
  * work while the file is malformed. */
-function resolveYolo(context: Context, flags: ParsedFlags, harness: HarnessName): boolean {
-  const on = flags.bools.has("yolo");
-  const off = flags.bools.has("no-yolo");
-  if (on && off) throw new UsageError("--yolo conflicts with --no-yolo; pick one");
+function resolveYolo(context: Context, parts: Partitioned, harness: HarnessName): YoloDecision {
+  const on = scopeApplies(parts, "x-yolo", harness);
+  const off = scopeApplies(parts, "x-no-yolo", harness);
+  if (on && off) {
+    throw new UsageError(`--x-yolo conflicts with --x-no-yolo for ${harness}; pick one`);
+  }
   if (on || off) {
     context.narrator.detail("config", "not consulted · yolo set by flag");
-    return on;
+    return { on, explicitOff: off };
   }
   const config = loadConfig(context.env, context.home);
   context.narrator.detail(
     "config",
     facts(
       tildePath(config.path, context.home),
-      config.exists ? describeYolo(config.yolo) : "missing · yolo off everywhere",
+      config.exists ? describeYolo(config.yolo) : "missing · yolo on everywhere",
     ),
   );
-  return config.yolo[harness];
+  return { on: config.yolo[harness], explicitOff: false };
+}
+
+/** A bare occurrence covers every harness; a scoped one only its own. */
+function scopeApplies(parts: Partitioned, flag: string, harness: HarnessName): boolean {
+  const scopes = parts.scoped.get(flag) ?? [];
+  return scopes.includes("all") || scopes.includes(harness);
 }
 
 function describeYolo(yolo: Record<HarnessName, boolean>): string {
@@ -184,7 +157,7 @@ function describeYolo(yolo: Record<HarnessName, boolean>): string {
 
 /**
  * The model that should drive account routing for a resume: an explicit
- * `--model` in the forwarded args wins; otherwise, for claude, the session
+ * model in the forwarded tokens wins; otherwise, for claude, the session
  * file's last-used model (a resume continues on it, so its quota window is
  * the one being spent). Best-effort — balance treats null as no model
  * workload, which is the conservation default.
@@ -194,9 +167,9 @@ async function resumeRoutingModel(
   harness: HarnessName,
   sessionId: string,
   sessionPath: string | null,
-  passthrough: string[],
+  forwarded: string[],
 ): Promise<string | undefined> {
-  const explicit = modelFromArgs(passthrough);
+  const explicit = modelFromArgs(forwarded);
   if (explicit !== undefined) return explicit;
   if (harness !== "claude") return undefined;
   const path =
@@ -216,8 +189,8 @@ async function resumeRoutingModel(
   }
 }
 
-export async function doctorCommand(context: Context, flags: ParsedFlags): Promise<Outcome> {
-  if (flags.positional.length > 0) throw new UsageError("doctor takes no positional arguments");
+export async function doctorCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  if (parts.harness.length > 0) throw new UsageError("x-doctor takes no arguments");
   const reports = [];
   const lines: string[] = [];
   for (const harness of HARNESS_NAMES) {
@@ -246,7 +219,7 @@ export async function doctorCommand(context: Context, flags: ParsedFlags): Promi
   const config = configReport(context);
   lines.push(
     "config",
-    `  path   ${config.path} ${config.exists ? "" : "(missing)"}`.trimEnd(),
+    `  path   ${config.path} ${config.exists ? "" : "(missing — yolo on everywhere)"}`.trimEnd(),
     config.valid
       ? `  yolo   ${HARNESS_NAMES.map((h) => `${h} ${config.yolo?.[h] ? "on" : "off"}`).join(", ")}`
       : `  yolo   INVALID: ${config.error}`,
@@ -287,17 +260,21 @@ function configReport(context: Context): ConfigReport {
 
 async function finishLaunch(
   context: Context,
-  flags: ParsedFlags,
+  parts: Partitioned,
   spec: LaunchSpec,
   routingModel: string | undefined,
-  yolo: boolean,
+  yolo: YoloDecision,
+  applied: YoloApplication,
+  utility: boolean,
 ): Promise<Outcome> {
-  const dryRun = flags.bools.has("dry-run");
-  if (flags.bools.has("json") && !dryRun) {
-    throw new UsageError("this command launches an interactive harness; --json needs --dry-run");
+  const dryRun = parts.bools.has("x-dry-run");
+  if (parts.bools.has("x-json") && !dryRun) {
+    throw new UsageError(
+      "this command launches an interactive harness; --x-json needs --x-dry-run",
+    );
   }
-  const noBalance = flags.bools.has("x-no-balance");
-  const account = flags.values["x-account"];
+  const noBalance = parts.bools.has("x-no-balance");
+  const account = parts.values["x-account"];
   if (noBalance && account !== undefined) {
     throw new UsageError("--x-account pins a balanced launch; drop --x-no-balance");
   }
@@ -305,14 +282,13 @@ async function finishLaunch(
   // A utility invocation passes through unwrapped (ADR 0005): no account is
   // spent, and the swap wrappers reject several of these commands outright.
   // The launch sentinel still makes PATH shims exec the real binary.
-  const utility = utilityInvocation(spec.harness, spec.command.slice(1));
   if (utility && account !== undefined) {
     throw new UsageError(
       `--x-account pins a session launch; "${spec.command[1]}" is a utility invocation that passes through`,
     );
   }
 
-  narrateYolo(context, spec, yolo, utility);
+  narrateYolo(context, yolo, applied, utility);
 
   let launchSpec = spec;
   let decision: BalanceDecision | null = null;
@@ -348,28 +324,52 @@ async function finishLaunch(
     command: launchSpec.command,
     balance: decision,
     utility,
-    yolo,
+    yolo: yolo.on,
+    redactions: applied.redacted,
   };
   return { kind: "result", data, human: shellLine(launchSpec.command) };
 }
 
-/** Yolo is the one decision that changes what the harness will let the model
- * do, so it is narrated even when nothing was injected. */
-function narrateYolo(context: Context, spec: LaunchSpec, yolo: boolean, utility: boolean): void {
-  if (!yolo) {
-    context.narrator.detail("yolo", "off · permission prompts stay on");
+/** Yolo changes what the harness will let the model do, and --x-no-yolo can
+ * remove a flag the caller explicitly forwarded — both land in the
+ * narrative, on stderr with every other row (ADR 0007). */
+function narrateYolo(
+  context: Context,
+  yolo: YoloDecision,
+  applied: YoloApplication,
+  utility: boolean,
+): void {
+  if (applied.redacted.length > 0) {
+    context.narrator.row(
+      "yolo",
+      facts(
+        "off",
+        `removed ${applied.redacted.join(" ")}`,
+        "explicitly forwarded · --x-no-yolo wins",
+      ),
+    );
     return;
   }
   if (utility) {
-    context.narrator.detail("yolo", "on · never applied to a utility invocation");
+    context.narrator.detail("yolo", yolo.on ? "on · never applied to a utility invocation" : "off");
     return;
   }
-  const injected = YOLO_FLAGS[spec.harness];
+  if (applied.presentNegative) {
+    context.narrator.row(
+      "yolo",
+      facts("off", `${applied.present} forwarded · the caller's spelling wins`),
+    );
+    return;
+  }
+  if (!yolo.on) {
+    context.narrator.row("yolo", "off · permission prompts stay on");
+    return;
+  }
   context.narrator.row(
     "yolo",
-    spec.command.includes(injected)
-      ? facts("on", injected)
-      : facts("on", `${injected} already forwarded`),
+    applied.injected !== null
+      ? facts("on", applied.injected)
+      : facts("on", `${applied.present} already forwarded`),
   );
 }
 

@@ -105,17 +105,17 @@ function balanceCalls(world: World): string[] {
   }
 }
 
-describe("balanced open", () => {
-  test("claude composes the cswap prefix and forwards the model", () => {
+describe("balanced launch", () => {
+  test("claude composes the cswap prefix and forwards the tokens verbatim", () => {
     const world = makeWorld();
     const result = run(world, [
-      "open",
       "claude",
-      "hi there",
       "--model",
       "fable",
-      "--dry-run",
-      "--json",
+      "hi there",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
     ]);
     expect(result.code).toBe(0);
     const envelope = JSON.parse(result.stdout) as AnyEnvelope;
@@ -137,9 +137,31 @@ describe("balanced open", () => {
     expect(balanceCalls(world)).toEqual(["balance claude --json --model fable --dry-run"]);
   });
 
+  test("the injected yolo flag rides inside the wrapped command", () => {
+    const world = makeWorld();
+    const result = run(world, ["claude", "--x-dry-run", "--x-json"]);
+    expect(result.code).toBe(0);
+    const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
+    expect(data.command).toEqual([
+      "cswap",
+      "run",
+      "2",
+      "--share-history",
+      "--",
+      "--dangerously-skip-permissions",
+    ]);
+  });
+
   test("codex dry run composes the copy-runnable --account spelling", () => {
     const world = makeWorld();
-    const result = run(world, ["open", "codex", "--effort", "xhigh", "--dry-run", "--json"]);
+    const result = run(world, [
+      "codex",
+      "-c",
+      'model_reasoning_effort="xhigh"',
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
+    ]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as {
       command: string[];
@@ -159,15 +181,22 @@ describe("balanced open", () => {
     expect(balanceCalls(world)).toEqual(["balance codex --json"]);
   });
 
+  test("codex's -m short drives routing", () => {
+    const world = makeWorld();
+    const result = run(world, ["codex", "-m", "gpt-x", "--x-no-yolo", "--x-dry-run"]);
+    expect(result.code).toBe(0);
+    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-x"]);
+  });
+
   test("pi normalizes the provider-prefixed model for lane selection", () => {
     const world = makeWorld();
     const result = run(world, [
-      "open",
       "pi",
       "--model",
       "openai-codex/gpt-5.3-codex-spark",
-      "--dry-run",
-      "--json",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
     ]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
@@ -185,12 +214,12 @@ describe("balanced open", () => {
   test("--x-account pins codex without a balance call", () => {
     const world = makeWorld();
     const result = run(world, [
-      "open",
       "codex",
       "--x-account",
       "you@example.com",
-      "--dry-run",
-      "--json",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
     ]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as {
@@ -204,14 +233,20 @@ describe("balanced open", () => {
 
   test("--x-account forwards to balance for claude", () => {
     const world = makeWorld();
-    const result = run(world, ["open", "claude", "--x-account", "c1", "--dry-run"]);
+    const result = run(world, ["claude", "--x-account", "c1", "--x-no-yolo", "--x-dry-run"]);
     expect(result.code).toBe(0);
     expect(balanceCalls(world)).toEqual(["balance claude --json --account c1 --dry-run"]);
   });
 
   test("--x-no-balance and AGENTSURFACE_NO_BALANCE launch raw", () => {
     const world = makeWorld();
-    const flagged = run(world, ["open", "claude", "--x-no-balance", "--dry-run", "--json"]);
+    const flagged = run(world, [
+      "claude",
+      "--x-no-balance",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
+    ]);
     expect(flagged.code).toBe(0);
     const flaggedData = (JSON.parse(flagged.stdout) as AnyEnvelope).data as {
       command: string[];
@@ -220,7 +255,7 @@ describe("balanced open", () => {
     expect(flaggedData.command).toEqual(["claude"]);
     expect(flaggedData.balance).toBeNull();
 
-    const env = run(world, ["open", "codex", "--dry-run", "--json"], {
+    const env = run(world, ["codex", "--x-no-yolo", "--x-dry-run", "--x-json"], {
       AGENTSURFACE_NO_BALANCE: "1",
     });
     expect(env.code).toBe(0);
@@ -232,7 +267,7 @@ describe("balanced open", () => {
 
   test("--x-account with --x-no-balance is a usage fault", () => {
     const world = makeWorld();
-    const result = run(world, ["open", "claude", "--x-account", "c1", "--x-no-balance"]);
+    const result = run(world, ["claude", "--x-account", "c1", "--x-no-balance"]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("--x-account pins a balanced launch");
   });
@@ -248,7 +283,7 @@ describe("balanced open", () => {
       }),
     );
     writeFileSync(join(world.binDir, "exit-code"), "3");
-    const result = run(world, ["open", "codex", "--dry-run", "--json"]);
+    const result = run(world, ["codex", "--x-dry-run", "--x-json"]);
     expect(result.code).toBe(1);
     const envelope = JSON.parse(result.stdout) as AnyEnvelope;
     expect(envelope.ok).toBe(false);
@@ -262,7 +297,7 @@ describe("balanced open", () => {
     rmSync(join(world.binDir, "agentusage"));
     // PATH without the real stack — only the fake bin dir and bun itself —
     // so the real agentusage can never leak into this refusal.
-    const result = run(world, ["open", "claude", "--dry-run", "--json"], {
+    const result = run(world, ["claude", "--x-dry-run", "--x-json"], {
       PATH: `${world.binDir}:${dirname(process.execPath)}`,
     });
     expect(result.code).toBe(1);
@@ -273,15 +308,7 @@ describe("balanced open", () => {
 
   test("a utility invocation passes through without consulting balance", () => {
     const world = makeWorld();
-    const result = run(world, [
-      "open",
-      "codex",
-      "--dry-run",
-      "--json",
-      "--",
-      "login",
-      "--device-auth",
-    ]);
+    const result = run(world, ["codex", "--x-dry-run", "--x-json", "login", "--device-auth"]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as {
       command: string[];
@@ -297,7 +324,7 @@ describe("balanced open", () => {
   test("a utility invocation works even when the stack is missing entirely", () => {
     const world = makeWorld();
     rmSync(join(world.binDir, "agentusage"));
-    const result = run(world, ["open", "codex", "--dry-run", "--json", "--", "--version"], {
+    const result = run(world, ["codex", "--x-dry-run", "--x-json", "--version"], {
       PATH: `${world.binDir}:${dirname(process.execPath)}`,
     });
     expect(result.code).toBe(0);
@@ -307,7 +334,7 @@ describe("balanced open", () => {
 
   test("--x-account on a utility invocation is a usage fault, not a silent drop", () => {
     const world = makeWorld();
-    const result = run(world, ["open", "codex", "--x-account", "acc_x", "--", "login"]);
+    const result = run(world, ["codex", "--x-account", "acc_x", "login"]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("utility invocation");
     expect(balanceCalls(world)).toEqual([]);
@@ -325,7 +352,7 @@ describe("balanced resume", () => {
         message: { model: "claude-fable-5" },
       })}\n`,
     );
-    const result = run(world, ["resume", SESSION_ID, "--dry-run", "--json"]);
+    const result = run(world, ["x-resume", SESSION_ID, "--x-no-yolo", "--x-dry-run", "--x-json"]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
     expect(data.command).toEqual([
@@ -340,7 +367,7 @@ describe("balanced resume", () => {
     expect(balanceCalls(world)).toEqual(["balance claude --json --model claude-fable-5 --dry-run"]);
   });
 
-  test("an explicit --model in forwarded args wins over the sniff", () => {
+  test("an explicit --model in forwarded tokens wins over the sniff", () => {
     const world = makeWorld();
     const store = join(world.root, "claude", "projects", "-some-cwd");
     mkdirSync(store, { recursive: true });
@@ -348,14 +375,29 @@ describe("balanced resume", () => {
       join(store, `${SESSION_ID}.jsonl`),
       `${JSON.stringify({ message: { model: "claude-fable-5" } })}\n`,
     );
-    const result = run(world, ["resume", SESSION_ID, "--dry-run", "--", "--model", "haiku"]);
+    const result = run(world, [
+      "x-resume",
+      SESSION_ID,
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--model",
+      "haiku",
+    ]);
     expect(result.code).toBe(0);
     expect(balanceCalls(world)).toEqual(["balance claude --json --model haiku --dry-run"]);
   });
 
   test("codex resume moves the session id into the wrapper grammar", () => {
     const world = makeWorld();
-    const result = run(world, ["resume", SESSION_ID, "--harness", "codex", "--dry-run", "--json"]);
+    const result = run(world, [
+      "x-resume",
+      SESSION_ID,
+      "--x-harness",
+      "codex",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
+    ]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
     expect(data.command).toEqual([
@@ -370,7 +412,15 @@ describe("balanced resume", () => {
 
   test("pi resume rides --session through the pi runner", () => {
     const world = makeWorld();
-    const result = run(world, ["resume", SESSION_ID, "--harness", "pi", "--dry-run", "--json"]);
+    const result = run(world, [
+      "x-resume",
+      SESSION_ID,
+      "--x-harness",
+      "pi",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
+    ]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
     expect(data.command).toEqual([
@@ -421,11 +471,12 @@ describe("compose units", () => {
 });
 
 describe("shim support", () => {
-  test("a passthrough --model drives routing when the flag is absent", () => {
+  test("a forwarded --model drives routing without being consumed", () => {
     const world = makeWorld();
-    const result = run(world, ["open", "claude", "--dry-run", "--", "--model", "fable", "-p"]);
+    const result = run(world, ["claude", "--x-no-yolo", "--x-dry-run", "--model", "fable", "-p"]);
     expect(result.code).toBe(0);
     expect(balanceCalls(world)).toEqual(["balance claude --json --model fable --dry-run"]);
+    expect(result.stdout.trim()).toBe("cswap run 2 --share-history -- --model fable -p");
   });
 
   test("real launches carry the AGENTSURFACE_LAUNCH sentinel", () => {
@@ -437,7 +488,7 @@ describe("shim support", () => {
       `#!/usr/bin/env bash\nprintf '%s' "\${AGENTSURFACE_LAUNCH:-unset}" > ${JSON.stringify(out)}\n`,
     );
     chmodSync(probe, 0o755);
-    const result = run(world, ["open", "claude", "--x-no-balance"]);
+    const result = run(world, ["claude", "--x-no-balance"]);
     expect(result.code).toBe(0);
     expect(readFileSync(out, "utf8")).toBe("1");
   });

@@ -6,16 +6,18 @@ import { HARNESS_NAMES } from "./harness.ts";
 import type { Environ } from "./paths.ts";
 import { configDirectory } from "./paths.ts";
 
-/** Per-user launcher configuration. Strictly validated: a config that would
- * be silently misread is worse than none, because yolo opens permission
- * gates — a typo must fail the launch, not quietly launch gated. */
+/** Per-user launcher configuration. Yolo defaults on (ADR 0009); the file
+ * exists to disable it. Strictly validated: a config that would be silently
+ * misread is worse than none, because a disabling config with a typo would
+ * quietly launch with the gates down against the operator's wishes — it
+ * must fail the launch instead. */
 export interface Config {
   yolo: Record<HarnessName, boolean>;
   path: string;
   exists: boolean;
 }
 
-const NO_YOLO: Record<HarnessName, boolean> = { claude: false, codex: false, pi: false };
+const ALL_YOLO: Record<HarnessName, boolean> = { claude: true, codex: true, pi: true };
 
 export function configPath(env: Environ, home: string): string {
   return join(configDirectory(env, home, "agentsurface"), "config.json");
@@ -23,7 +25,7 @@ export function configPath(env: Environ, home: string): string {
 
 export function loadConfig(env: Environ, home: string): Config {
   const path = configPath(env, home);
-  if (!existsSync(path)) return { yolo: { ...NO_YOLO }, path, exists: false };
+  if (!existsSync(path)) return { yolo: { ...ALL_YOLO }, path, exists: false };
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8"));
@@ -55,7 +57,7 @@ export function loadConfig(env: Environ, home: string): Config {
 }
 
 function parseYolo(value: unknown, path: string): Record<HarnessName, boolean> {
-  if (value === undefined) return { ...NO_YOLO };
+  if (value === undefined) return { ...ALL_YOLO };
   if (typeof value === "boolean") {
     return { claude: value, codex: value, pi: value };
   }
@@ -67,7 +69,7 @@ function parseYolo(value: unknown, path: string): Record<HarnessName, boolean> {
     );
   }
   const map = value as Record<string, unknown>;
-  const yolo = { ...NO_YOLO };
+  const yolo = { ...ALL_YOLO };
   for (const [key, flag] of Object.entries(map)) {
     if (!(HARNESS_NAMES as readonly string[]).includes(key)) {
       throw new CliError(

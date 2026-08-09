@@ -7,8 +7,12 @@ export type HarnessName = "claude" | "codex" | "pi";
 
 export const HARNESS_NAMES: readonly HarnessName[] = ["claude", "codex", "pi"];
 
+export function isHarnessName(value: string): value is HarnessName {
+  return (HARNESS_NAMES as readonly string[]).includes(value);
+}
+
 export function parseHarnessName(value: string): HarnessName {
-  if ((HARNESS_NAMES as readonly string[]).includes(value)) return value as HarnessName;
+  if (isHarnessName(value)) return value;
   throw new UsageError(`unknown harness "${value}" (expected claude, codex, or pi)`);
 }
 
@@ -20,76 +24,85 @@ export interface LaunchSpec {
   sessionId: string | null;
 }
 
-export interface OpenRequest {
-  model?: string | undefined;
-  effort?: string | undefined;
-  name?: string | undefined;
-  prompt?: string | undefined;
-  yolo?: boolean | undefined;
-  passthrough: string[];
+/**
+ * Every spelling each harness accepts for its own permission bypass; the
+ * first is canonical and is what injection emits. Pi has no gates on tools
+ * at all — `--approve` (and its `-a` short) only auto-trusts project-local
+ * files. Verified against claude 2.1.x, codex-cli 0.147.0, pi 0.84.1;
+ * re-check on harness upgrades.
+ */
+export const YOLO_SPELLINGS: Record<HarnessName, readonly string[]> = {
+  claude: ["--dangerously-skip-permissions"],
+  codex: ["--dangerously-bypass-approvals-and-sandbox"],
+  pi: ["--approve", "-a"],
+};
+
+/** A harness's own negative spelling. A caller who typed it has decided, so
+ * yolo never injects over it. Only pi has one. */
+const NATIVE_NO_YOLO: Record<HarnessName, readonly string[]> = {
+  claude: [],
+  codex: [],
+  pi: ["--no-approve", "-na"],
+};
+
+export interface YoloDecision {
+  /** Resolved state: per-launch flags beat the config; no config means on
+   * (ADR 0009). */
+  on: boolean;
+  /** An explicit --x-no-yolo redacts forwarded yolo spellings; a config
+   * that says off only declines to inject. */
+  explicitOff: boolean;
 }
 
-/** The flag is canonical; the value sets are per-harness realities — codex
- * has no max, claude has no off or minimal. */
-const EFFORT_LEVELS: Record<HarnessName, readonly string[]> = {
-  claude: ["low", "medium", "high", "xhigh", "max"],
-  codex: ["minimal", "low", "medium", "high", "xhigh"],
-  pi: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-};
+export interface YoloApplication {
+  /** The harness stream after redaction and injection. */
+  tokens: string[];
+  injected: string | null;
+  redacted: string[];
+  /** A yolo (or native no-yolo) spelling the caller forwarded themselves. */
+  present: string | null;
+  presentNegative: boolean;
+}
 
-const RUN_NAMES_SUPPORTED: Record<HarnessName, boolean> = {
-  claude: true,
-  codex: false,
-  pi: true,
-};
-
-/** One flag per harness that drops its permission gates. Pi has no gates
- * on tools at all; --approve only auto-trusts project-local files. */
-export const YOLO_FLAGS: Record<HarnessName, string> = {
-  claude: "--dangerously-skip-permissions",
-  codex: "--dangerously-bypass-approvals-and-sandbox",
-  pi: "--approve",
-};
-
-/** Yolo never touches a utility invocation (`codex login` would reject the
- * flag, and a flag ahead of the word would defeat first-token
- * classification) and never duplicates a flag the caller already
- * forwarded. */
-function yoloArguments(
+/** Yolo never touches a utility invocation (`codex login` rejects the flag)
+ * and never duplicates or contradicts a spelling the caller forwarded. The
+ * one edit it makes against the caller's argv — --x-no-yolo removing an
+ * explicitly forwarded yolo flag — is reported for the narrative. */
+export function applyYolo(
   harness: HarnessName,
-  yolo: boolean | undefined,
-  argvWithoutYolo: string[],
-): string[] {
-  if (yolo !== true) return [];
-  if (utilityInvocation(harness, argvWithoutYolo)) return [];
-  const flag = YOLO_FLAGS[harness];
-  if (argvWithoutYolo.includes(flag)) return [];
-  return [flag];
+  tokens: string[],
+  decision: YoloDecision,
+  utility: boolean,
+): YoloApplication {
+  const spellings = YOLO_SPELLINGS[harness];
+  const negatives = NATIVE_NO_YOLO[harness];
+  const redacted: string[] = [];
+  let kept = tokens;
+  if (decision.explicitOff) {
+    kept = tokens.filter((token) => {
+      if (!spellings.includes(token)) return true;
+      redacted.push(token);
+      return false;
+    });
+  }
+  const present =
+    kept.find((token) => spellings.includes(token) || negatives.includes(token)) ?? null;
+  const presentNegative = present !== null && negatives.includes(present);
+  if (!decision.on || utility || present !== null) {
+    return { tokens: kept, injected: null, redacted, present, presentNegative };
+  }
+  const canonical = spellings[0]!;
+  return {
+    tokens: [canonical, ...kept],
+    injected: canonical,
+    redacted,
+    present: null,
+    presentNegative: false,
+  };
 }
 
-export function buildOpen(harness: HarnessName, request: OpenRequest): LaunchSpec {
-  const { model, effort, name, prompt, passthrough, yolo } = request;
-  if (effort !== undefined && !EFFORT_LEVELS[harness].includes(effort)) {
-    throw new UsageError(
-      `${harness} effort must be one of ${EFFORT_LEVELS[harness].join(", ")} (got "${effort}")`,
-    );
-  }
-  if (name !== undefined && !RUN_NAMES_SUPPORTED[harness]) {
-    throw new UsageError(`${harness} does not support run names; omit --name`);
-  }
-  const own: string[] = [];
-  if (model !== undefined) own.push("--model", model);
-  if (effort !== undefined) {
-    if (harness === "claude") own.push("--effort", effort);
-    // Codex has no effort flag; only the TOML config override reaches it.
-    if (harness === "codex") own.push("-c", `model_reasoning_effort="${effort}"`);
-    if (harness === "pi") own.push("--thinking", effort);
-  }
-  if (name !== undefined) own.push("--name", name);
-  // The prompt stays last so passthrough flags cannot capture it as a value.
-  const tail = prompt === undefined ? [...passthrough] : [...passthrough, prompt];
-  const command = [harness, ...own, ...yoloArguments(harness, yolo, [...own, ...tail]), ...tail];
-  return { harness, command, sessionId: null };
+export function buildOpen(harness: HarnessName, tokens: string[]): LaunchSpec {
+  return { harness, command: [harness, ...tokens], sessionId: null };
 }
 
 /**
@@ -154,10 +167,11 @@ const UTILITY_WORDS: Record<HarnessName, ReadonlySet<string>> = {
 const BARE_UTILITY_FLAGS = new Set(["-h", "--help", "-v", "-V", "--version"]);
 
 /**
- * First-token classification of the argv after the binary. Flags ahead of a
- * subcommand (`codex -c k=v login`) classify as a session — the shim path
- * never produces that shape, and misclassifying toward balance fails the
- * same way the raw CLI run would, never the other way around.
+ * First-token classification of the harness stream. Flags ahead of a
+ * subcommand (`codex -c k=v login`) classify as a session — misclassifying
+ * toward balance fails the same way the raw CLI run would, never the other
+ * way around. The stream is partitioned before this runs, so x-flags can
+ * sit anywhere in the typed command without defeating it.
  */
 export function utilityInvocation(harness: HarnessName, argvAfterBin: string[]): boolean {
   const first = argvAfterBin[0];
@@ -166,12 +180,7 @@ export function utilityInvocation(harness: HarnessName, argvAfterBin: string[]):
   return UTILITY_WORDS[harness].has(first);
 }
 
-export function buildResume(
-  harness: HarnessName,
-  sessionId: string,
-  passthrough: string[],
-  yolo = false,
-): LaunchSpec {
+export function buildResume(harness: HarnessName, sessionId: string, tokens: string[]): LaunchSpec {
   // Pi's --resume is a boolean that opens a picker; --session is its by-id
   // spelling. Emitting pi --resume <id> would strand the id as a prompt.
   const base =
@@ -180,10 +189,7 @@ export function buildResume(
       : harness === "codex"
         ? ["codex", "resume", sessionId]
         : ["pi", "--session", sessionId];
-  const flag = YOLO_FLAGS[harness];
-  const inject = yolo && !passthrough.includes(flag);
-  const command = [...base, ...(inject ? [flag] : []), ...passthrough];
-  return { harness, command, sessionId };
+  return { harness, command: [...base, ...tokens], sessionId };
 }
 
 export interface SessionStore {

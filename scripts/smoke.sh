@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Every documented command end-to-end against a throwaway HOME and empty
-# session stores. Launch paths only ever run with --dry-run, so the smoke
+# session stores. Launch paths only ever run with --x-dry-run, so the smoke
 # can never start a real harness.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -61,91 +61,115 @@ expect_out() {
 expect_exit 0 run --version
 expect_exit 0 run --agent-teaser
 expect_exit 0 run --agent-help
-expect_exit 0 run help open
-expect_exit 0 run doctor
-expect_exit 0 run doctor --json
+expect_exit 0 run claude --x-help
+expect_exit 0 run x-doctor
+expect_exit 0 run x-doctor --x-json
 expect_out '"harnesses"'
 
-# Open, dry runs only
-expect_exit 0 run open claude "hello there" --model fable --effort max --dry-run
-expect_out "claude --model fable --effort max 'hello there'"
-expect_exit 0 run open codex --effort xhigh --dry-run --json
-expect_out 'model_reasoning_effort='
-expect_exit 0 run open pi --effort high --dry-run
-expect_out "pi --thinking high"
-expect_exit 0 run open claude --dry-run --json -- --permission-mode plan
+# Launches, dry runs only. Yolo is on by default (ADR 0009).
+expect_exit 0 run claude --x-dry-run
+expect_out "claude --dangerously-skip-permissions"
+expect_exit 0 run codex --x-dry-run
+expect_out "codex --dangerously-bypass-approvals-and-sandbox"
+expect_exit 0 run pi --x-dry-run
+expect_out "pi --approve"
+
+# Unprefixed tokens forward verbatim, in the order typed.
+expect_exit 0 run claude "hello there" --model fable --x-no-yolo --x-dry-run
+expect_out "claude 'hello there' --model fable"
+expect_exit 0 run claude --permission-mode plan --x-no-yolo --x-dry-run --x-json
 expect_out '"--permission-mode"'
+expect_exit 0 run codex --totally-unknown-flag --x-no-yolo --x-dry-run
+expect_out "codex --totally-unknown-flag"
+
+# --x-no-yolo redacts an explicitly forwarded yolo flag; the removal is
+# narrated on stderr and recorded in the envelope.
+expect_exit 0 run claude --dangerously-skip-permissions --x-no-yolo --x-dry-run --x-json
+expect_out '"redactions":\["--dangerously-skip-permissions"\]'
+expect_exit 0 run claude --dangerously-skip-permissions --x-no-yolo --x-dry-run
+if grep -q -- "--dangerously" "$WORK/out"; then
+  echo "FAIL: --x-no-yolo did not redact the forwarded flag" >&2
+  exit 1
+fi
+grep -q "removed --dangerously-skip-permissions" "$WORK/err" || {
+  echo "FAIL: redaction was not narrated" >&2
+  exit 1
+}
+
+# The config file disables yolo; --x-yolo forces it back per launch.
+mkdir -p "$WORK/home/.config/agentsurface"
+printf '{"yolo":false}\n' >"$WORK/home/.config/agentsurface/config.json"
+expect_exit 0 run claude --x-dry-run
+if grep -q -- "--dangerously" "$WORK/out"; then
+  echo "FAIL: a disabling config still injected the flag" >&2
+  exit 1
+fi
+expect_exit 0 run claude --x-yolo --x-dry-run
+expect_out "claude --dangerously-skip-permissions"
+expect_exit 2 run pi --x-yolo --x-no-yolo --x-dry-run
+rm "$WORK/home/.config/agentsurface/config.json"
+
+# Utility invocations pass through unwrapped and unflagged.
+expect_exit 0 run codex --x-dry-run login
+expect_out "codex login"
+expect_exit 0 run claude --x-dry-run --version
+expect_out "claude --version"
 
 # Usage faults exit 2 before anything runs
-expect_exit 2 run open
-expect_exit 2 run open cursor --dry-run
-expect_exit 2 run open codex --effort max --dry-run
-expect_exit 2 run open codex --name nope --dry-run
-expect_exit 2 run open claude --json
-expect_exit 2 run resume a/b --dry-run
+expect_exit 2 run cursor --x-dry-run
+expect_exit 2 run claude --x-bogus
+expect_exit 2 run claude x-something
+expect_exit 2 run claude --x-json
+expect_exit 2 run x-resume a/b --x-dry-run
+expect_exit 2 run open claude
+expect_exit 2 run resume abc
+expect_exit 2 run doctor
 expect_exit 2 run bogus-command
 
 # Resume against a fixture store
 SESSION_ID="05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60"
 mkdir -p "$WORK/claude/projects/-somewhere"
 printf '{}\n' >"$WORK/claude/projects/-somewhere/$SESSION_ID.jsonl"
-expect_exit 0 run resume "$SESSION_ID" --dry-run
+expect_exit 0 run x-resume "$SESSION_ID" --x-no-yolo --x-dry-run
 expect_out "claude --resume $SESSION_ID"
-expect_exit 0 run resume "$SESSION_ID" --harness pi --dry-run
+expect_exit 0 run x-resume "$SESSION_ID" --x-dry-run
+expect_out "claude --resume $SESSION_ID --dangerously-skip-permissions"
+expect_exit 0 run x-resume "$SESSION_ID" --x-harness pi --x-no-yolo --x-dry-run
 expect_out "pi --session $SESSION_ID"
-expect_exit 1 run resume 99999999-9999-4999-9999-999999999999
-expect_exit 1 run resume 99999999-9999-4999-9999-999999999999 --dry-run --json
+expect_exit 1 run x-resume 99999999-9999-4999-9999-999999999999
+expect_exit 1 run x-resume 99999999-9999-4999-9999-999999999999 --x-dry-run --x-json
 expect_out '"code":"session_not_found"'
 
 # Balanced launches compose the swap prefix (fake stack, dry runs only)
 install_fake_balance
-expect_exit 0 run_balanced open claude --model fable --dry-run
+expect_exit 0 run_balanced claude --model fable --x-no-yolo --x-dry-run
 expect_out "cswap run 1 --share-history -- --model fable"
-expect_exit 0 run_balanced open codex --dry-run
+expect_exit 0 run_balanced codex --x-no-yolo --x-dry-run
 expect_out "codex-swap run --account account:org-smoke --"
-expect_exit 0 run_balanced open pi --dry-run
+expect_exit 0 run_balanced pi --x-no-yolo --x-dry-run
 expect_out "codex-swap pi run --account account:org-smoke --"
-expect_exit 0 run_balanced resume "$SESSION_ID" --dry-run
+expect_exit 0 run_balanced x-resume "$SESSION_ID" --x-no-yolo --x-dry-run
 expect_out "cswap run 1 --share-history -- --resume $SESSION_ID"
-expect_exit 0 run_balanced open claude --x-no-balance --dry-run
+expect_exit 0 run_balanced claude --x-no-balance --x-no-yolo --x-dry-run
 expect_out "claude"
-expect_exit 2 run_balanced open claude --x-account c1 --x-no-balance --dry-run
-
-# Yolo mode from the personal config, dry runs only
-mkdir -p "$WORK/home/.config/agentsurface"
-printf '{"yolo":{"claude":true,"codex":true,"pi":true}}\n' >"$WORK/home/.config/agentsurface/config.json"
-expect_exit 0 run open claude --dry-run
-expect_out "claude --dangerously-skip-permissions"
-expect_exit 0 run open codex --dry-run
-expect_out "codex --dangerously-bypass-approvals-and-sandbox"
-expect_exit 0 run open pi --dry-run
-expect_out "pi --approve"
-expect_exit 0 run resume "$SESSION_ID" --dry-run
-expect_out "claude --resume $SESSION_ID --dangerously-skip-permissions"
-expect_exit 0 run open claude --no-yolo --dry-run
-if grep -q -- "--dangerously" "$WORK/out"; then
-  echo "FAIL: --no-yolo still injected the flag" >&2
-  exit 1
-fi
-expect_exit 0 run open codex --dry-run -- login
-expect_out "codex login"
-expect_exit 2 run open pi --yolo --no-yolo --dry-run
+expect_exit 2 run_balanced claude --x-account c1 --x-no-balance --x-dry-run
 
 # The narrative is on stderr, so stdout stays exactly the command
-expect_exit 0 run open claude --model fable --dry-run
-if [[ "$(cat "$WORK/out")" != "claude --model fable --dangerously-skip-permissions" ]]; then
+expect_exit 0 run claude --model fable --x-no-yolo --x-dry-run
+if [[ "$(cat "$WORK/out")" != "claude --model fable" ]]; then
   echo "FAIL: narrative leaked into stdout" >&2
   cat "$WORK/out" >&2
   exit 1
 fi
-grep -q "^open    claude · model fable$" "$WORK/err" || { echo "FAIL: no narrative on stderr" >&2; exit 1; }
-expect_exit 0 run open claude --dry-run --json --x-verbose
+grep -q "^open    claude$" "$WORK/err" || { echo "FAIL: no narrative on stderr" >&2; exit 1; }
+grep -q "^yolo    off" "$WORK/err" || { echo "FAIL: yolo row missing" >&2; exit 1; }
+expect_exit 0 run claude --x-dry-run --x-json --x-verbose
 if [[ -s "$WORK/err" ]]; then
-  echo "FAIL: --json did not silence the narrative" >&2
+  echo "FAIL: --x-json did not silence the narrative" >&2
   cat "$WORK/err" >&2
   exit 1
 fi
-expect_exit 0 run open claude --dry-run --x-verbose
+expect_exit 0 run claude --x-dry-run --x-verbose
 grep -q "^config  " "$WORK/err" || { echo "FAIL: --x-verbose printed no mechanism" >&2; exit 1; }
 
 echo "smoke: all commands behaved"

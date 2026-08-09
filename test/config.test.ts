@@ -24,12 +24,12 @@ function writeConfig(content: string): { env: Environ; home: string } {
 }
 
 describe("loadConfig", () => {
-  test("missing file means yolo off everywhere", () => {
+  test("missing file means yolo on everywhere (ADR 0009)", () => {
     const root = mkdtempSync(join(tmpdir(), "agentsurface-config-"));
     roots.push(root);
     const config = loadConfig({}, join(root, "home"));
     expect(config.exists).toBe(false);
-    expect(config.yolo).toEqual({ claude: false, codex: false, pi: false });
+    expect(config.yolo).toEqual({ claude: true, codex: true, pi: true });
   });
 
   test("XDG_CONFIG_HOME relocates the file", () => {
@@ -51,22 +51,27 @@ describe("loadConfig", () => {
   });
 
   test("boolean yolo covers every harness", () => {
-    const { env, home } = writeConfig(JSON.stringify({ yolo: true }));
-    expect(loadConfig(env, home).yolo).toEqual({ claude: true, codex: true, pi: true });
+    const { env, home } = writeConfig(JSON.stringify({ yolo: false }));
+    expect(loadConfig(env, home).yolo).toEqual({ claude: false, codex: false, pi: false });
   });
 
-  test("partial maps leave the rest off", () => {
-    const { env, home } = writeConfig(JSON.stringify({ yolo: { codex: true } }));
-    expect(loadConfig(env, home).yolo).toEqual({ claude: false, codex: true, pi: false });
+  test("partial maps leave the rest on", () => {
+    const { env, home } = writeConfig(JSON.stringify({ yolo: { codex: false } }));
+    expect(loadConfig(env, home).yolo).toEqual({ claude: true, codex: false, pi: true });
+  });
+
+  test("an empty file body defaults on", () => {
+    const { env, home } = writeConfig(JSON.stringify({}));
+    expect(loadConfig(env, home).yolo).toEqual({ claude: true, codex: true, pi: true });
   });
 
   test("a $schema key is accepted and ignored", () => {
     const { env, home } = writeConfig(
-      JSON.stringify({ $schema: "./config.schema.json", yolo: { claude: true } }),
+      JSON.stringify({ $schema: "./config.schema.json", yolo: { claude: false } }),
     );
     const config = loadConfig(env, home);
     expect(config.exists).toBe(true);
-    expect(config.yolo).toEqual({ claude: true, codex: false, pi: false });
+    expect(config.yolo).toEqual({ claude: false, codex: true, pi: true });
   });
 
   test("invalid shapes are config_invalid domain errors", () => {

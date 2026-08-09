@@ -1,12 +1,12 @@
 # agentsurface
 
-One launcher for agent harnesses. `agentsurface open` starts claude, codex,
-or pi in this terminal with one flag vocabulary; `agentsurface resume`
-reopens a stored session by id no matter which harness owns it. Today it is
-a runner — a passthrough wrapper around the harness CLIs. Later slices land
+One launcher for agent harnesses. `agentsurface claude` (or `codex`, or
+`pi`) starts that harness in this terminal; `agentsurface x-resume` reopens
+a stored session by id no matter which harness owns it. Today it is a
+runner — a passthrough wrapper around the harness CLIs. Later slices land
 the same launches on a surface (a managed environment; Orca first) behind
-reserved `--x-*` flags, and the launch spec the runner execs is exactly what
-a surface will consume.
+more `--x-*` flags, and the launch spec the runner execs is exactly what a
+surface will consume.
 
 ## Install
 
@@ -18,32 +18,61 @@ writes the deployed SHA to `~/.local/state/agentsurface/deployed-sha`.
 
 ## Use
 
-    agentsurface open claude --model fable --effort max "fix the failing tests"
-    agentsurface open codex --effort xhigh -- --search
-    agentsurface open pi --model sonnet --effort high
-    agentsurface resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
-    agentsurface resume 019fcb41-6f70-7283-aa42-97510cb09818 --harness codex
-    agentsurface doctor
+    agentsurface claude "fix the failing tests"
+    agentsurface claude --model fable "fix the failing tests"
+    agentsurface codex -c 'model_reasoning_effort="xhigh"' --search
+    agentsurface pi --model sonnet:high
+    agentsurface x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
+    agentsurface x-resume 019fcb41-6f70-7283-aa42-97510cb09818 --x-harness codex
+    agentsurface x-doctor
 
-Everything after `--` goes to the harness verbatim. `--effort` is one flag
-with per-harness values (claude `low…max`, codex `minimal…xhigh`, pi
-`off…max`); it is spelled `--thinking` on pi and `-c
-model_reasoning_effort=…` on codex. `--name` names the run on claude and pi;
-codex has no run names. `resume` without `--harness` detects which session
-store owns the id and refuses, with the candidates named, when that is
-ambiguous. `--dry-run` prints the command instead of launching; add `--json`
-for the machine envelope.
+One partition rule (ADR 0008): a token starting `--x-` is agentsurface's,
+and every other token is the harness's, forwarded in the order typed —
+prompts, flags, and subcommands alike, native spellings only. Unknown
+`--x-*` flags are usage faults; unknown harness flags are the harness's to
+judge, so a harness upgrade never changes how a command parses here. Bare
+`x-*` words in command position are reserved for agentsurface (`x-resume`,
+`x-doctor`). `x-resume` without `--x-harness` detects which session store
+owns the id and refuses, with the candidates named, when that is
+ambiguous. `--x-dry-run` prints the command instead of launching; add
+`--x-json` for the machine envelope.
+
+## Yolo mode
+
+Yolo is on by default (ADR 0009): every launch gets its harness's own
+permission-bypass flag — `--dangerously-skip-permissions` (claude),
+`--dangerously-bypass-approvals-and-sandbox` (codex), `--approve` (pi —
+its tools never prompt; this only auto-trusts project-local files).
+`~/.config/agentsurface/config.json` disables it: `{"yolo": false}` or a
+per-harness map like `{"yolo": {"codex": false}}`. Per launch, `--x-yolo`
+and `--x-no-yolo` override the config; both repeat and take an optional
+harness scope (`--x-no-yolo codex`), which only bites when the launch
+matches — useful in aliases that wrap every launch alike.
+
+An explicit `--x-no-yolo` also *removes* a yolo spelling that was
+explicitly forwarded, and the removal is narrated. A spelling the caller
+already forwarded is never duplicated (pi's `-a` alias included), pi's own
+`--no-approve` is never overridden, and utility invocations never get the
+flag. A malformed config fails the launch loudly; `x-doctor` reports the
+config's path, validity, and per-harness state. `config.schema.json` in
+this repo describes the file for editors — name it in a `"$schema"` key,
+which the loader accepts and ignores.
+
+With the PATH shims installed, this is what lets upstream tools — orca's
+per-agent default args included — stop encoding permission flags per
+harness: they run the bare command, and the launcher decides.
 
 ## Balanced launches
 
-Every open and resume is balanced by default (ADR 0003): `agentusage
+Every launch and resume is balanced by default (ADR 0003): `agentusage
 balance` picks the account from live quota observations and the command is
 wrapped in the swap tool's public contract — `cswap run <slot>
 --share-history -- …` (claude), `codex-swap run|resume --claim <lease> --
 …` (codex), `codex-swap pi run --claim <lease> -- …` (pi, riding the codex
 account pool). The harness argv after the wrapper's `--` is byte-identical
-to the unbalanced command. `--model` drives fable intent and codex lane
-selection; a claude resume routes on the session's last-used model.
+to the unbalanced command. Routing reads the native `--model` (or codex's
+`-m`) from the forwarded tokens; a claude resume routes on the session's
+last-used model.
 
 Pins and escape hatches: `--x-account <sel>` pins one account (still gated
 by the swap tool), `--x-no-balance` launches raw once, and
@@ -61,54 +90,39 @@ in; `codex exec`, `review`, `resume`, `fork`, prompts, and flag launches
 still balance.
 
 On this machine, bare `claude`/`codex`/`pi` are funk-installed PATH shims
-that exec `agentsurface open <harness> -- "$@"` — every launch balances
-however it was typed. The `AGENTSURFACE_LAUNCH=1` sentinel marks
-already-routed children so shims exec the real binary (ADR 0004);
+that exec `agentsurface <harness> "$@"` — every launch balances however it
+was typed. The `AGENTSURFACE_LAUNCH=1` sentinel marks already-routed
+children so shims exec the real binary (ADR 0004);
 `AGENTSURFACE_SHIM_BYPASS=1` is the manual escape.
 
 ## The launch narrative
 
-Every open and resume reports its decisions on stderr, one labelled row
+Every launch and resume reports its decisions on stderr, one labelled row
 each, before the harness takes the terminal:
 
-    open    claude · model fable
+    open    claude
     cwd     ~/code/agentsurface
     yolo    on · --dangerously-skip-permissions
     account claude-swap slot 1 · full-focus
-    launch  cswap run 1 --share-history -- claude --model fable --dangerously-skip-permissions
+    launch  cswap run 1 --share-history -- claude --dangerously-skip-permissions
 
-stdout stays the result, so `--dry-run` remains a runnable line and
-`--json` a parseable envelope — and `--json` silences the rows outright,
-since the envelope already carries every fact they would report (ADR
-0007). `--x-verbose` adds mechanism rows: the config consulted, the
-`agentusage` command shelled, the session file a resume matched, the
-resolved binary, the sentinel.
-
-## Yolo mode
-
-`~/.config/agentsurface/config.json` can drop each harness's permission
-gates at launch: `{"yolo": true}` (or a per-harness map like `{"yolo":
-{"claude": true, "codex": true, "pi": true}}`) injects
-`--dangerously-skip-permissions` (claude),
-`--dangerously-bypass-approvals-and-sandbox` (codex), or `--approve` (pi —
-its tools never prompt; this only auto-trusts project-local files) into the
-launch spec. `--yolo` / `--no-yolo` override per launch. Utility
-invocations never get the flag, and a flag already forwarded after `--` is
-not duplicated (ADR 0006). A malformed config fails the launch loudly;
-`doctor` reports the config's path, validity, and per-harness state.
-`config.schema.json` in this repo describes the file for editors — name it
-in a `"$schema"` key, which the loader accepts and ignores.
-
-With the PATH shims installed, this is what lets upstream tools — orca's
-per-agent default args included — stop encoding permission flags per
-harness: they run the bare command, and the config decides.
+stdout stays the result, so `--x-dry-run` remains a runnable line and
+`--x-json` a parseable envelope — and `--x-json` silences the rows
+outright, since the envelope already carries every fact they would report
+(ADR 0007). When an x-flag edits the harness's own tokens, the edit is a
+row too: `yolo    off · removed --dangerously-skip-permissions ·
+explicitly forwarded · --x-no-yolo wins`. `--x-verbose` adds mechanism
+rows: the config consulted, the `agentusage` command shelled, the session
+file a resume matched, the resolved binary, the sentinel.
 
 ## For agents
 
 `agentsurface --agent-teaser` is the one-line summary, `--agent-help` the
-runbook. Machine outcomes are one `{schema_version, ok, error, data}`
-envelope on stdout under `--json`. Exit codes are 0 success, 1 domain error,
-2 usage fault — except open and resume, which exit with the launched
+runbook (top level is agentsurface's own namespace — no harness named,
+nothing to forward — so the conventional spellings stay there). Machine
+outcomes are one `{schema_version, ok, error, data}` envelope on stdout
+under `--x-json`. Exit codes are 0 success, 1 domain error, 2 usage fault —
+except harness launches and `x-resume`, which exit with the launched
 harness's own code.
 
 ## Develop
