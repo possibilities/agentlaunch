@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { type BalanceDecision, balanceDisabled, balanceSpec } from "./balance.ts";
+import { BUILTIN_CATALOG_PATH, catalogPath, loadCatalog } from "./catalog.ts";
 import { configPath, loadConfig } from "./config.ts";
 import { CliError, UsageError } from "./errors.ts";
 import type { HarnessName, LaunchSpec, YoloApplication, YoloDecision } from "./harness.ts";
@@ -224,7 +225,21 @@ export async function doctorCommand(context: Context, parts: Partitioned): Promi
       ? `  yolo   ${HARNESS_NAMES.map((h) => `${h} ${config.yolo?.[h] ? "on" : "off"}`).join(", ")}`
       : `  yolo   INVALID: ${config.error}`,
   );
-  return { kind: "result", data: { harnesses: reports, config }, human: lines.join("\n") };
+  const catalog = catalogReport(context);
+  lines.push("catalog", `  path   ${catalog.path} (${catalog.source})`);
+  if (catalog.valid && catalog.harnesses !== null) {
+    lines.push(
+      `  order  ${catalog.harnesses.map((entry) => entry.harness).join(", ")} (default ${catalog.default})`,
+      `  models ${catalog.harnesses.map((entry) => `${entry.harness} ${entry.models}`).join(", ")}`,
+    );
+  } else {
+    lines.push(`  order  INVALID: ${catalog.error}`);
+  }
+  return {
+    kind: "result",
+    data: { harnesses: reports, config, catalog },
+    human: lines.join("\n"),
+  };
 }
 
 interface ConfigReport {
@@ -233,6 +248,45 @@ interface ConfigReport {
   valid: boolean;
   yolo: Record<HarnessName, boolean> | null;
   error: string | null;
+}
+
+interface CatalogReport {
+  source: "built-in" | "custom";
+  path: string;
+  valid: boolean;
+  default: HarnessName | null;
+  harnesses: Array<{ harness: HarnessName; models: number }> | null;
+  error: string | null;
+}
+
+/** Doctor reports a malformed catalog instead of dying on it — same
+ * downgrade as the config. */
+function catalogReport(context: Context): CatalogReport {
+  const custom = catalogPath(context.env, context.home);
+  try {
+    const catalog = loadCatalog(context.env, context.home);
+    return {
+      source: catalog.source,
+      path: catalog.path,
+      valid: true,
+      default: catalog.harness,
+      harnesses: catalog.harnesses.map((entry) => ({
+        harness: entry.harness,
+        models: entry.models.length,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    const isCustom = existsSync(custom);
+    return {
+      source: isCustom ? "custom" : "built-in",
+      path: isCustom ? custom : BUILTIN_CATALOG_PATH,
+      valid: false,
+      default: null,
+      harnesses: null,
+      error: (error as Error).message,
+    };
+  }
 }
 
 /** Doctor reports a malformed config instead of dying on it — diagnosis is

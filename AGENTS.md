@@ -44,6 +44,16 @@ the harnesses actually write, not from their documentation.
   utility-invocation classification (ADR 0005), and session store
   locations with their relocating env vars. Every harness asymmetry lives
   here and nowhere else.
+- `catalog-schema.ts` is the catalog's zod source of truth (fleet
+  conventions: strict objects, every field described, `$schema` stripped
+  by the loader); `scripts/generate-schema.ts` emits `catalog.schema.json`
+  from it, `bun run generate:schema` regenerates, and a drift test fails
+  when the checked-in file lags.
+- `catalog.ts` loads the built-in or custom catalog (replacement, never
+  merge), expands families into per-harness offerings, validates the
+  cross-entry invariants where they are declared, and resolves
+  model/effort requests — order is the tiebreak, defaults fill after
+  selection (ADR 0010).
 - `resolve.ts` finds a session id across the stores and counts sessions;
   ids are validated glob-literal before they touch a pattern.
 - `balance.ts` composes the account-balancing prefix around a spec
@@ -98,6 +108,11 @@ the adapters; append a new numbered record rather than editing an old one.
 - Pi is resumed with `--session <id>`; pi's `--resume` is a picker boolean.
   (cass emits the broken `pi --resume <id>` form — do not copy commands
   from it.)
+- The catalog is data (ADR 0010): it names what exists — harnesses in
+  priority order, models, effort sets, defaults (plural = offering,
+  singular = default) — while the adapters in `harness.ts` own every
+  emission spelling, provider semantics included. zod 4 is the one runtime
+  dependency, adopted with the fleet's config conventions.
 - No invented state: no generated session ids, no extra flags beyond the
   narrated yolo/balance composition. Utility invocations pass through
   byte-identical.

@@ -16,6 +16,22 @@ export function parseHarnessName(value: string): HarnessName {
   throw new UsageError(`unknown harness "${value}" (expected claude, codex, or pi)`);
 }
 
+/**
+ * How a provider name from the catalog combines with a model name when the
+ * harness emits its model argument. Null means the harness has no provider
+ * semantics, and a provider on its catalog include is a catalog fault. Pi
+ * spells providers as a path prefix: openai-codex + gpt-5.6 →
+ * openai-codex/gpt-5.6.
+ */
+export const PROVIDER_SPELLINGS: Record<
+  HarnessName,
+  ((provider: string, model: string) => string) | null
+> = {
+  claude: null,
+  codex: null,
+  pi: (provider, model) => `${provider}/${model}`,
+};
+
 /** What a launch is, apart from launching it. A surface consumes this same
  * shape later, so nothing in here may assume a live terminal. */
 export interface LaunchSpec {

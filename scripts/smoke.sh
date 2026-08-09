@@ -65,6 +65,7 @@ expect_exit 0 run claude --x-help
 expect_exit 0 run x-doctor
 expect_exit 0 run x-doctor --x-json
 expect_out '"harnesses"'
+expect_out '"catalog"'
 
 # Launches, dry runs only. Yolo is on by default (ADR 0009).
 expect_exit 0 run claude --x-dry-run

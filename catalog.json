@@ -1,0 +1,37 @@
+{
+  "$schema": "./catalog.schema.json",
+  "harness": "claude",
+  "families": {
+    "gpt": {
+      "models": [{ "model": "gpt-5.6" }, { "model": "gpt-5.3-codex-spark" }]
+    }
+  },
+  "harnesses": [
+    {
+      "harness": "claude",
+      "efforts": ["low", "medium", "high", "xhigh", "max"],
+      "effort": "max",
+      "models": [
+        { "model": "fable" },
+        { "model": "opus" },
+        { "model": "sonnet" },
+        { "model": "haiku" }
+      ],
+      "model": "fable"
+    },
+    {
+      "harness": "codex",
+      "efforts": ["minimal", "low", "medium", "high", "xhigh"],
+      "effort": "xhigh",
+      "families": [{ "family": "gpt" }],
+      "model": "gpt-5.6"
+    },
+    {
+      "harness": "pi",
+      "efforts": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+      "effort": "high",
+      "families": [{ "family": "gpt", "provider": "openai-codex" }],
+      "model": "gpt-5.6"
+    }
+  ]
+}

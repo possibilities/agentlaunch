@@ -365,4 +365,27 @@ describe("surface", () => {
     expect(harnesses.map((report) => report.harness)).toEqual(["claude", "codex", "pi"]);
     expect(run(["x-doctor", "stray"]).code).toBe(2);
   });
+
+  test("x-doctor reports the catalog, downgrading a malformed custom one", () => {
+    const clean = envelope(run(["x-doctor", "--x-json"]));
+    const catalog = clean.data?.["catalog"] as {
+      source: string;
+      valid: boolean;
+      harnesses: Array<{ harness: string; models: number }>;
+    };
+    expect(catalog.source).toBe("built-in");
+    expect(catalog.valid).toBe(true);
+    expect(catalog.harnesses.map((entry) => entry.harness)).toEqual(["claude", "codex", "pi"]);
+
+    const root = mkdtempSync(join(tmpdir(), "agentsurface-badcat-"));
+    roots.push(root);
+    const home = join(root, "home");
+    mkdirSync(join(home, ".config", "agentsurface"), { recursive: true });
+    writeFileSync(join(home, ".config", "agentsurface", "catalog.json"), "not json");
+    const doctor = run(["x-doctor", "--x-json"], { HOME: home });
+    expect(doctor.code).toBe(0);
+    const bad = envelope(doctor).data?.["catalog"] as { source: string; valid: boolean };
+    expect(bad.valid).toBe(false);
+    expect(bad.source).toBe("custom");
+  });
 });

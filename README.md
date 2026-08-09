@@ -37,6 +37,36 @@ owns the id and refuses, with the candidates named, when that is
 ambiguous. `--x-dry-run` prints the command instead of launching; add
 `--x-json` for the machine envelope.
 
+## The catalog
+
+`catalog.json` (shipped with the checkout) is the ordered description of
+harnesses, their models, and their effort sets (ADR 0010); a custom
+`~/.config/agentsurface/catalog.json` replaces it outright — no merging.
+`catalog.schema.json` describes the file for editors, generated from the
+zod source of truth (`bun run generate:schema`).
+
+- **Families** define a model list once: the `gpt` family is included as-is
+  by codex and through the `openai-codex` provider by pi, so `gpt-5.6`
+  means the same thing on both — pi merely emits `openai-codex/gpt-5.6`.
+  What a provider means is each harness's own semantics; claude and codex
+  have none, and a provider on their includes is a fault.
+- **Efforts** attach per harness and per model — the model's set replaces
+  the harness's — so `max` is allowed exactly where it is real.
+- **Defaults**: a plural key names the offering, its singular the default —
+  the top-level `harness`, each harness's `model` and `effort` (required),
+  and optionally a model's own `effort` overriding the harness default.
+- **Resolution** (the runtime flags consuming it arrive in a later slice):
+  harnesses are walked in catalog order and the earliest entry offering
+  the requested model at the requested effort wins — `gpt-5.6` + `xhigh`
+  picks codex, `gpt-5.6` + `max` skips codex for pi. Defaults fill what
+  the request left unspecified; nothing requested resolves to the default
+  harness.
+- Validation is strict and total at load: unknown keys or families,
+  providers without semantics, duplicates after family expansion, and
+  unsatisfiable defaults are all `catalog_invalid`, and a malformed custom
+  catalog fails rather than falling back. `x-doctor` reports the active
+  catalog's source, order, default, and model counts.
+
 ## Yolo mode
 
 Yolo is on by default (ADR 0009): every launch gets its harness's own
