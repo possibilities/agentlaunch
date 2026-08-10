@@ -26,6 +26,7 @@ import {
   sessionFileFacts,
   sessionStore,
   utilityInvocation,
+  workspaceArguments,
 } from "./harness.ts";
 import { landWorkspace } from "./land.ts";
 import type { Narrator } from "./narrate.ts";
@@ -977,6 +978,11 @@ async function finishLaunch(
           if (spec.harness === "codex") {
             held.lease = acquirePlacementLease(context.env, context.home, workspacePath);
           }
+          const anchored = workspaceArguments(spec.harness, workspacePath);
+          if (anchored.length > 0) {
+            context.narrator.row("anchor", facts(tildePath(workspacePath, context.home), "--cd"));
+          }
+          return anchored;
         },
         narrator: context.narrator,
         env: context.env,

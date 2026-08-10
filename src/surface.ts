@@ -61,13 +61,19 @@ export interface PlaceRequest {
   /**
    * Called once the workspace exists and before anything is started inside it,
    * with the workspace's own path. It is where the caller answers what a
-   * harness would otherwise stop to ask on first sight of a directory, and
-   * where a launch that must not run concurrently claims its place — both need
-   * the real path, which only the backend knows once it has resolved or
+   * harness would otherwise stop to ask on first sight of a directory, where a
+   * launch that must not run concurrently claims its place, and where it
+   * contributes the arguments that only a real path makes sayable — all three
+   * need the path, which only the backend knows once it has resolved or
    * created the workspace. Throwing here refuses the placement before any
    * attachment starts. A backend must call it exactly once outside a dry run.
+   *
+   * Anything returned is appended to the composed command. The tail is the
+   * harness's own argv — a balancing wrapper contributes a head and a `--`,
+   * never a tail — so appending reaches the harness whether or not the launch
+   * was wrapped, which is what makes this backend- and wrapper-generic.
    */
-  prepare?: (workspacePath: string) => void;
+  prepare?: (workspacePath: string) => string[] | void;
   narrator: Narrator;
   env: Environ;
 }

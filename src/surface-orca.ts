@@ -33,12 +33,13 @@ export const orcaBackend: SurfaceBackend = {
   async place(request: PlaceRequest): Promise<Placement> {
     await assertReachable(request.env, request.narrator);
     const resolved = await resolveWorkspace(request);
+    let anchored: string[] = [];
     if (!request.dryRun && resolved.workspace.path !== null) {
-      request.prepare?.(resolved.workspace.path);
+      anchored = request.prepare?.(resolved.workspace.path) ?? [];
     }
     const terminal = request.dryRun
       ? null
-      : await createTerminal(request, resolved.workspace.id, resolved.workspace.path);
+      : await createTerminal(request, resolved.workspace.id, resolved.workspace.path, anchored);
     return {
       backend: "orca",
       project: resolved.project,
@@ -327,11 +328,14 @@ async function createTerminal(
   request: PlaceRequest,
   worktreeId: string | null,
   worktreePath: string | null,
+  anchored: string[],
 ): Promise<string> {
   const selector = worktreeId !== null ? `id:${worktreeId}` : `path:${worktreePath}`;
   // The sentinel marks the placed command as already-routed (ADR 0004), and
   // the `env` spelling holds whether Orca runs it through a shell or not.
-  const command = shellLine(["env", "AGENTSURFACE_LAUNCH=1", ...request.spec.command]);
+  // Anchoring arguments go last: the tail is the harness's own argv, since a
+  // balancing wrapper only ever contributes a head and a `--` (ADR 0023).
+  const command = shellLine(["env", "AGENTSURFACE_LAUNCH=1", ...request.spec.command, ...anchored]);
   const created = await orcaJson(request.env, request.narrator, [
     "terminal",
     "create",

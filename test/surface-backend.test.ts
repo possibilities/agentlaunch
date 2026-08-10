@@ -631,8 +631,22 @@ describe("run names", () => {
     const record = readRecord(world, runId);
     expect(record.name).toBe("fix the auth flow");
     expect(orcaCalls(world)).toContain(
-      `terminal create --worktree id:repo1::${world.workspace} --command env AGENTSURFACE_LAUNCH=1 codex --model gpt-5.6-sol -c 'model_reasoning_effort="high"' --title fix the auth flow --json`,
+      `terminal create --worktree id:repo1::${world.workspace} --command env AGENTSURFACE_LAUNCH=1 codex --model gpt-5.6-sol -c 'model_reasoning_effort="high"' --cd ${world.workspace} --title fix the auth flow --json`,
     );
+  });
+
+  test("codex is anchored to the workspace it was placed in; claude is not", () => {
+    const world = makeWorld();
+    placeNamed(world, "anchored run");
+    const codexCall = orcaCalls(world).find((call) => call.startsWith("terminal create"))!;
+    // Absolute, and last: a codex thread attached to a shared app-server
+    // records the server's directory unless it is told this one (ADR 0023).
+    expect(codexCall).toContain(`--cd ${world.workspace} --title`);
+
+    const other = makeWorld();
+    run(other, ["--x-harness", "claude", "--x-surface", "--x-no-yolo", "--x-json"]);
+    const claudeCall = orcaCalls(other).find((call) => call.startsWith("terminal create"))!;
+    expect(claudeCall).not.toContain("--cd");
   });
 
   test("a created workspace is labelled with the name, verbatim", () => {

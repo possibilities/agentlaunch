@@ -72,6 +72,25 @@ export function nameArguments(harness: HarnessName, name: string): string[] | nu
   }
 }
 
+/**
+ * How a harness is told which directory it is working in, when the workspace
+ * is only known after it has been created (ADR 0023). Only codex needs it, and
+ * only because of how it reaches its model: a session attached to a shared
+ * app-server through `--remote` has its thread created *server-side*, so the
+ * thread records the app-server's working directory rather than the terminal's
+ * — `/` for a launchd-started one. Everything that identifies a codex session
+ * by where it is working then fails: the bus cannot place a peer in a
+ * workspace, and session discovery (ADR 0014) matches a cwd that never occurs.
+ *
+ * An absolute path is required. Verified against codex-cli 0.147.0: `--cd
+ * <abs>` reaches the thread through a remote attach, while `--cd .` and the
+ * inherited process directory do not. claude and pi take nothing here — they
+ * run in the terminal's own directory and record it.
+ */
+export function workspaceArguments(harness: HarnessName, workspacePath: string): string[] {
+  return harness === "codex" ? ["--cd", workspacePath] : [];
+}
+
 /** The first forwarded token that natively claims the name dimension —
  * `--name`, `--name=…`, or the `-n` alias claude and pi share — or null.
  * Codex has none, so nothing there can conflict. */
