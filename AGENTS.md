@@ -58,6 +58,14 @@ the harnesses actually write, not from their documentation.
   selection (ADR 0010).
 - `resolve.ts` finds a session id across the stores and counts sessions;
   ids are validated glob-literal before they touch a pattern.
+- `surface.ts` is the backend-generic surface API (ADR 0012/0013): the
+  land operation's types, the backend registry, and nothing any one
+  backend looks like. `surface-orca.ts` is the Orca adapter — its CLI
+  vocabulary, selectors, and ensure mechanics live there and nowhere else.
+- `runs.ts` owns run records and session-id discovery (ADR 0014): one
+  JSON file per run under `~/.local/state/agentsurface/runs/`, ids
+  validated like session ids, discovery by workspace-cwd and birth-time
+  match against the stores.
 - `balance.ts` composes the account-balancing prefix around a spec
   (ADR 0003): shells `agentusage balance --json`, wraps with cswap /
   codex-swap [pi] run, never edits the harness argv after the wrapper's
@@ -121,10 +129,14 @@ the adapters; append a new numbered record rather than editing an old one.
   the one runtime dependency, adopted with the fleet's config conventions.
 - Surfaces are pluggable (ADR 0012): the surface API is backend-generic
   and documented; Orca is the first backend, not the concept, and nothing
-  Orca-shaped may leak outside its adapter.
-- No invented state: no generated session ids, no extra flags beyond the
-  narrated yolo/balance composition. Utility invocations pass through
-  byte-identical.
+  Orca-shaped may leak outside its adapter. One operation lands a
+  finished spec (ADR 0013), ensure materializes what the request implies
+  and never invents a name, and every landing writes a run record whose
+  session id is discovered, never assigned (ADR 0014).
+- No invented state in the harness's world: no generated session ids, no
+  extra flags beyond the narrated yolo/balance composition. Utility
+  invocations pass through byte-identical. The run registry is the
+  surface layer's own bookkeeping, outside the harness's argv and stores.
 - Comments state constraints the code can't show; no narration.
 
 ## The fleet

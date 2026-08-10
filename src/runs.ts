@@ -1,0 +1,147 @@
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { Glob } from "bun";
+import { CliError, UsageError } from "./errors.ts";
+import type { HarnessName } from "./harness.ts";
+import { sessionFileFacts, sessionStore } from "./harness.ts";
+import type { Environ } from "./paths.ts";
+import { stateDirectory } from "./paths.ts";
+
+/**
+ * The run registry (ADR 0014): a run is a session plus where it landed, and
+ * the record is agentsurface's own bookkeeping — the one identifier a
+ * surface landing can promise immediately, since a session id is not always
+ * knowable at launch (codex mints its uuid7 during startup). The run id
+ * names the record file, rides the envelope, and is never passed to the
+ * harness. One file per run, so concurrent landings never contend.
+ */
+export interface RunRecord {
+  run_id: string;
+  created_at: string;
+  kind: "open" | "resume";
+  backend: string;
+  harness: HarnessName;
+  harness_value: string | null;
+  workspace: { name: string; path: string; id: string | null };
+  /** Backend-issued terminal handle — an address for steering, not the
+   * run's identity; its lifetime is the backend runtime's. */
+  terminal: string | null;
+  command: string[];
+  session_id: string | null;
+}
+
+/** Same alphabet as session ids: every character glob- and path-literal. */
+const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function assertRunId(runId: string): void {
+  if (!RUN_ID.test(runId)) {
+    throw new UsageError(`run id "${runId}" must be alphanumeric plus dot, dash, or underscore`);
+  }
+}
+
+export function runsDirectory(env: Environ, home: string): string {
+  return join(stateDirectory(env, home, "agentsurface"), "runs");
+}
+
+function recordPath(env: Environ, home: string, runId: string): string {
+  return join(runsDirectory(env, home), `${runId}.json`);
+}
+
+export function writeRunRecord(env: Environ, home: string, record: RunRecord): string {
+  const directory = runsDirectory(env, home);
+  mkdirSync(directory, { recursive: true });
+  const path = join(directory, `${record.run_id}.json`);
+  Bun.write(path, `${JSON.stringify(record, null, 2)}\n`);
+  return path;
+}
+
+export async function readRunRecord(env: Environ, home: string, runId: string): Promise<RunRecord> {
+  assertRunId(runId);
+  const path = recordPath(env, home, runId);
+  if (!existsSync(path)) {
+    throw new CliError(
+      "run_not_found",
+      `run "${runId}" has no record under ${runsDirectory(env, home)}`,
+      "agentsurface x-runs lists the recorded runs",
+    );
+  }
+  return (await Bun.file(path).json()) as RunRecord;
+}
+
+/** Newest first — records are tiny and the directory is flat. */
+export async function listRunRecords(env: Environ, home: string): Promise<RunRecord[]> {
+  const directory = runsDirectory(env, home);
+  if (!existsSync(directory)) return [];
+  const records: RunRecord[] = [];
+  for (const entry of readdirSync(directory)) {
+    if (!entry.endsWith(".json")) continue;
+    try {
+      records.push((await Bun.file(join(directory, entry)).json()) as RunRecord);
+    } catch {
+      // A half-written or foreign file is not a run; listing skips it.
+    }
+  }
+  records.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return records;
+}
+
+/**
+ * Session ids are discovered, never assigned (ADR 0014): the run's session
+ * is the store entry born in the run's workspace at or after the landing —
+ * every store carries the cwd (codex session_meta, pi header, claude's
+ * in-record field), so the workspace path is the join key. Earliest birth
+ * wins: a later run in the same workspace has its own later session.
+ */
+export async function discoverSessionId(
+  record: RunRecord,
+  env: Environ,
+  home: string,
+): Promise<string | null> {
+  const store = sessionStore(record.harness, env, home);
+  if (!existsSync(store.root)) return null;
+  const landedAt = Date.parse(record.created_at);
+  let found: { sessionId: string; bornAt: number } | null = null;
+  for (const pattern of store.patternsFor("*")) {
+    const glob = new Glob(pattern);
+    for await (const relative of glob.scan({ cwd: store.root, onlyFiles: true })) {
+      // Compressed rollouts are archived history, never a fresh session.
+      if (relative.endsWith(".zst")) continue;
+      const path = join(store.root, relative);
+      const bornAt = birthTime(path);
+      if (bornAt === null || bornAt < landedAt) continue;
+      if (found !== null && bornAt >= found.bornAt) continue;
+      const facts = await sessionFileFacts(record.harness, path);
+      if (facts.cwd !== record.workspace.path || facts.sessionId === null) continue;
+      found = { sessionId: facts.sessionId, bornAt };
+    }
+  }
+  return found?.sessionId ?? null;
+}
+
+/** Creation time where the filesystem records it (APFS does); mtime is the
+ * fallback and only ever delays discovery, never misattributes it. */
+function birthTime(path: string): number | null {
+  try {
+    const stats = statSync(path);
+    const birth = stats.birthtimeMs;
+    return birth > 0 ? birth : stats.mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/** Backfill on first sight: discovery rewrites the record so later readers
+ * (and the future steer command) get the session id for free. */
+export async function resolveRun(
+  env: Environ,
+  home: string,
+  runId: string,
+): Promise<{ record: RunRecord; discovered: boolean }> {
+  const record = await readRunRecord(env, home, runId);
+  if (record.session_id !== null) return { record, discovered: false };
+  const sessionId = await discoverSessionId(record, env, home);
+  if (sessionId === null) return { record, discovered: false };
+  const updated = { ...record, session_id: sessionId };
+  writeRunRecord(env, home, updated);
+  return { record: updated, discovered: true };
+}

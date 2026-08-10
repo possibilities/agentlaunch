@@ -1,13 +1,12 @@
 # agentsurface
 
-One launcher for agent harnesses. `agentsurface claude` (or `codex`, or
-`pi`) starts that harness in this terminal; `agentsurface x-resume` reopens
-a stored session by id no matter which harness owns it. Today it is a
-runner — a passthrough wrapper around the harness CLIs. Later slices land
-the same launches on a surface (a managed environment behind a pluggable
-backend API — Orca is the first backend, ADR 0012) via more `--x-*`
-flags, and the launch spec the runner execs is exactly what a surface
-backend will consume.
+One launcher for agent harnesses. `agentsurface --x-harness claude` (or
+`codex`, or `pi`) starts that harness in this terminal; `agentsurface
+x-resume` reopens a stored session by id no matter which harness owns it;
+`--x-surface` lands the same launch on a surface instead — a managed
+environment behind a pluggable backend API (Orca is the first backend,
+ADR 0012) — and returns a run id. The launch spec the runner execs is
+exactly what a surface backend consumes (ADR 0013).
 
 ## Install
 
@@ -53,6 +52,44 @@ injection; resumes never do — a session continues on its own model.
 and refuses, with the candidates named, when that is ambiguous.
 `--x-dry-run` prints the command instead of launching; add `--x-json` for
 the machine envelope.
+
+## On a surface
+
+    agentsurface --x-harness claude --x-surface "fix the tests"
+    agentsurface --x-harness codex --x-surface --x-new-workspace fix-tests --x-json
+    agentsurface x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60 --x-surface
+    agentsurface x-runs
+    agentsurface x-run <run-id>
+
+`--x-surface` lands the launch in a managed workspace and the command
+returns instead of becoming the harness (ADR 0013). The same composed
+command — balanced, yolo'd, model/effort injected — starts in a terminal
+there; the surface API is backend-generic and Orca is the first backend
+(ADR 0012), its worktrees implementing workspaces. Where it lands:
+
+- default — the workspace containing the cwd (a resume's default is the
+  workspace containing the *session's own* cwd, so a conversation
+  continues where it lived);
+- `--x-workspace <sel>` — an existing workspace, selector interpreted by
+  the backend (orca: `name:`, `path:`, `branch:`, `id:`);
+- `--x-new-workspace <name>` — created on demand, with **ensure**
+  (ADR 0013): the project it belongs to is registered automatically —
+  from `--x-project` (a registered name, or `path:<repo>` to register
+  one), else the cwd's git repository. Ensure never invents a name: no
+  flags and no enclosing workspace is a loud fault, not a conjured
+  worktree.
+
+Every landing writes a **run record** (ADR 0014) — one JSON file under
+`~/.local/state/agentsurface/runs/` — and prints its run id (the envelope
+under `--x-json`, legal here without `--x-dry-run`, carries `run_id` and
+`surface {backend, project, workspace, terminal}`). The session id is
+*discovered*, never assigned: codex mints its id only at startup, so
+`x-run <run-id>` matches the store entry born in the run's workspace and
+backfills the record; `x-runs` lists everything landed. The terminal
+handle in the record is the backend's address for the future steer verb.
+A surface dry run resolves read-only, and a refused surface (runtime
+unreachable, workspace missing) fails the launch loudly — never a silent
+fall-back to this terminal. Utility invocations cannot land.
 
 ## The catalog
 
@@ -142,9 +179,9 @@ balancing stack is missing. Shimmed `codex login --device-auth` just logs
 in; `codex exec`, `review`, `resume`, `fork`, prompts, and flag launches
 still balance.
 
-On this machine, bare `claude`/`codex`/`pi` are funk-installed PATH shims
-that exec `agentsurface <harness> "$@"` — every launch balances however it
-was typed. The `AGENTSURFACE_LAUNCH=1` sentinel marks already-routed
+On this machine, bare `claude`/`codex`/`pi` are agentdots-installed PATH
+shims that exec `agentsurface --x-harness <harness> "$@"` — every launch
+balances however it was typed. The `AGENTSURFACE_LAUNCH=1` sentinel marks already-routed
 children so shims exec the real binary (ADR 0004);
 `AGENTSURFACE_SHIM_BYPASS=1` is the manual escape.
 

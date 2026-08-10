@@ -20,6 +20,7 @@ import {
   modelArguments,
   modelDimensionToken,
   parseHarnessName,
+  sessionFileFacts,
   sessionStore,
   utilityInvocation,
 } from "./harness.ts";
@@ -28,6 +29,10 @@ import { facts, shellLine, tildePath } from "./narrate.ts";
 import type { Partitioned } from "./partition.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
+import type { RunRecord } from "./runs.ts";
+import { listRunRecords, resolveRun, runsDirectory, writeRunRecord } from "./runs.ts";
+import type { SurfaceBackend, WorkspaceIntent } from "./surface.ts";
+import { BACKENDS, DEFAULT_BACKEND, surfaceBackend } from "./surface.ts";
 
 export interface Context {
   env: Environ;
@@ -69,6 +74,12 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
   context.narrator.row("cwd", tildePath(context.cwd, context.home));
 
   const utility = utilityInvocation(harness, tokens);
+  const surface = surfaceRequest(parts, context.cwd, value);
+  if (utility && surface !== null) {
+    throw new UsageError(
+      `"${head}" is a utility invocation; it passes through and cannot land on a surface`,
+    );
+  }
   // Colon forms own both dimensions (ADR 0011): they fault on a forwarded
   // counterpart, and mean nothing on a utility invocation. The name route
   // yields per dimension — the caller's native spelling wins, unjudged.
@@ -128,7 +139,76 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
     utility,
     model,
     effort,
+    surface === null ? null : { ...surface, kind: "open", harnessValue: value },
   );
+}
+
+/** The surface flags as one decision: which backend, and the workspace
+ * intent the landing should satisfy. The anchor path — the invocation cwd
+ * on a launch, the session's own cwd on a resume — is what "current" means
+ * and what a new workspace's project is inferred from. Null anchor happens
+ * only on a resume whose session file is nowhere local. */
+function surfaceRequest(
+  parts: Partitioned,
+  anchor: string | null,
+  title: string,
+): { backend: SurfaceBackend; intent: WorkspaceIntent; title: string } | null {
+  const scopes = parts.scoped.get("x-surface");
+  const workspace = parts.values["x-workspace"];
+  const newWorkspace = parts.values["x-new-workspace"];
+  const project = parts.values["x-project"];
+  if (scopes === undefined) {
+    const stray =
+      workspace !== undefined
+        ? "--x-workspace"
+        : newWorkspace !== undefined
+          ? "--x-new-workspace"
+          : project !== undefined
+            ? "--x-project"
+            : null;
+    if (stray !== null) {
+      throw new UsageError(`${stray} says where a surface landing lives; add --x-surface`);
+    }
+    return null;
+  }
+  const names = [...new Set(scopes.filter((scope) => scope !== "all"))];
+  if (names.length > 1) {
+    throw new UsageError(`--x-surface names more than one backend (${names.join(", ")}); pick one`);
+  }
+  const backend = surfaceBackend(names[0] ?? DEFAULT_BACKEND);
+  if (workspace !== undefined && newWorkspace !== undefined) {
+    throw new UsageError(
+      "--x-workspace picks an existing workspace and --x-new-workspace creates one; pick one",
+    );
+  }
+  if (project !== undefined && newWorkspace === undefined) {
+    throw new UsageError("--x-project only qualifies --x-new-workspace");
+  }
+  if (newWorkspace !== undefined) {
+    if (anchor === null && project === undefined) {
+      throw new CliError(
+        "workspace_not_found",
+        "the session's cwd is unknown locally, so no project can be inferred",
+        "pass --x-project <selector> to name one",
+      );
+    }
+    return {
+      backend,
+      title,
+      intent: { kind: "new", name: newWorkspace, project: project ?? null, path: anchor ?? "" },
+    };
+  }
+  if (workspace !== undefined) {
+    return { backend, title, intent: { kind: "existing", selector: workspace } };
+  }
+  if (anchor === null) {
+    throw new CliError(
+      "workspace_not_found",
+      "the session's cwd is unknown locally, so the current workspace cannot be resolved",
+      "pass --x-workspace <selector> or --x-new-workspace <name>",
+    );
+  }
+  return { backend, title, intent: { kind: "current", path: anchor } };
 }
 
 /** First model value in the forwarded tokens — --model, --model=, or
@@ -180,6 +260,22 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
     context.narrator.row("cwd", tildePath(context.cwd, context.home));
     context.narrator.detail("session", tildePath(first.path, context.home));
   }
+  // A surface resume lands where the conversation lived: the session's own
+  // cwd (every store records it) anchors the current-workspace default and
+  // the project inference. Only looked up when a surface is asked for.
+  let anchor: string | null = null;
+  if (parts.scoped.get("x-surface") !== undefined) {
+    const path =
+      sessionPath ??
+      (await findSessions(sessionId, context.env, context.home)).find(
+        (match) => match.harness === harness,
+      )?.path ??
+      null;
+    anchor = path === null ? null : (await sessionFileFacts(harness, path)).cwd;
+    if (anchor !== null) context.narrator.detail("anchor", `${anchor} · the session's cwd`);
+  }
+  const surface = surfaceRequest(parts, anchor, `${harness} resume`);
+
   const model = await resumeRoutingModel(context, harness, sessionId, sessionPath, forwarded);
   if (model !== undefined) context.narrator.detail("model", `${model} · drives routing`);
   const yolo = resolveYolo(context, parts, harness);
@@ -192,6 +288,9 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
     yolo,
     applied,
     false,
+    NO_DIMENSION,
+    NO_DIMENSION,
+    surface === null ? null : { ...surface, kind: "resume", harnessValue: harnessFlag ?? null },
   );
 }
 
@@ -311,9 +410,22 @@ export async function doctorCommand(context: Context, parts: Partitioned): Promi
   } else {
     lines.push(`  order  INVALID: ${catalog.error}`);
   }
+  const backends = [];
+  lines.push("surface");
+  for (const backend of Object.values(BACKENDS)) {
+    const health = await backend.doctor(context.env);
+    backends.push({ backend: backend.name, ...health });
+    lines.push(
+      `  ${backend.name.padEnd(6)} ${health.reachable ? "reachable" : "unreachable"} · ${health.detail}`,
+    );
+  }
+  const runs = await listRunRecords(context.env, context.home);
+  lines.push(
+    `  runs   ${runs.length} recorded · ${tildePath(runsDirectory(context.env, context.home), context.home)}`,
+  );
   return {
     kind: "result",
-    data: { harnesses: reports, config, catalog },
+    data: { harnesses: reports, config, catalog, surface: { backends, runs: runs.length } },
     human: lines.join("\n"),
   };
 }
@@ -367,6 +479,55 @@ function catalogReport(context: Context): CatalogReport {
   }
 }
 
+export async function runsCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  if (parts.harness.length > 0) throw new UsageError("x-runs takes no arguments");
+  const records = await listRunRecords(context.env, context.home);
+  const lines = records.map((record) =>
+    facts(
+      record.run_id,
+      record.backend,
+      record.harness,
+      record.workspace.name,
+      record.session_id ?? "session not yet discovered",
+      record.created_at,
+    ),
+  );
+  return {
+    kind: "result",
+    data: { runs: records },
+    human: lines.length > 0 ? lines.join("\n") : "no recorded runs",
+  };
+}
+
+export async function runCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  const [runId, ...rest] = parts.harness;
+  if (runId === undefined) throw new UsageError("x-run requires a run id");
+  if (rest.length > 0) throw new UsageError("x-run takes exactly one run id");
+  const { record, discovered } = await resolveRun(context.env, context.home, runId);
+  if (discovered) {
+    context.narrator.row(
+      "session",
+      `${record.session_id} · discovered from the ${record.harness} store`,
+    );
+  }
+  const label = (name: string, value: string): string => `${name.padEnd(10)}${value}`;
+  const lines = [
+    label("run", record.run_id),
+    label("created", record.created_at),
+    label("kind", record.kind),
+    label("backend", record.backend),
+    label("harness", facts(record.harness, record.harness_value ?? undefined)),
+    label(
+      "workspace",
+      facts(record.workspace.name, tildePath(record.workspace.path, context.home)),
+    ),
+    label("terminal", record.terminal ?? "none recorded"),
+    label("session", record.session_id ?? "not yet discovered"),
+    label("command", shellLine(record.command)),
+  ];
+  return { kind: "result", data: record, human: lines.join("\n") };
+}
+
 /** Doctor reports a malformed config instead of dying on it — diagnosis is
  * its whole job. */
 function configReport(context: Context): ConfigReport {
@@ -392,6 +553,15 @@ function configReport(context: Context): ConfigReport {
 
 const NO_DIMENSION: DimensionReport = { value: null, source: null };
 
+/** A launch that lands on a surface instead of becoming the harness. */
+interface SurfaceLaunch {
+  backend: SurfaceBackend;
+  intent: WorkspaceIntent;
+  title: string;
+  kind: "open" | "resume";
+  harnessValue: string | null;
+}
+
 async function finishLaunch(
   context: Context,
   parts: Partitioned,
@@ -402,9 +572,12 @@ async function finishLaunch(
   utility: boolean,
   model: DimensionReport = NO_DIMENSION,
   effort: DimensionReport = NO_DIMENSION,
+  surface: SurfaceLaunch | null = null,
 ): Promise<Outcome> {
   const dryRun = parts.bools.has("x-dry-run");
-  if (parts.bools.has("x-json") && !dryRun) {
+  // A surface landing returns instead of becoming the harness, so its
+  // envelope needs no dry run.
+  if (parts.bools.has("x-json") && !dryRun && surface === null) {
     throw new UsageError(
       "this command launches an interactive harness; --x-json needs --x-dry-run",
     );
@@ -448,11 +621,6 @@ async function finishLaunch(
     context.narrator.row("account", describeAccount(balanced.decision));
   }
 
-  if (!dryRun) {
-    context.narrator.row("launch", shellLine(launchSpec.command));
-    return { kind: "launch", spec: launchSpec };
-  }
-  context.narrator.row("dry run", "nothing launched · command on stdout");
   const data = {
     harness: spec.harness,
     session_id: spec.sessionId,
@@ -467,6 +635,92 @@ async function finishLaunch(
     effort: effort.value,
     effort_source: effort.source,
   };
+
+  if (surface !== null) {
+    const landing = await surface.backend.land({
+      spec: launchSpec,
+      intent: surface.intent,
+      title: surface.title,
+      dryRun,
+      narrator: context.narrator,
+      env: context.env,
+    });
+    context.narrator.row("surface", surface.backend.name);
+    if (landing.project !== null) {
+      context.narrator.row(
+        "project",
+        facts(
+          landing.project.name,
+          landing.project.created ? (dryRun ? "would register" : "registered") : "existing",
+        ),
+      );
+    }
+    context.narrator.row(
+      "workspace",
+      facts(
+        landing.workspace.name,
+        landing.workspace.created
+          ? "created"
+          : dryRun && surface.intent.kind === "new"
+            ? "would create"
+            : "existing",
+        landing.workspace.path === null
+          ? undefined
+          : tildePath(landing.workspace.path, context.home),
+      ),
+    );
+    let runId: string | null = null;
+    if (!dryRun) {
+      runId = crypto.randomUUID();
+      const record: RunRecord = {
+        run_id: runId,
+        created_at: new Date().toISOString(),
+        kind: surface.kind,
+        backend: surface.backend.name,
+        harness: spec.harness,
+        harness_value: surface.harnessValue,
+        workspace: {
+          name: landing.workspace.name,
+          // Outside a dry run a landed workspace always has its path.
+          path: landing.workspace.path ?? context.cwd,
+          id: landing.workspace.id,
+        },
+        terminal: landing.terminal,
+        command: launchSpec.command,
+        session_id: spec.sessionId,
+      };
+      const recordPath = writeRunRecord(context.env, context.home, record);
+      context.narrator.detail("record", tildePath(recordPath, context.home));
+      context.narrator.row("run", runId);
+      context.narrator.row(
+        "launch",
+        facts(shellLine(launchSpec.command), `on ${surface.backend.name}`),
+      );
+    } else {
+      context.narrator.row("dry run", "nothing landed · command on stdout");
+    }
+    const surfaceData = {
+      ...data,
+      run_id: runId,
+      surface: {
+        backend: surface.backend.name,
+        project: landing.project,
+        workspace: landing.workspace,
+        terminal: landing.terminal,
+      },
+    };
+    return {
+      kind: "result",
+      data: surfaceData,
+      human: runId ?? shellLine(launchSpec.command),
+    };
+  }
+
+  if (!dryRun) {
+    context.narrator.row("launch", shellLine(launchSpec.command));
+    return { kind: "launch", spec: launchSpec };
+  }
+  context.narrator.row("dry run", "nothing launched · command on stdout");
   return { kind: "result", data, human: shellLine(launchSpec.command) };
 }
 
