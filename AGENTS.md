@@ -58,8 +58,8 @@ the harnesses actually write, not from their documentation.
   selection (ADR 0010).
 - `resolve.ts` finds a session id across the stores and counts sessions;
   ids are validated glob-literal before they touch a pattern.
-- `surface.ts` is the backend-generic surface API (ADR 0012/0013): the
-  land operation's types, the backend registry, and nothing any one
+- `surface.ts` is the backend-generic surface API (ADR 0012/0013/0022): the
+  Place operation's types, the backend registry, and nothing any one
   backend looks like. `surface-orca.ts` is the Orca adapter — its CLI
   vocabulary, selectors, and ensure mechanics live there and nowhere else.
 - `runs.ts` owns run records and session-id discovery (ADR 0014): one
@@ -132,9 +132,9 @@ the adapters; append a new numbered record rather than editing an old one.
   runtime dependency, adopted with the fleet's config conventions.
 - Surfaces are pluggable (ADR 0012): the surface API is backend-generic
   and documented; Orca is the first backend, not the concept, and nothing
-  Orca-shaped may leak outside its adapter. One operation lands a
-  finished spec (ADR 0013), ensure materializes what the request implies
-  and never invents a name, and every landing writes a run record whose
+  Orca-shaped may leak outside its adapter. Place puts a finished spec on
+  a Surface (ADR 0013/0022), ensure materializes what the request implies
+  and never invents a name, and every Placement writes a run record whose
   session id is discovered, never assigned (ADR 0014).
 - No invented state in the harness's world: no generated session ids, no
   extra flags beyond the narrated yolo/balance composition. Utility

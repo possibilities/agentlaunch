@@ -33,9 +33,9 @@ import { facts, shellLine, tildePath } from "./narrate.ts";
 import type { Partitioned } from "./partition.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
-import type { LandingLease, RunRecord } from "./runs.ts";
+import type { PlacementLease, RunRecord } from "./runs.ts";
 import {
-  acquireLandingLease,
+  acquirePlacementLease,
   assertRunNameAvailable,
   listRunRecords,
   resolveRun,
@@ -350,7 +350,7 @@ async function resolveProvenance(
   if (record.backend !== backend) {
     context.narrator.detail(
       "from",
-      `run ${record.run_id} landed on ${record.backend} · matching by path on ${backend}`,
+      `run ${record.run_id} was placed on ${record.backend} · matching by path on ${backend}`,
     );
   }
   return {
@@ -415,7 +415,7 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
     context.narrator.row("cwd", tildePath(context.cwd, context.home));
     context.narrator.detail("session", tildePath(first.path, context.home));
   }
-  // A surface resume lands where the conversation lived: the session's own
+  // A surface resume is placed where the conversation lived: the session's own
   // cwd (every store records it) anchors the current-workspace default and
   // the project inference. Only looked up when a surface is asked for.
   let anchor: string | null = null;
@@ -804,7 +804,7 @@ async function resolveWorkspaceRef(
     if (record.backend !== backend) {
       context.narrator.detail(
         "land",
-        `run ${record.run_id} landed on ${record.backend} · matching by path on ${backend}`,
+        `run ${record.run_id} was placed on ${record.backend} · matching by path on ${backend}`,
       );
     }
     return record.workspace.id !== null && record.backend === backend
@@ -858,7 +858,7 @@ function configReport(context: Context): ConfigReport {
 
 const NO_DIMENSION: DimensionReport = { value: null, source: null };
 
-/** A launch that lands on a surface instead of becoming the harness. */
+/** A launch that is placed on a Surface instead of becoming the harness. */
 interface SurfaceLaunch {
   backend: SurfaceBackend;
   intent: WorkspaceIntent;
@@ -955,7 +955,7 @@ async function finishLaunch(
     }
     // Held rather than bound, because the lease is taken inside the backend's
     // own call and has to survive back out here to be released on failure.
-    const held: { lease: LandingLease | null } = { lease: null };
+    const held: { lease: PlacementLease | null } = { lease: null };
     const placement = await surface.backend
       .place({
         spec: launchSpec,
@@ -975,7 +975,7 @@ async function finishLaunch(
             context.narrator.row("trust", facts(spec.harness, `workspace ${trust}`));
           }
           if (spec.harness === "codex") {
-            held.lease = acquireLandingLease(context.env, context.home, workspacePath);
+            held.lease = acquirePlacementLease(context.env, context.home, workspacePath);
           }
         },
         narrator: context.narrator,
@@ -1035,7 +1035,7 @@ async function finishLaunch(
         name: surface.name,
         workspace: {
           name: placement.workspace.name,
-          // Outside a dry run a landed workspace always has its path.
+          // Outside a dry run a placed Workspace always has its path.
           path: placement.workspace.path ?? context.cwd,
           id: placement.workspace.id,
         },
@@ -1052,7 +1052,7 @@ async function finishLaunch(
         facts(shellLine(launchSpec.command), `on ${surface.backend.name}`),
       );
     } else {
-      context.narrator.row("dry run", "nothing landed · command on stdout");
+      context.narrator.row("dry run", "nothing placed · command on stdout");
     }
     const surfaceData = {
       ...data,

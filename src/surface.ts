@@ -7,12 +7,12 @@ import { orcaBackend } from "./surface-orca.ts";
 /**
  * The surface API (ADR 0012): one backend-generic contract every surface
  * implements. The core hands a finished launch spec across this seam with a
- * workspace intent and gets back where it landed; nothing backend-shaped may
+ * workspace intent and gets back where it was placed; nothing backend-shaped may
  * appear in these types, and everything a backend's own CLI or state looks
  * like lives in its adapter.
  */
 
-/** Where a landing should live. "current" and "new" carry the path the
+/** Where a Placement should live. "current" and "new" carry the path the
  * intent is anchored to — the invocation cwd on a launch, the session's own
  * cwd on a resume. Ensure (ADR 0013) materializes what the intent implies:
  * registration always, creation only when the operator named it. */
@@ -34,7 +34,7 @@ export type Provenance =
   | { kind: "none" }
   /** A workspace named in the backend's own selector vocabulary. */
   | { kind: "selector"; selector: string }
-  /** The workspace a previous run landed in. The path is portable across
+  /** The workspace a previous run was placed in. The path is portable across
    * backends; the id belongs to the backend that recorded it. */
   | {
       kind: "run";
@@ -46,7 +46,7 @@ export type Provenance =
 export interface PlaceRequest {
   spec: LaunchSpec;
   intent: WorkspaceIntent;
-  /** Display name for the landed terminal: the run name when the operator
+  /** Display name for the placed terminal: the run name when the operator
    * gave one, the harness value otherwise. */
   title: string;
   /** The operator's own label for this run (`--x-name`), or null. Distinct
@@ -78,7 +78,7 @@ export interface Placement {
   project: { name: string; created: boolean } | null;
   /** Path and id are null only when a dry run declined to create. */
   workspace: { name: string; path: string | null; id: string | null; created: boolean };
-  /** Backend-issued handle for the landed terminal; null on a dry run. */
+  /** Backend-issued handle for the placed terminal; null on a dry run. */
   terminal: string | null;
   /** What the backend did with the requested provenance. Backends differ in
    * what they can express, so a drop is reported, never silent. */
@@ -150,7 +150,7 @@ export interface BackendHealth {
 export interface SurfaceBackend {
   readonly name: string;
   /** Place a finished launch spec: ensure the entities the intent implies,
-   * start the command in the workspace, report where it landed. */
+   * start the command in the workspace, report where it was placed. */
   place(request: PlaceRequest): Promise<Placement>;
   /** Report an existing workspace: identity, attachments, and the facts only
    * this backend holds. Read-only. */

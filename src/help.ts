@@ -28,8 +28,8 @@ Launch x-flags:
                          What it runs at; both parts required. One of
                          --x-harness and --x-level is required.
   --x-name <name>        Name this run (claude/pi --name; codex has none)
-  --x-surface [backend]  Land on a surface instead of this terminal
-  --x-workspace <sel>    Surface workspace to land in (default: current)
+  --x-surface [backend]  Place on a surface instead of this terminal
+  --x-workspace <sel>    Surface workspace to place in (default: current)
   --x-new-workspace <n>  Create the workspace, registering its project
   --x-project <sel>      Project for --x-new-workspace (default: inferred)
   --x-from <ref>         What the new workspace descends from
@@ -40,7 +40,7 @@ Launch x-flags:
   --x-no-balance         Launch unbalanced (raw harness command)
   --x-dry-run            Print the command instead of launching
   --x-json               Print the machine envelope (launches need
-                         --x-dry-run unless they land on a surface)
+                         --x-dry-run unless placed on a surface)
   --x-verbose            Add mechanism rows to the stderr narrative
   --x-help               Show a command's help
 
@@ -49,7 +49,7 @@ Top level only (nothing to forward): --help, -h · --version, -V ·
 
 The resolved model and effort are injected in the harness's own spelling,
 and yolo is on by default. Launch commands exit with the harness's code;
-a surface landing returns a run id instead and exits 0.
+a surface Placement returns a run id instead and exits 0.
 `;
 
 export const HELP: Record<string, string> = {
@@ -85,14 +85,14 @@ wins and nothing is injected for that dimension. Utility invocations
 (codex login, claude mcp, bare --version…) get no injection at all, and
 --x-level on one is a usage fault.
 
-Surface x-flags (ADR 0012/0013 — the launch lands on a surface and the
-command returns an envelope instead of becoming the harness):
-  --x-surface [backend]  Land on a surface. The optional value names the
+Surface x-flags (ADR 0012/0013/0022 — the launch is placed on a surface
+and the command returns an envelope instead of becoming the harness):
+  --x-surface [backend]  Place on a surface. The optional value names the
                          backend; bare means the default (orca).
-  --x-workspace <sel>    Land in an existing workspace (selector is the
+  --x-workspace <sel>    Place in an existing workspace (selector is the
                          backend's own; orca takes name:, path:, branch:,
                          id:). Default: the workspace containing the cwd.
-  --x-new-workspace <n>  Create workspace <n> and land there. Its project
+  --x-new-workspace <n>  Create workspace <n> and place there. Its project
                          is registered on demand (ensure): from
                          --x-project, else the cwd's git repository.
   --x-project <sel>      Project for --x-new-workspace — a registered name,
@@ -108,7 +108,7 @@ command returns an envelope instead of becoming the harness):
                          a launch-time name (claude and pi --name); codex
                          has none, so a runner launch narrates the drop.
                          On a surface it is the terminal title, the label
-                         of a workspace this landing created, and the run
+                         of a workspace this Placement created, and the run
                          record's name — so codex loses nothing there.
                          A name is a label, not an identity: run:<name>
                          reads a run back wherever run:<run-id> does, and
@@ -123,11 +123,11 @@ terminal) has to be told not to. What a parent means is each backend's own
 flavor; the envelope reports what was actually recorded, so an adapter that
 cannot express a request says so instead of dropping it.
 
-A landing writes a run record and prints its run id on stdout; --x-json
+A Placement writes a run record and prints its run id on stdout; --x-json
 works without --x-dry-run here and the envelope adds run_id and surface
 {backend, project, workspace, terminal, provenance}. The session id is
 discovered later (x-run <run-id>), never assigned. A utility invocation
-cannot land.
+cannot be placed.
 
 Other x-flags (processed here, never forwarded):
   --x-yolo [harness]     Force permission gates down for this launch
@@ -190,8 +190,8 @@ x-flags:
                          workspace instead of this terminal. Defaults to
                          the workspace containing the session's own cwd;
                          --x-workspace / --x-new-workspace (+ --x-project,
-                         --x-from) override, as on a launch. Lands a run
-                         record.
+                         --x-from) override, as on a launch. Writes a run
+                         record for the Placement.
   --x-yolo, --x-no-yolo  As on a launch; resumes inject and redact the same
   --x-account <sel>      Pin the balanced launch to one account
   --x-no-balance         Launch unbalanced (raw harness command)
@@ -228,11 +228,11 @@ reachability and version, plus how many runs are recorded.
 `,
   "x-runs": `agentsurface x-runs [--x-json]
 
-List recorded surface runs, newest first: run id, name (when the landing
+List recorded surface runs, newest first: run id, name (when the Placement
 gave one), backend, harness, workspace, session id (or "not yet
-discovered"), and landing time. Records
-live one file per run under ~/.local/state/agentsurface/runs/ and are
-written by every non-dry surface landing (ADR 0014).
+discovered"), and Placement time. Records live one file per run under
+~/.local/state/agentsurface/runs/ and are written by every non-dry
+surface Placement (ADR 0014/0022).
 `,
   "x-run": `agentsurface x-run <run-id | run-name> [--x-json]
 
@@ -242,9 +242,9 @@ rather than identities: several runs sharing one is an ambiguous_run
 refusal naming the candidates, and open runs are preferred over landed
 ones. When its session id is still unknown, the harness's
 session store is searched for the session born in the run's workspace at or
-after the landing (every store records the cwd); a discovery is written
+after the Placement (every store records the cwd); a discovery is written
 back to the record, so it happens at most once. The terminal field is the
-backend's handle for the landed terminal — the address a future steer
+backend's handle for the placed terminal — the address a future steer
 command will use.
 `,
   "x-land": `agentsurface x-land <run:<run-id-or-name> | backend-selector> [flags]
@@ -290,7 +290,7 @@ the workspace it was born in.
 };
 
 export const AGENT_TEASER =
-  "Launch agent harnesses (claude, codex, pi) in place or on a surface: agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…] resolves against the catalog and injects the model/effort in the harness's own spelling; --x-surface lands the launch in a managed workspace (Orca) and returns a run id; x-resume <session-id> reopens a session with cross-store detection; x-runs/x-run inspect landed runs; x-land merges a finished workspace back to the main line and releases it; x-doctor reports install health.";
+  "Launch agent harnesses (claude, codex, pi) in place or on a surface: agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…] resolves against the catalog and injects the model/effort in the harness's own spelling; --x-surface places the launch in a managed workspace (Orca) and returns a run id; x-resume <session-id> reopens a session with cross-store detection; x-runs/x-run inspect surface runs; x-land merges a finished workspace back to the main line and releases it; x-doctor reports install health.";
 
 export const AGENT_HELP = `agentsurface agent runbook
 
@@ -298,7 +298,7 @@ What it is
   One launcher for agent harnesses (claude, codex, pi). As a runner,
   \`agentsurface --x-harness <harness> [tokens…]\` starts a session in this
   terminal and cwd, and \`x-resume\` reopens a stored session by id. With
-  --x-surface the same launch lands on a surface instead — a managed
+  --x-surface the same launch is placed on a surface instead — a managed
   workspace behind a pluggable backend API (Orca is the first backend) —
   and the command returns a run id instead of becoming the harness.
 
@@ -347,19 +347,19 @@ Rules
     pins; --x-no-balance and AGENTSURFACE_NO_BALANCE=1 launch raw. A
     refused balance is a domain error with a recovery — never a silent
     unbalanced launch.
-  - --x-surface lands the launch on a surface (ADR 0012/0013): the same
-    composed command starts in a managed workspace — the one containing
+  - --x-surface places the launch on a surface (ADR 0012/0013/0022): the
+    same composed command starts in a managed workspace — the one containing
     the cwd (or the session's cwd on a resume) by default, --x-workspace
     <sel> picks one, --x-new-workspace <n> creates one with its project
     registered on demand (--x-project names or registers it; ensure). The
     command returns an envelope with run_id and surface {backend, project,
     workspace, terminal} instead of becoming the harness, and exits 0 on a
-    successful landing. Utility invocations cannot land. A refused surface
-    (backend unreachable, workspace missing) is a domain error — never a
-    silent fall-back to this terminal.
+    successful Placement. Utility invocations cannot be placed. A refused
+    surface (backend unreachable, workspace missing) is a domain error —
+    never a silent fall-back to this terminal.
   - Runs are agentsurface's own records (ADR 0014), one JSON file per run
     under ~/.local/state/agentsurface/runs/. The run id is the immediate
-    identifier every landing returns; session ids are discovered — x-run
+    identifier every Placement returns; session ids are discovered — x-run
     <run-id> matches the store entry born in the run's workspace and
     backfills the record — never assigned. The terminal handle in the
     record is the backend's address for steering, not the run's identity.
@@ -371,10 +371,10 @@ Rules
     envelope's data carries {harness, session_id, cwd, command, balance,
     utility, yolo, redactions, model, model_source, effort,
     effort_source}. --x-json without --x-dry-run is a usage fault unless
-    the launch lands on a surface. A surface dry run resolves read-only:
+    the launch is placed on a surface. A surface dry run resolves read-only:
     nothing registered, created, or recorded.
   - Exit codes: launches and x-resume exit with the harness's own code —
-    except surface landings, which return (0 landed, 1 refused);
+    except surface Placements, which return (0 placed, 1 refused);
     otherwise 0 success, 1 domain error (ok:false envelope under
     --x-json), 2 usage fault (help on stderr, never an envelope).
 

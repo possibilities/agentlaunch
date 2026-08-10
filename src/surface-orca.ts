@@ -20,7 +20,7 @@ import type {
  * The Orca backend: everything Orca-shaped lives here and nowhere else
  * (ADR 0012). The adapter speaks Orca's own CLI (`orca … --json`, verified
  * against 1.4.177): worktrees implement workspaces, `repo add` implements
- * project registration, and a runtime-issued terminal handle is the landed
+ * project registration, and a runtime-issued terminal handle is the placed
  * terminal's address. Selector spellings (`path:`, `id:`, `name:`) are
  * Orca's; the core never sees them.
  */
@@ -264,7 +264,7 @@ async function createWorkspace(
  * only setter for the label the app shows. Orca stores both verbatim, so the
  * name reaches the card exactly as typed. Only a workspace this placement
  * created is labelled: relabelling one that already existed would rename
- * somebody else's card as a side effect of landing in it.
+ * somebody else's card as a side effect of placing a run in it.
  */
 async function labelWorkspace(
   request: PlaceRequest,
@@ -329,7 +329,7 @@ async function createTerminal(
   worktreePath: string | null,
 ): Promise<string> {
   const selector = worktreeId !== null ? `id:${worktreeId}` : `path:${worktreePath}`;
-  // The sentinel marks the landed command as already-routed (ADR 0004), and
+  // The sentinel marks the placed command as already-routed (ADR 0004), and
   // the `env` spelling holds whether Orca runs it through a shell or not.
   const command = shellLine(["env", "AGENTSURFACE_LAUNCH=1", ...request.spec.command]);
   const created = await orcaJson(request.env, request.narrator, [
@@ -347,7 +347,7 @@ async function createTerminal(
     throw new CliError(
       "surface_backend",
       "orca terminal create reported no terminal handle",
-      "run `orca terminal list --json` to find the landed terminal",
+      "run `orca terminal list --json` to find the placed terminal",
     );
   }
   return handle;

@@ -30,7 +30,7 @@ interface World {
   home: string;
   /** The repository's primary checkout — where a merge has to happen. */
   repo: string;
-  /** The linked worktree standing in for a landed workspace. */
+  /** The linked worktree standing in for a workspace a run was placed in. */
   workspace: string;
   argvLog: string;
 }
@@ -244,7 +244,7 @@ describe("x-land", () => {
   test("landing merges, releases, deletes the branch, and stamps the run", () => {
     const world = makeWorld();
     commitInWorkspace(world, "feature\n", "feature work");
-    // A run record pointing at the workspace, as a real landing would leave.
+    // A run record pointing at the workspace, as a real Placement would leave.
     const runsDir = join(world.home, ".local", "state", "agentsurface", "runs");
     mkdirSync(runsDir, { recursive: true });
     const record: RunRecord = {

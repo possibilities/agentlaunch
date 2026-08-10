@@ -185,7 +185,7 @@ expect_exit 0 run_balanced --x-harness claude --x-no-balance --x-no-yolo --x-dry
 expect_out "claude"
 expect_exit 2 run_balanced --x-harness claude --x-account c1 --x-no-balance --x-dry-run
 
-# Surface landings against a fake orca: the adapter drives the real CLI
+# Surface placements against a fake orca: the adapter drives the real CLI
 # contract shapes, the fake creates nothing, and the run registry fills.
 install_fake_orca() {
   mkdir -p "$WORK/orca-bin"

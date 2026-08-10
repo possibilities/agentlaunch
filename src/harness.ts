@@ -424,7 +424,7 @@ export function sessionStore(harness: HarnessName, env: Environ, home: string): 
  * answer that ahead of time for one the operator's own tooling just created
  * (ADR 0021). Only codex needs it: it asks once per directory before doing
  * anything at all, no launch flag skips it (`--dangerously-bypass-approvals-
- * and-sandbox` covers tool approvals, not this), and an unattended landing
+ * and-sandbox` covers tool approvals, not this), and an unattended Placement
  * simply stops there forever. The answer is written exactly where the dialog
  * itself writes it, and an existing entry is never rewritten — a directory the
  * operator has already judged keeps their judgement, including a refusal.

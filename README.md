@@ -7,7 +7,7 @@ One launcher for every agent harness. `agentsurface --x-harness claude` (or
 and the catalog picks the harness that offers it.
 
 Every launch is balanced across accounts and yolo'd by default. `x-resume`
-reopens a stored session whichever harness owns it, and `--x-surface` lands the
+reopens a stored session whichever harness owns it, and `--x-surface` places the
 same launch in a managed workspace instead, returning a run id.
 
 ## Install
@@ -65,11 +65,11 @@ the command instead of launching; add `--x-json` for the machine envelope.
     agentsurface x-runs
     agentsurface x-run <run-id>
 
-`--x-surface` lands the launch in a managed workspace, and the command returns
-instead of becoming the harness (ADR 0013). The same composed command —
+`--x-surface` places the launch in a managed workspace, and the command returns
+instead of becoming the harness (ADR 0013/0022). The same composed command —
 balanced, yolo'd, model and effort injected — starts in a terminal there. The
 surface API is backend-generic; Orca is the first backend (ADR 0012), and its
-worktrees implement workspaces. Where a launch lands:
+worktrees implement workspaces. Where a launch is placed:
 
 - default — the workspace containing the cwd. A resume defaults to the
   workspace containing the *session's own* cwd, so a conversation continues
@@ -96,26 +96,26 @@ the envelope reports what was actually recorded rather than assuming it took.
 A run can carry the operator's own label. `--x-name <name>` is passed to the
 harness where one has a launch-time name (claude and pi `--name`; codex has
 none, so a runner launch narrates the drop rather than failing), and on a
-surface it titles the terminal, labels a workspace the landing created, and
-lands in the run record — so codex loses nothing there. **A name is a label,
-not an identity** (ADR 0017): free text, never unique, never invented. It reads
-back wherever a run id does — `x-run auth-flow`, `--x-from run:auth-flow`,
-`x-land run:auth-flow` — with the id tier matched first and several runs
-sharing a name refused by name rather than guessed between.
+surface it titles the terminal, labels a workspace the Placement created, and
+is written to the run record — so codex loses nothing there. **A name is a
+label, not an identity** (ADR 0017): free text, never unique, never invented.
+It reads back wherever a run id does — `x-run auth-flow`, `--x-from
+run:auth-flow`, `x-land run:auth-flow` — with the id tier matched first and
+several runs sharing a name refused by name rather than guessed between.
 
-Every landing writes a **run record** (ADR 0014): one JSON file under
+Every Placement writes a **run record** (ADR 0014/0022): one JSON file under
 `~/.local/state/agentsurface/runs/`, whose run id is printed. Under `--x-json`,
 legal here without `--x-dry-run`, the envelope carries `run_id` and
 `surface {backend, project, workspace, terminal, provenance}`.
 
 The session id is *discovered*, never assigned. Codex mints its id only at
 startup, so `x-run <run-id>` matches the store entry born in the run's
-workspace and backfills the record; `x-runs` lists everything landed. The
+workspace and backfills the record; `x-runs` lists every surface run. The
 record's terminal handle is the backend's address for the future steer verb.
 
 A surface dry run resolves read-only. A refused surface (runtime unreachable,
 workspace missing) fails the launch loudly, never falling back to this
-terminal. Utility invocations cannot land.
+terminal. Utility invocations cannot be placed.
 
 ## Landing finished work
 

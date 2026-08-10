@@ -33,7 +33,7 @@ interface SurfaceData {
 const MAIN = join(import.meta.dir, "..", "src", "main.ts");
 const SESSION_ID = "05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60";
 /** The adapter's word for "this workspace already existed, so its lineage is
- * not the landing's to set". */
+ * not the Placement's to set". */
 const NOT_CREATED_DETAIL = "workspace already exists · lineage unchanged";
 
 let roots: string[] = [];
@@ -54,7 +54,7 @@ interface World {
 
 /**
  * A world with a fake `orca` first on PATH: it records its argv and answers
- * from canned per-verb JSON files, so landings drive the real adapter
+ * from canned per-verb JSON files, so Placements drive the real adapter
  * against the real CLI contract shapes (transcribed from orca 1.4.177)
  * without an Orca install. `repo add` swaps the repo-list answer, which is
  * what makes ensure observable.
@@ -164,8 +164,8 @@ function readRecord(world: World, runId: string): RunRecord {
   return JSON.parse(readFileSync(join(runsDir(world), `${runId}.json`), "utf8")) as RunRecord;
 }
 
-describe("surface landings", () => {
-  test("a launch lands in the current workspace and records a run", () => {
+describe("surface placements", () => {
+  test("a launch is placed in the current workspace and records a run", () => {
     const world = makeWorld();
     const result = run(world, [
       "--x-harness",
@@ -324,7 +324,7 @@ describe("surface landings", () => {
     expect(envelope.error?.recovery).toContain("--x-new-workspace");
   });
 
-  test("an unreachable runtime refuses loudly, never lands in this terminal", () => {
+  test("an unreachable runtime refuses loudly, never places in this terminal", () => {
     const world = makeWorld();
     answerFile(world, "status", { ok: true, result: { runtime: { reachable: false } } });
     const result = run(world, ["--x-harness", "claude", "--x-surface", "--x-json"]);
@@ -374,7 +374,7 @@ describe("surface landings", () => {
     expect(utility.stderr).toContain("utility invocation");
   });
 
-  test("a resume lands in the workspace holding the session's own cwd", () => {
+  test("a resume is placed in the workspace holding the session's own cwd", () => {
     const world = makeWorld();
     const store = join(world.root, "claude", "projects", "-encoded");
     mkdirSync(store, { recursive: true });
@@ -409,7 +409,7 @@ describe("surface landings", () => {
 describe("provenance", () => {
   /** A new workspace in the already-registered project, so the ensure path
    * needs no git repository of its own. */
-  function landNew(world: World, args: string[]): RunResult {
+  function placeNew(world: World, args: string[]): RunResult {
     const created = join(world.root, "worktrees", "child");
     answerFile(world, "worktree-create", {
       ok: true,
@@ -431,7 +431,7 @@ describe("provenance", () => {
 
   test("--x-from carries a backend selector through untouched", () => {
     const world = makeWorld();
-    const result = landNew(world, ["--x-from", "name:parent-ws"]);
+    const result = placeNew(world, ["--x-from", "name:parent-ws"]);
     expect(result.code).toBe(0);
     const data = surfaceData(result);
     expect(data.surface.provenance).toEqual({
@@ -450,13 +450,13 @@ describe("provenance", () => {
 
   test("--x-from run:<id> resolves through our own registry", () => {
     const world = makeWorld();
-    // One landing, then a second that descends from it — the agent-spawning-
+    // One Placement, then a second that descends from it — the agent-spawning-
     // agent case, expressed entirely in run ids.
     const first = surfaceData(
       run(world, ["--x-harness", "codex", "--x-surface", "--x-no-yolo", "--x-json"]),
     );
     const parentRun = first.run_id!;
-    const result = landNew(world, ["--x-from", `run:${parentRun}`]);
+    const result = placeNew(world, ["--x-from", `run:${parentRun}`]);
     expect(result.code).toBe(0);
     const data = surfaceData(result);
     expect(data.surface.provenance.recorded).toBe(true);
@@ -474,9 +474,9 @@ describe("provenance", () => {
 
   test("--x-no-from and an omitted flag both mean explicitly none", () => {
     const explicit = makeWorld();
-    expect(landNew(explicit, ["--x-no-from"]).code).toBe(0);
+    expect(placeNew(explicit, ["--x-no-from"]).code).toBe(0);
     const silent = makeWorld();
-    const result = landNew(silent, []);
+    const result = placeNew(silent, []);
     expect(result.code).toBe(0);
     const created = "worktree create --name child --repo id:repo1 --no-parent --json";
     expect(orcaCalls(explicit)).toContain(created);
@@ -492,7 +492,7 @@ describe("provenance", () => {
 
   test("an unknown parent run is a domain error, not a silent none", () => {
     const world = makeWorld();
-    const result = landNew(world, ["--x-from", "run:2f4a9c1e-0000-4000-8000-000000000000"]);
+    const result = placeNew(world, ["--x-from", "run:2f4a9c1e-0000-4000-8000-000000000000"]);
     expect(result.code).toBe(1);
     const envelope = JSON.parse(result.stdout) as AnyEnvelope;
     expect(envelope.error?.code).toBe("run_not_found");
@@ -501,7 +501,7 @@ describe("provenance", () => {
 
   test("a ref that is neither run: nor a selector is a usage fault", () => {
     const world = makeWorld();
-    const result = landNew(world, ["--x-from", "parent"]);
+    const result = placeNew(world, ["--x-from", "parent"]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("run:<run-id-or-name>");
     expect(orcaCalls(world).some((call) => call.startsWith("worktree create"))).toBe(false);
@@ -526,7 +526,7 @@ describe("provenance", () => {
 });
 
 describe("run records", () => {
-  function land(world: World, args: string[] = []): string {
+  function place(world: World, args: string[] = []): string {
     const result = run(world, [
       "--x-harness",
       "codex",
@@ -541,10 +541,10 @@ describe("run records", () => {
 
   test("x-runs lists records; x-run discovers the session id and backfills", () => {
     const world = makeWorld();
-    const runId = land(world);
+    const runId = place(world);
     expect(readRecord(world, runId).session_id).toBeNull();
 
-    // The session is born in the run's workspace after the landing: the
+    // The session is born in the run's workspace after the Placement: the
     // codex store gains a rollout whose session_meta cwd is the workspace.
     const day = join(world.root, "codex", "sessions", "2026", "08", "09");
     mkdirSync(day, { recursive: true });
@@ -569,7 +569,7 @@ describe("run records", () => {
 
   test("a session in another cwd is never claimed by discovery", () => {
     const world = makeWorld();
-    const runId = land(world);
+    const runId = place(world);
     const day = join(world.root, "codex", "sessions", "2026", "08", "09");
     mkdirSync(day, { recursive: true });
     writeFileSync(
@@ -593,7 +593,7 @@ describe("run records", () => {
 
   test("x-doctor reports the backend and the run count", () => {
     const world = makeWorld();
-    land(world);
+    place(world);
     const result = run(world, ["x-doctor", "--x-json"]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as {
@@ -610,7 +610,7 @@ describe("run records", () => {
 });
 
 describe("run names", () => {
-  function landNamed(world: World, name: string, args: string[] = []): string {
+  function placeNamed(world: World, name: string, args: string[] = []): string {
     const result = run(world, [
       "--x-harness",
       "codex",
@@ -625,9 +625,9 @@ describe("run names", () => {
     return surfaceData(result).run_id!;
   }
 
-  test("the name titles the terminal and lands in the record", () => {
+  test("the name titles the terminal and is written to the record", () => {
     const world = makeWorld();
-    const runId = landNamed(world, "fix the auth flow");
+    const runId = placeNamed(world, "fix the auth flow");
     const record = readRecord(world, runId);
     expect(record.name).toBe("fix the auth flow");
     expect(orcaCalls(world)).toContain(
@@ -644,7 +644,7 @@ describe("run names", () => {
       ok: true,
       result: { worktree: { id: `repo1::${created}`, path: created, displayName: "auth" } },
     });
-    landNamed(world, "fix the auth flow", ["--x-new-workspace", "auth"]);
+    placeNamed(world, "fix the auth flow", ["--x-new-workspace", "auth"]);
     // Orca stores what it is given: the checkout keeps the slug, the card
     // reads the name as typed.
     expect(orcaCalls(world)).toContain(
@@ -657,13 +657,13 @@ describe("run names", () => {
 
   test("a workspace that already existed is never relabelled", () => {
     const world = makeWorld();
-    landNamed(world, "fix the auth flow");
+    placeNamed(world, "fix the auth flow");
     expect(orcaCalls(world).some((call) => call.startsWith("worktree set"))).toBe(false);
   });
 
   test("x-run and x-runs read a run back by its name", () => {
     const world = makeWorld();
-    const runId = landNamed(world, "auth-flow");
+    const runId = placeNamed(world, "auth-flow");
     const shown = run(world, ["x-run", "auth-flow", "--x-json"]);
     expect(shown.code).toBe(0);
     const record = (JSON.parse(shown.stdout) as AnyEnvelope).data as unknown as RunRecord;
@@ -674,7 +674,7 @@ describe("run names", () => {
 
   test("a name an open run already answers to is refused at the source", () => {
     const world = makeWorld();
-    const first = landNamed(world, "auth-flow");
+    const first = placeNamed(world, "auth-flow");
     const result = run(world, [
       "--x-harness",
       "codex",
@@ -688,13 +688,13 @@ describe("run names", () => {
     const envelope = JSON.parse(result.stdout) as AnyEnvelope;
     expect(envelope.error?.code).toBe("run_name_taken");
     expect(envelope.error?.message).toContain(first);
-    // Refused before anything landed: the name still names exactly one run.
+    // Refused before anything was placed: the name still names exactly one run.
     expect(run(world, ["x-run", "auth-flow", "--x-json"]).code).toBe(0);
   });
 
-  test("a second codex landing into one workspace waits its turn", () => {
+  test("a second codex Placement into one workspace waits its turn", () => {
     const world = makeWorld();
-    landNamed(world, "first-run");
+    placeNamed(world, "first-run");
     const result = run(world, [
       "--x-harness",
       "codex",
@@ -706,13 +706,13 @@ describe("run names", () => {
     ]);
     expect(result.code).toBe(1);
     const envelope = JSON.parse(result.stdout) as AnyEnvelope;
-    expect(envelope.error?.code).toBe("landing_in_flight");
+    expect(envelope.error?.code).toBe("placement_in_flight");
     expect(envelope.error?.recovery).toContain("retry");
   });
 
-  test("claude lands beside a held codex slot: only codex needs telling apart", () => {
+  test("claude is placed beside a held codex slot: only codex needs telling apart", () => {
     const world = makeWorld();
-    landNamed(world, "codex-run");
+    placeNamed(world, "codex-run");
     const result = run(world, [
       "--x-harness",
       "claude",
@@ -727,7 +727,7 @@ describe("run names", () => {
 
   test("codex's workspace trust is answered before anything starts in it", () => {
     const world = makeWorld();
-    landNamed(world, "trusted-run");
+    placeNamed(world, "trusted-run");
     // Written under the relocating env var, not the default home.
     const config = readFileSync(join(world.root, "codex", "config.toml"), "utf8");
     expect(config).toContain(`[projects.${JSON.stringify(realpathSync(world.workspace))}]`);
@@ -737,7 +737,7 @@ describe("run names", () => {
   test("--x-from resolves a run by name", () => {
     const world = makeWorld();
     Bun.spawnSync({ cmd: ["git", "init", "-q", world.workspace] });
-    landNamed(world, "parent-run");
+    placeNamed(world, "parent-run");
     const created = join(world.root, "worktrees", "child");
     answerFile(world, "worktree-create", {
       ok: true,

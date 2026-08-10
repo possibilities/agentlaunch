@@ -1,7 +1,7 @@
 {
   "name": "agentsurface",
   "version": "0.1.0",
-  "description": "One launcher for agent harnesses: open and resume claude, codex, and pi in place today, land them on a surface tomorrow",
+  "description": "One launcher for agent harnesses: open and resume claude, codex, and pi in place today, place them on a surface tomorrow",
   "private": true,
   "license": "MIT",
   "repository": {

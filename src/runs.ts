@@ -21,12 +21,12 @@ import { stateDirectory } from "./paths.ts";
 import type { Provenance } from "./surface.ts";
 
 /**
- * The run registry (ADR 0014): a run is a session plus where it landed, and
- * the record is agentsurface's own bookkeeping — the one identifier a
- * surface landing can promise immediately, since a session id is not always
- * knowable at launch (codex mints its uuid7 during startup). The run id
+ * The run registry (ADR 0014/0022): a run is a session plus where it was
+ * placed, and the record is agentsurface's own bookkeeping — the one
+ * identifier a Placement can promise immediately, since a session id is not
+ * always knowable at launch (codex mints its uuid7 during startup). The run id
  * names the record file, rides the envelope, and is never passed to the
- * harness. One file per run, so concurrent landings never contend.
+ * harness. One file per run, so concurrent Placements never contend.
  */
 export interface RunRecord {
   run_id: string;
@@ -121,7 +121,7 @@ export async function listRunRecords(env: Environ, home: string): Promise<RunRec
  * is a label, so two runs may share one — which is why this returns every
  * match and lets the caller refuse rather than guess. Closed runs are
  * reported apart: their workspace is gone, so a reference almost never means
- * them, but hiding them entirely would turn "landed already" into "never
+ * them, but hiding them entirely would turn "already closed" into "never
  * existed".
  */
 export async function findRunsByName(
@@ -194,7 +194,7 @@ export async function stampClosedRuns(
 
 /**
  * Session ids are discovered, never assigned (ADR 0014): the run's session
- * is the store entry born in the run's workspace at or after the landing —
+ * is the store entry born in the run's workspace at or after the Placement —
  * every store carries the cwd (codex session_meta, pi header, claude's
  * in-record field), so the workspace path is the join key. Earliest birth
  * wins: a later run in the same workspace has its own later session.
@@ -206,7 +206,7 @@ export async function discoverSessionId(
 ): Promise<string | null> {
   const store = sessionStore(record.harness, env, home);
   if (!existsSync(store.root)) return null;
-  const landedAt = Date.parse(record.created_at);
+  const placedAt = Date.parse(record.created_at);
   let found: { sessionId: string; bornAt: number } | null = null;
   for (const pattern of store.patternsFor("*")) {
     const glob = new Glob(pattern);
@@ -215,7 +215,7 @@ export async function discoverSessionId(
       if (relative.endsWith(".zst")) continue;
       const path = join(store.root, relative);
       const bornAt = birthTime(path);
-      if (bornAt === null || bornAt < landedAt) continue;
+      if (bornAt === null || bornAt < placedAt) continue;
       if (found !== null && bornAt >= found.bornAt) continue;
       const facts = await sessionFileFacts(record.harness, path);
       if (facts.cwd !== record.workspace.path || facts.sessionId === null) continue;
@@ -275,18 +275,18 @@ export async function assertRunNameAvailable(
 }
 
 /**
- * Serialized landings for a workspace (ADR 0020). A codex session is invisible
- * outside its app-server until its first turn — no rollout file, no state row,
- * nothing on disk — so the only fact tying one to a run before it speaks is
- * the workspace it sits in. That is enough exactly while a workspace holds at
- * most one *uncorrelated* session of a harness, which is what this lease
- * buys: a second landing into the same workspace is refused until the first
- * has had time to appear. Naming is sticky once made, so only the
+ * Serialized Placements for a workspace (ADR 0020/0022). A codex session is
+ * invisible outside its app-server until its first turn — no rollout file, no
+ * state row, nothing on disk — so the only fact tying one to a run before it
+ * speaks is the workspace it sits in. That is enough exactly while a workspace
+ * holds at most one *uncorrelated* session of a harness, which is what this
+ * lease buys: a second Placement into the same workspace is refused until the
+ * first has had time to appear. Naming is sticky once made, so only the
  * uncorrelated window needs protecting, never the workspace's whole life.
  */
-export const LANDING_LEASE_MS = 60_000;
+export const PLACEMENT_LEASE_MS = 60_000;
 
-export interface LandingLease {
+export interface PlacementLease {
   release(): void;
 }
 
@@ -308,17 +308,17 @@ function leasePath(env: Environ, home: string, workspacePath: string): string {
   return join(stateDirectory(env, home, "agentsurface"), "leases", `${key}.json`);
 }
 
-export function acquireLandingLease(
+export function acquirePlacementLease(
   env: Environ,
   home: string,
   workspacePath: string,
   now: number = Date.now(),
-  ttlMs: number = LANDING_LEASE_MS,
-): LandingLease {
+  ttlMs: number = PLACEMENT_LEASE_MS,
+): PlacementLease {
   const path = leasePath(env, home, workspacePath);
   mkdirSync(dirname(path), { recursive: true });
   // Two passes at most: the first can lose to an expired lease left by a
-  // landing that never came back, which is cleared and retried once.
+  // Placement that never came back, which is cleared and retried once.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const handle = openSync(path, "wx");
@@ -351,8 +351,8 @@ export function acquireLandingLease(
       }
       if (Number.isFinite(expiresAt) && expiresAt > now) {
         throw new CliError(
-          "landing_in_flight",
-          `another landing into ${workspacePath} is still starting; only one at a time can be told apart`,
+          "placement_in_flight",
+          `another Placement into ${workspacePath} is still starting; only one at a time can be told apart`,
           "retry the same command in a few seconds",
         );
       }
@@ -364,8 +364,8 @@ export function acquireLandingLease(
     }
   }
   throw new CliError(
-    "landing_in_flight",
-    `could not claim a landing slot for ${workspacePath}`,
+    "placement_in_flight",
+    `could not claim a Placement slot for ${workspacePath}`,
     "retry the same command in a few seconds",
   );
 }
