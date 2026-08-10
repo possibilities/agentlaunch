@@ -93,12 +93,12 @@ describe("surface", () => {
       harness: "claude",
       session_id: null,
       cwd: realpathSync(root),
-      command: ["claude", "--model", "opus", "--effort", "medium", "fix the tests"],
+      command: ["claude", "--model", "opus[1m]", "--effort", "medium", "fix the tests"],
       balance: null,
       utility: false,
       yolo: false,
       redactions: [],
-      model: "opus",
+      model: "opus-1m",
       model_source: "default",
       effort: "medium",
       effort_source: "default",
@@ -213,7 +213,7 @@ describe("surface", () => {
       "claude",
       "--dangerously-skip-permissions",
       "--model",
-      "opus",
+      "opus[1m]",
       "--effort",
       "medium",
     ]);
@@ -267,7 +267,7 @@ describe("surface", () => {
     expect(catalog.source).toBe("built-in");
     expect(catalog.valid).toBe(true);
     expect(catalog.harnesses.map((entry) => entry.harness)).toEqual(["claude", "codex", "pi"]);
-    expect(catalog.harnesses[0]?.defaults.model).toBe("opus");
+    expect(catalog.harnesses[0]?.defaults.model).toBe("opus-1m");
     expect(run(["x-doctor", "stray"]).code).toBe(2);
   });
 
@@ -307,11 +307,11 @@ describe("surface", () => {
     const result = run(["--x-harness", "claude", "--x-dry-run", "--x-no-yolo"]);
     expect(result.code).toBe(0);
     // stdout stays a runnable shell line, so --x-dry-run can be piped.
-    expect(result.stdout.trim()).toBe("claude --model opus --effort medium");
+    expect(result.stdout.trim()).toBe("claude --model 'opus[1m]' --effort medium");
     const rows = result.stderr.trimEnd().split("\n");
     expect(rows[0]).toBe("open      claude");
     expect(rows[1]).toMatch(/^cwd {7}\S/);
-    expect(rows).toContain("model     opus · default");
+    expect(rows).toContain("model     opus-1m · default");
     expect(rows).toContain("effort    medium · default");
     expect(rows).toContain("yolo      off · permission prompts stay on");
     expect(rows).toContain("account   skipped · balancing off (AGENTSURFACE_NO_BALANCE)");

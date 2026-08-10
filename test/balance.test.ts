@@ -129,13 +129,13 @@ describe("balanced launch", () => {
       "--share-history",
       "--",
       "--model",
-      "opus",
+      "opus[1m]",
       "--effort",
       "medium",
       "hi there",
     ]);
     expect(data.balance.route.slot).toBe(2);
-    expect(balanceCalls(world)).toEqual(["balance claude --json --model opus --dry-run"]);
+    expect(balanceCalls(world)).toEqual(["balance claude --json --model opus-1m --dry-run"]);
   });
 
   test("a forwarded model yields the dimension and drives routing", () => {
@@ -169,7 +169,7 @@ describe("balanced launch", () => {
       "--",
       "--dangerously-skip-permissions",
       "--model",
-      "opus",
+      "opus[1m]",
       "--effort",
       "medium",
     ]);
@@ -276,7 +276,7 @@ describe("balanced launch", () => {
     ]);
     expect(result.code).toBe(0);
     expect(balanceCalls(world)).toEqual([
-      "balance claude --json --model opus --account c1 --dry-run",
+      "balance claude --json --model opus-1m --account c1 --dry-run",
     ]);
   });
 
@@ -295,7 +295,7 @@ describe("balanced launch", () => {
       command: string[];
       balance: null;
     };
-    expect(flaggedData.command).toEqual(["claude", "--model", "opus", "--effort", "medium"]);
+    expect(flaggedData.command).toEqual(["claude", "--model", "opus[1m]", "--effort", "medium"]);
     expect(flaggedData.balance).toBeNull();
 
     const env = run(world, ["--x-harness", "codex", "--x-no-yolo", "--x-dry-run", "--x-json"], {

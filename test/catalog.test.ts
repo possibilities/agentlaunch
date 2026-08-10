@@ -82,8 +82,15 @@ describe("loadCatalog", () => {
     expect(catalog.source).toBe("built-in");
     expect(catalog.harnesses.map((entry) => entry.harness)).toEqual(["claude", "codex", "pi"]);
     const claude = catalog.harnesses[0]!;
-    expect(claude.models.map((model) => model.model)).toEqual(["fable", "opus", "sonnet", "haiku"]);
-    expect(claude.model).toBe("opus");
+    expect(claude.models.map((model) => model.model)).toEqual([
+      "fable",
+      "opus-1m",
+      "opus",
+      "sonnet-1m",
+      "sonnet",
+      "haiku",
+    ]);
+    expect(claude.model).toBe("opus-1m");
     expect(claude.effort).toBe("medium");
     expect(claude.models[0]?.family).toBe("claude");
   });
@@ -102,6 +109,14 @@ describe("loadCatalog", () => {
     expect(codex?.models.find((model) => model.model === "gpt-5.6-sol")?.spelling).toBe(
       "gpt-5.6-sol",
     );
+  });
+
+  test("a family member's spelling carries a name the typed grammar forbids", () => {
+    const { env, home } = emptyHome();
+    const catalog = loadCatalog(env, home);
+    const claude = catalog.harnesses[0]!;
+    expect(claude.models.find((model) => model.model === "opus-1m")?.spelling).toBe("opus[1m]");
+    expect(claude.models.find((model) => model.model === "opus")?.spelling).toBe("opus");
   });
 
   test("efforts inherit member > family > harness", () => {
@@ -294,7 +309,7 @@ describe("resolveRequest", () => {
   test("a harness name resolves to its defaults, marked defaulted", () => {
     const resolved = resolveRequest(builtin(), { harness: "claude" });
     expect(resolved.harness).toBe("claude");
-    expect(resolved.model.model).toBe("opus");
+    expect(resolved.model.model).toBe("opus-1m");
     expect(resolved.effort).toBe("medium");
     expect(resolved.modelDefaulted).toBe(true);
     expect(resolved.effortDefaulted).toBe(true);

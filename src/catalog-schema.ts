@@ -54,6 +54,13 @@ const familyMemberSchema = z
       .describe(
         "The name the operator types for this model — identical in every harness that includes the family; only the emitted spelling varies per harness.",
       ),
+    spelling: z
+      .string()
+      .regex(SPELLING_PATTERN)
+      .optional()
+      .describe(
+        "What is actually passed to the harness's native model flag when it differs from the typed name — the same field a local model carries, so a family member can name a spelling the typed-name grammar forbids (claude's opus[1m]). Defaults to the typed name; a provider on the include combines with this, not with the typed name.",
+      ),
     efforts: effortList(
       "Model-bound effort vocabulary: the efforts this model supports wherever it runs, replacing the family's (or including harness's) set. Omit it and the model inherits down the chain.",
     ).optional(),

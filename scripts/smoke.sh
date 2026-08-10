@@ -71,7 +71,7 @@ expect_out '"catalog"'
 # resolved model and effort in the harness's own spelling. Yolo is on by
 # default (ADR 0009).
 expect_exit 0 run --x-harness claude --x-dry-run
-expect_out "claude --dangerously-skip-permissions --model opus --effort medium"
+expect_out "claude --dangerously-skip-permissions --model 'opus\[1m\]' --effort medium"
 expect_exit 0 run --x-harness codex --x-no-yolo --x-dry-run
 expect_out "codex --model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"'"
 expect_exit 0 run --x-harness pi --x-no-yolo --x-dry-run
@@ -158,7 +158,7 @@ expect_out '"code":"session_not_found"'
 # Balanced launches compose the swap prefix (fake stack, dry runs only)
 install_fake_balance
 expect_exit 0 run_balanced --x-harness claude --x-no-yolo --x-dry-run
-expect_out "cswap run 1 --share-history -- --model opus --effort medium"
+expect_out "cswap run 1 --share-history -- --model 'opus\[1m\]' --effort medium"
 expect_exit 0 run_balanced --x-harness codex --x-no-yolo --x-dry-run
 expect_out "codex-swap run --account account:org-smoke --"
 expect_exit 0 run_balanced --x-harness pi --x-no-yolo --x-dry-run
@@ -199,7 +199,7 @@ expect_out '"run_id"'
 expect_out '"terminal":"term_smoke"'
 RUN_ID="$(python3 -c "import json;print(json.load(open('$WORK/out'))['data']['run_id'])")"
 expect_exit 0 run_surface --x-harness claude --x-surface --x-no-yolo --x-dry-run
-expect_out "claude --model opus --effort medium"
+expect_out "claude --model 'opus\[1m\]' --effort medium"
 expect_exit 0 run_surface x-runs
 expect_out "$RUN_ID"
 expect_exit 0 run_surface x-run "$RUN_ID"
@@ -214,13 +214,13 @@ cd "$ROOT"
 
 # The narrative is on stderr, so stdout stays exactly the command
 expect_exit 0 run --x-harness claude --x-no-yolo --x-dry-run
-if [[ "$(cat "$WORK/out")" != "claude --model opus --effort medium" ]]; then
+if [[ "$(cat "$WORK/out")" != "claude --model 'opus[1m]' --effort medium" ]]; then
   echo "FAIL: narrative leaked into stdout" >&2
   cat "$WORK/out" >&2
   exit 1
 fi
 grep -q "^open      claude$" "$WORK/err" || { echo "FAIL: no narrative on stderr" >&2; exit 1; }
-grep -q "^model     opus · default$" "$WORK/err" || { echo "FAIL: model row missing" >&2; exit 1; }
+grep -q "^model     opus-1m · default$" "$WORK/err" || { echo "FAIL: model row missing" >&2; exit 1; }
 grep -q "^effort    medium · default$" "$WORK/err" || { echo "FAIL: effort row missing" >&2; exit 1; }
 expect_exit 0 run --x-harness claude --x-dry-run --x-json --x-verbose
 if [[ -s "$WORK/err" ]]; then

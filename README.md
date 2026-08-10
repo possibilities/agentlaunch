@@ -107,6 +107,12 @@ zod source of truth (`bun run generate:schemas`).
   thing on both, and only the emitted spelling differs. What a provider
   means is each harness's own semantics; claude and codex have none, and a
   provider on their includes is a fault.
+- **Spellings** let a model be typed one way and emitted another. A
+  member's optional `spelling` is what reaches the harness's `--model`, so
+  a name the typed grammar forbids stays reachable: the claude family
+  offers `opus-1m` and `sonnet-1m`, emitted as claude's own `opus[1m]` /
+  `sonnet[1m]` long-context aliases. A provider combines with the
+  spelling, not the typed name.
 - **Efforts** inherit model > family > harness — a member's own set wins,
   else the family's, else the harness's — so `ultra` is allowed exactly
   where it is real.

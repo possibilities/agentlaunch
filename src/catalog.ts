@@ -181,8 +181,8 @@ function expandHarness(
         model: member.model,
         spelling:
           include.provider !== undefined && combine !== null
-            ? combine(include.provider, member.model)
-            : member.model,
+            ? combine(include.provider, member.spelling ?? member.model)
+            : (member.spelling ?? member.model),
         efforts,
         effort: member.defaults?.effort ?? null,
         family: include.family,

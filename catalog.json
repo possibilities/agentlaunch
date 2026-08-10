@@ -5,11 +5,13 @@
       "efforts": ["low", "medium", "high", "xhigh", "max"],
       "models": [
         { "model": "fable" },
+        { "model": "opus-1m", "spelling": "opus[1m]" },
         { "model": "opus" },
+        { "model": "sonnet-1m", "spelling": "sonnet[1m]" },
         { "model": "sonnet" },
         { "model": "haiku" }
       ],
-      "defaults": { "model": "opus", "effort": "medium" }
+      "defaults": { "model": "opus-1m", "effort": "medium" }
     },
     "gpt": {
       "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],

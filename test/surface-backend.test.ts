@@ -188,14 +188,14 @@ describe("surface landings", () => {
     expect(record.harness_value).toBe("claude");
     expect(record.terminal).toBe("term_test-1");
     expect(record.session_id).toBeNull();
-    expect(record.command).toEqual(["claude", "--model", "opus", "--effort", "medium", "hi"]);
+    expect(record.command).toEqual(["claude", "--model", "opus[1m]", "--effort", "medium", "hi"]);
     const calls = orcaCalls(world);
     expect(calls[0]).toBe("status --json");
     expect(calls[1]).toBe(`worktree show --worktree path:${world.workspace} --json`);
     // The sentinel rides an `env` prefix so PATH shims exec the real binary
     // whether or not Orca runs the command through a shell.
     expect(calls[2]).toBe(
-      `terminal create --worktree id:repo1::${world.workspace} --command env AGENTSURFACE_LAUNCH=1 claude --model opus --effort medium hi --title claude --json`,
+      `terminal create --worktree id:repo1::${world.workspace} --command env AGENTSURFACE_LAUNCH=1 claude --model 'opus[1m]' --effort medium hi --title claude --json`,
     );
     // --x-json without --x-dry-run is legal here: the command returned.
     expect(result.stderr).toBe("");
