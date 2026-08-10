@@ -1,5 +1,7 @@
 # agentsurface
 
+[![CI](https://github.com/possibilities/agentsurface/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/possibilities/agentsurface/actions/workflows/ci.yml)
+
 One launcher for agent harnesses. `agentsurface --x-harness claude` (or
 `codex`, or `pi`) starts that harness in this terminal; `agentsurface
 x-resume` reopens a stored session by id no matter which harness owns it;
