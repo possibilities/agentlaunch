@@ -1,5 +1,17 @@
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { Glob } from "bun";
 import { CliError, UsageError } from "./errors.ts";
 import type { HarnessName } from "./harness.ts";
@@ -239,4 +251,121 @@ export async function resolveRun(
   const updated = { ...record, session_id: sessionId };
   writeRunRecord(env, home, updated);
   return { record: updated, discovered: true };
+}
+
+/**
+ * A name has to be free among open runs to be worth having (ADR 0019). It is
+ * still a label rather than an identity — closed runs keep theirs, and nothing
+ * is invented when one is taken — but a name two live runs answer to resolves
+ * to neither, here or on the bus, so the refusal happens where a caller can
+ * still choose another.
+ */
+export async function assertRunNameAvailable(
+  env: Environ,
+  home: string,
+  name: string,
+): Promise<void> {
+  const { open } = await findRunsByName(env, home, name);
+  if (open.length === 0) return;
+  throw new CliError(
+    "run_name_taken",
+    `an open run already answers to "${name}" (${open.map((record) => record.run_id).join(", ")})`,
+    "pick another --x-name, or land that run first: agentsurface x-land run:<run-id>",
+  );
+}
+
+/**
+ * Serialized landings for a workspace (ADR 0020). A codex session is invisible
+ * outside its app-server until its first turn — no rollout file, no state row,
+ * nothing on disk — so the only fact tying one to a run before it speaks is
+ * the workspace it sits in. That is enough exactly while a workspace holds at
+ * most one *uncorrelated* session of a harness, which is what this lease
+ * buys: a second landing into the same workspace is refused until the first
+ * has had time to appear. Naming is sticky once made, so only the
+ * uncorrelated window needs protecting, never the workspace's whole life.
+ */
+export const LANDING_LEASE_MS = 60_000;
+
+export interface LandingLease {
+  release(): void;
+}
+
+/** Both sides of every workspace comparison are resolved: a path crosses into
+ * the harness as typed and comes back canonicalized. */
+export function resolvedWorkspacePath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+function leasePath(env: Environ, home: string, workspacePath: string): string {
+  const key = createHash("sha256")
+    .update(resolvedWorkspacePath(workspacePath))
+    .digest("hex")
+    .slice(0, 32);
+  return join(stateDirectory(env, home, "agentsurface"), "leases", `${key}.json`);
+}
+
+export function acquireLandingLease(
+  env: Environ,
+  home: string,
+  workspacePath: string,
+  now: number = Date.now(),
+  ttlMs: number = LANDING_LEASE_MS,
+): LandingLease {
+  const path = leasePath(env, home, workspacePath);
+  mkdirSync(dirname(path), { recursive: true });
+  // Two passes at most: the first can lose to an expired lease left by a
+  // landing that never came back, which is cleared and retried once.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = openSync(path, "wx");
+      writeFileSync(
+        handle,
+        `${JSON.stringify({
+          workspace: resolvedWorkspacePath(workspacePath),
+          acquired_at: new Date(now).toISOString(),
+          expires_at: new Date(now + ttlMs).toISOString(),
+        })}\n`,
+      );
+      closeSync(handle);
+      return {
+        release() {
+          try {
+            unlinkSync(path);
+          } catch {
+            // Already gone (expired and taken over): nothing to release.
+          }
+        },
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      let expiresAt = 0;
+      try {
+        const held = JSON.parse(readFileSync(path, "utf8")) as { expires_at?: string };
+        expiresAt = Date.parse(held.expires_at ?? "");
+      } catch {
+        // Unreadable lease: treat as expired rather than blocking forever.
+      }
+      if (Number.isFinite(expiresAt) && expiresAt > now) {
+        throw new CliError(
+          "landing_in_flight",
+          `another landing into ${workspacePath} is still starting; only one at a time can be told apart`,
+          "retry the same command in a few seconds",
+        );
+      }
+      try {
+        unlinkSync(path);
+      } catch {
+        // Someone else cleared it first; the next pass takes it.
+      }
+    }
+  }
+  throw new CliError(
+    "landing_in_flight",
+    `could not claim a landing slot for ${workspacePath}`,
+    "retry the same command in a few seconds",
+  );
 }

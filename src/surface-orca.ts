@@ -33,6 +33,9 @@ export const orcaBackend: SurfaceBackend = {
   async place(request: PlaceRequest): Promise<Placement> {
     await assertReachable(request.env, request.narrator);
     const resolved = await resolveWorkspace(request);
+    if (!request.dryRun && resolved.workspace.path !== null) {
+      request.prepare?.(resolved.workspace.path);
+    }
     const terminal = request.dryRun
       ? null
       : await createTerminal(request, resolved.workspace.id, resolved.workspace.path);

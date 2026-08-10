@@ -672,18 +672,66 @@ describe("run names", () => {
     expect(list.stdout).toContain("auth-flow");
   });
 
-  test("two runs sharing a name refuse rather than guess", () => {
+  test("a name an open run already answers to is refused at the source", () => {
     const world = makeWorld();
     const first = landNamed(world, "auth-flow");
-    const second = landNamed(world, "auth-flow");
-    const result = run(world, ["x-run", "auth-flow", "--x-json"]);
+    const result = run(world, [
+      "--x-harness",
+      "codex",
+      "--x-surface",
+      "--x-name",
+      "auth-flow",
+      "--x-no-yolo",
+      "--x-json",
+    ]);
     expect(result.code).toBe(1);
     const envelope = JSON.parse(result.stdout) as AnyEnvelope;
-    expect(envelope.error?.code).toBe("ambiguous_run");
+    expect(envelope.error?.code).toBe("run_name_taken");
     expect(envelope.error?.message).toContain(first);
-    expect(envelope.error?.message).toContain(second);
-    // The id tier is exact, so either run is still reachable by id.
-    expect(run(world, ["x-run", first, "--x-json"]).code).toBe(0);
+    // Refused before anything landed: the name still names exactly one run.
+    expect(run(world, ["x-run", "auth-flow", "--x-json"]).code).toBe(0);
+  });
+
+  test("a second codex landing into one workspace waits its turn", () => {
+    const world = makeWorld();
+    landNamed(world, "first-run");
+    const result = run(world, [
+      "--x-harness",
+      "codex",
+      "--x-surface",
+      "--x-name",
+      "second-run",
+      "--x-no-yolo",
+      "--x-json",
+    ]);
+    expect(result.code).toBe(1);
+    const envelope = JSON.parse(result.stdout) as AnyEnvelope;
+    expect(envelope.error?.code).toBe("landing_in_flight");
+    expect(envelope.error?.recovery).toContain("retry");
+  });
+
+  test("claude lands beside a held codex slot: only codex needs telling apart", () => {
+    const world = makeWorld();
+    landNamed(world, "codex-run");
+    const result = run(world, [
+      "--x-harness",
+      "claude",
+      "--x-surface",
+      "--x-name",
+      "claude-run",
+      "--x-no-yolo",
+      "--x-json",
+    ]);
+    expect(result.code).toBe(0);
+  });
+
+  test("codex's workspace trust is answered before anything starts in it", () => {
+    const world = makeWorld();
+    landNamed(world, "trusted-run");
+    // Written under the relocating env var, not the default home.
+    const config = readFileSync(join(world.root, "codex", "config.toml"), "utf8");
+    expect(config).toContain(`[projects.${JSON.stringify(realpathSync(world.workspace))}]`);
+    expect(config).toContain('trust_level = "trusted"');
   });
 
   test("--x-from resolves a run by name", () => {

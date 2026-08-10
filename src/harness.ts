@@ -1,3 +1,4 @@
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { UsageError } from "./errors.ts";
 import type { Environ } from "./paths.ts";
@@ -416,4 +417,49 @@ export function sessionStore(harness: HarnessName, env: Environ, home: string): 
       };
     }
   }
+}
+
+/**
+ * Whether a harness stops to ask about a directory it has not seen, and how to
+ * answer that ahead of time for one the operator's own tooling just created
+ * (ADR 0021). Only codex needs it: it asks once per directory before doing
+ * anything at all, no launch flag skips it (`--dangerously-bypass-approvals-
+ * and-sandbox` covers tool approvals, not this), and an unattended landing
+ * simply stops there forever. The answer is written exactly where the dialog
+ * itself writes it, and an existing entry is never rewritten — a directory the
+ * operator has already judged keeps their judgement, including a refusal.
+ */
+export type TrustOutcome = "trusted" | "already" | "not applicable";
+
+export function ensureWorkspaceTrusted(
+  harness: HarnessName,
+  env: Environ,
+  home: string,
+  workspacePath: string,
+): TrustOutcome {
+  if (harness !== "codex") return "not applicable";
+  const root = sessionStore("codex", env, home).root;
+  const config = join(root, "config.toml");
+  let resolved = workspacePath;
+  try {
+    resolved = realpathSync(workspacePath);
+  } catch {
+    // Not yet on disk: the path as given is the best key available.
+  }
+  // TOML basic-string quoting; codex keys these tables by the resolved path.
+  const header = `[projects.${JSON.stringify(resolved)}]`;
+  if (existsSync(config)) {
+    const current = readFileSync(config, "utf8");
+    if (current.split("\n").some((line) => line.trim() === header)) return "already";
+    // Appending a table header can never land inside another table, which is
+    // what keeps this safe beside codex's own writes to the same file.
+    appendFileSync(
+      config,
+      `${current.endsWith("\n") ? "" : "\n"}\n${header}\ntrust_level = "trusted"\n`,
+    );
+    return "trusted";
+  }
+  mkdirSync(root, { recursive: true });
+  appendFileSync(config, `${header}\ntrust_level = "trusted"\n`);
+  return "trusted";
 }

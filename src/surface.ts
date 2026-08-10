@@ -58,6 +58,16 @@ export interface PlaceRequest {
   provenance: Provenance;
   /** Dry runs resolve read-only: no registration, no creation, no terminal. */
   dryRun: boolean;
+  /**
+   * Called once the workspace exists and before anything is started inside it,
+   * with the workspace's own path. It is where the caller answers what a
+   * harness would otherwise stop to ask on first sight of a directory, and
+   * where a launch that must not run concurrently claims its place — both need
+   * the real path, which only the backend knows once it has resolved or
+   * created the workspace. Throwing here refuses the placement before any
+   * attachment starts. A backend must call it exactly once outside a dry run.
+   */
+  prepare?: (workspacePath: string) => void;
   narrator: Narrator;
   env: Environ;
 }

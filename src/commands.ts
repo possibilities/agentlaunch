@@ -17,6 +17,7 @@ import {
   buildResume,
   effortArguments,
   effortDimensionToken,
+  ensureWorkspaceTrusted,
   HARNESS_NAMES,
   modelArguments,
   modelDimensionToken,
@@ -32,8 +33,10 @@ import { facts, shellLine, tildePath } from "./narrate.ts";
 import type { Partitioned } from "./partition.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
-import type { RunRecord } from "./runs.ts";
+import type { LandingLease, RunRecord } from "./runs.ts";
 import {
+  acquireLandingLease,
+  assertRunNameAvailable,
   listRunRecords,
   resolveRun,
   resolveRunReference,
@@ -947,16 +950,43 @@ async function finishLaunch(
 
   if (surface !== null) {
     const provenance = await resolveProvenance(context, surface.from, surface.backend.name);
-    const placement = await surface.backend.place({
-      spec: launchSpec,
-      intent: surface.intent,
-      title: surface.title,
-      name: surface.name,
-      provenance,
-      dryRun,
-      narrator: context.narrator,
-      env: context.env,
-    });
+    if (!dryRun && surface.name !== null) {
+      await assertRunNameAvailable(context.env, context.home, surface.name);
+    }
+    // Held rather than bound, because the lease is taken inside the backend's
+    // own call and has to survive back out here to be released on failure.
+    const held: { lease: LandingLease | null } = { lease: null };
+    const placement = await surface.backend
+      .place({
+        spec: launchSpec,
+        intent: surface.intent,
+        title: surface.title,
+        name: surface.name,
+        provenance,
+        dryRun,
+        prepare: (workspacePath) => {
+          const trust = ensureWorkspaceTrusted(
+            spec.harness,
+            context.env,
+            context.home,
+            workspacePath,
+          );
+          if (trust !== "not applicable") {
+            context.narrator.row("trust", facts(spec.harness, `workspace ${trust}`));
+          }
+          if (spec.harness === "codex") {
+            held.lease = acquireLandingLease(context.env, context.home, workspacePath);
+          }
+        },
+        narrator: context.narrator,
+        env: context.env,
+      })
+      .catch((error: unknown) => {
+        // Nothing started in the workspace, so the slot goes back immediately
+        // rather than blocking the retry this failure is about to prompt.
+        held.lease?.release();
+        throw error;
+      });
     context.narrator.row("surface", surface.backend.name);
     if (placement.project !== null) {
       context.narrator.row(
