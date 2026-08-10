@@ -3,6 +3,7 @@
 - **Harness** — An agent CLI/TUI that owns a conversation: claude, codex, pi. _Avoid_: agent (that is a running conversation), model.
 - **Runner** — agentsurface acting as a passthrough launcher in the current terminal and cwd, no surface involved. _Avoid_: wrapper mode, local mode.
 - **Surface** — A managed environment where launches land and can be referred to and controlled afterwards; Orca is the first backend, the API stays backend-generic. _Avoid_: platform, ADE (one backend, not the concept).
+- **Surface backend** — One implementation of the surface API (ADR 0012): Orca first, others later. The core speaks only the documented backend-generic contract; everything Orca-shaped lives in its adapter, the way harness asymmetries live in `harness.ts`. _Avoid_: integration (an adapter behind a seam, not a wiring-in).
 - **Open in place** — Starting a fresh harness session as the runner: `agentsurface <harness> [tokens…]`, agentsurface becomes the harness and gets out of the way. _Avoid_: spawn, attach.
 - **Launch spec** — The pure description of a launch: harness, command argv, session id when known. `--x-dry-run` prints it, the runner execs it, a surface will consume it. _Avoid_: plan, invocation.
 - **Session** — One harness conversation persisted in its session store, resumable by id. _Avoid_: run (a run is a session plus where it landed), thread, chat.

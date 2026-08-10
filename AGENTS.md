@@ -119,6 +119,9 @@ the adapters; append a new numbered record rather than editing an old one.
   model and effort are injected, narrated, and owned per dimension (colon
   forms fault on forwarded counterparts, the name form yields). zod 4 is
   the one runtime dependency, adopted with the fleet's config conventions.
+- Surfaces are pluggable (ADR 0012): the surface API is backend-generic
+  and documented; Orca is the first backend, not the concept, and nothing
+  Orca-shaped may leak outside its adapter.
 - No invented state: no generated session ids, no extra flags beyond the
   narrated yolo/balance composition. Utility invocations pass through
   byte-identical.

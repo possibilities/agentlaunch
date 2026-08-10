@@ -4,9 +4,10 @@ One launcher for agent harnesses. `agentsurface claude` (or `codex`, or
 `pi`) starts that harness in this terminal; `agentsurface x-resume` reopens
 a stored session by id no matter which harness owns it. Today it is a
 runner — a passthrough wrapper around the harness CLIs. Later slices land
-the same launches on a surface (a managed environment; Orca first) behind
-more `--x-*` flags, and the launch spec the runner execs is exactly what a
-surface will consume.
+the same launches on a surface (a managed environment behind a pluggable
+backend API — Orca is the first backend, ADR 0012) via more `--x-*`
+flags, and the launch spec the runner execs is exactly what a surface
+backend will consume.
 
 ## Install
 
