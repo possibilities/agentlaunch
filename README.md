@@ -248,7 +248,7 @@ passes through to the real binary unwrapped even when the balancing stack is
 missing. Shimmed `codex login --device-auth` just logs in; `codex exec`,
 `review`, `resume`, `fork`, prompts, and flag launches still balance.
 
-On this machine, bare `claude`/`codex`/`pi` are agentdots-installed PATH shims
+On this machine, bare `claude`/`codex`/`pi` are AgentStart-installed PATH shims
 that exec `agentsurface --x-harness <harness> "$@"`, so every launch balances
 however it was typed. The `AGENTSURFACE_LAUNCH=1` sentinel marks already-routed
 children so shims exec the real binary (ADR 0004);
