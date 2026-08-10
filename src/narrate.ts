@@ -16,8 +16,9 @@ export interface Narrator {
   readonly verbose: boolean;
 }
 
-/** Wide enough for the longest label, so values line up in one column. */
-const LABEL_WIDTH = 8;
+/** Wide enough for the longest label (workspace), so values line up in one
+ * column. */
+const LABEL_WIDTH = 10;
 
 /** Values are lists of facts, not sentences. */
 export function facts(...parts: (string | undefined)[]): string {

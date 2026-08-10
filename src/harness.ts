@@ -269,6 +269,65 @@ export function buildResume(harness: HarnessName, sessionId: string, tokens: str
   return { harness, command: [...base, ...tokens], sessionId };
 }
 
+export interface SessionFileFacts {
+  cwd: string | null;
+  sessionId: string | null;
+}
+
+/**
+ * What a session file says about itself, per store layout: codex and pi
+ * carry cwd and id in their first line (session_meta / session header);
+ * claude files scatter cwd through the records and put the id only in the
+ * filename. Read bounded — a session transcript can be huge, and these
+ * facts live at the head.
+ */
+export async function sessionFileFacts(
+  harness: HarnessName,
+  path: string,
+): Promise<SessionFileFacts> {
+  let head: string;
+  try {
+    head = await readHead(path, 262_144);
+  } catch {
+    return { cwd: null, sessionId: null };
+  }
+  if (harness === "claude") {
+    const cwd = head.match(/"cwd"\s*:\s*"([^"]+)"/)?.[1] ?? null;
+    const base = path.slice(path.lastIndexOf("/") + 1);
+    const sessionId = base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : null;
+    return { cwd, sessionId };
+  }
+  const firstLine = head.split("\n", 1)[0] ?? "";
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(firstLine) as Record<string, unknown>;
+  } catch {
+    return { cwd: null, sessionId: null };
+  }
+  if (harness === "codex") {
+    const payload = parsed["payload"];
+    const record =
+      typeof payload === "object" && payload !== null
+        ? (payload as Record<string, unknown>)
+        : parsed;
+    return {
+      cwd: stringField(record, "cwd"),
+      sessionId: stringField(record, "session_id") ?? stringField(record, "id"),
+    };
+  }
+  return { cwd: stringField(parsed, "cwd"), sessionId: stringField(parsed, "id") };
+}
+
+async function readHead(path: string, bytes: number): Promise<string> {
+  const file = Bun.file(path);
+  return await file.slice(0, Math.min(bytes, file.size)).text();
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
 export interface SessionStore {
   harness: HarnessName;
   /** Env var that relocates the store; swap tools lean on these, so honoring

@@ -14,10 +14,10 @@ export interface XSpec {
   value: Set<string>;
   /** Boolean x-flags; a value or a repeat is a usage fault. */
   bool: Set<string>;
-  /** Repeatable x-flags with an optional harness scope: bare covers every
-   * harness, and a following harness name (or `=name`) narrows one
-   * occurrence. */
-  scoped: Set<string>;
+  /** Repeatable x-flags with an optional scope from a per-flag vocabulary
+   * (harness names for yolo, backend names for surface): bare covers "all",
+   * and a following vocabulary word (or `=word`) narrows one occurrence. */
+  scoped: Map<string, readonly string[]>;
 }
 
 export interface Partitioned {
@@ -29,11 +29,7 @@ export interface Partitioned {
   harness: string[];
 }
 
-export function partition(
-  argv: string[],
-  spec: XSpec,
-  harnessNames: readonly string[],
-): Partitioned {
+export function partition(argv: string[], spec: XSpec): Partitioned {
   const seen = new Set<string>();
   const values: Record<string, string> = {};
   const bools = new Set<string>();
@@ -49,20 +45,21 @@ export function partition(
     const equals = argument.indexOf("=");
     const flag = equals === -1 ? argument : argument.slice(0, equals);
     const inline = equals === -1 ? undefined : argument.slice(equals + 1);
-    if (spec.scoped.has(flag)) {
+    const vocabulary = spec.scoped.get(flag);
+    if (vocabulary !== undefined) {
       let scope = "all";
       if (inline !== undefined) {
-        if (!harnessNames.includes(inline)) {
+        if (!vocabulary.includes(inline)) {
           throw new UsageError(
-            `"${flag}" scopes to a harness (${harnessNames.join(", ")}), got "${inline}"`,
+            `"${flag}" scopes to one of ${vocabulary.join(", ")}; got "${inline}"`,
           );
         }
         scope = inline;
       } else {
         // The scope is positional: the next token is consumed only when it
-        // names a harness, so a prompt can still follow the bare flag.
+        // is a vocabulary word, so a prompt can still follow the bare flag.
         const next = argv[i + 1];
-        if (next !== undefined && harnessNames.includes(next)) {
+        if (next !== undefined && vocabulary.includes(next)) {
           scope = next;
           i++;
         }

@@ -16,7 +16,7 @@ describe("createNarrator", () => {
     narrator.row("open", "claude");
     narrator.row("dry run", "nothing launched");
     narrator.detail("bin", "/usr/bin/claude");
-    expect(lines).toEqual(["open    claude", "dry run nothing launched"]);
+    expect(lines).toEqual(["open      claude", "dry run   nothing launched"]);
     expect(narrator.verbose).toBe(false);
   });
 
@@ -24,7 +24,7 @@ describe("createNarrator", () => {
     const { lines, narrator } = collect({ silent: false, verbose: true });
     narrator.row("open", "claude");
     narrator.detail("bin", "/usr/bin/claude");
-    expect(lines).toEqual(["open    claude", "bin     /usr/bin/claude"]);
+    expect(lines).toEqual(["open      claude", "bin       /usr/bin/claude"]);
   });
 
   test("silent withholds everything, even verbose detail", () => {

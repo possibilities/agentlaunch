@@ -169,6 +169,49 @@ expect_exit 0 run_balanced --x-harness claude --x-no-balance --x-no-yolo --x-dry
 expect_out "claude"
 expect_exit 2 run_balanced --x-harness claude --x-account c1 --x-no-balance --x-dry-run
 
+# Surface landings against a fake orca: the adapter drives the real CLI
+# contract shapes, the fake creates nothing, and the run registry fills.
+install_fake_orca() {
+  mkdir -p "$WORK/orca-bin"
+  cat >"$WORK/orca-bin/orca" <<FAKE
+#!/usr/bin/env bash
+case "\$1 \$2" in
+  "status --json") printf '{"ok":true,"result":{"runtime":{"reachable":true,"state":"ready","appVersion":"smoke"}}}\n';;
+  "worktree show") printf '{"ok":true,"result":{"worktree":{"id":"repo1::$WORK/ws","path":"$WORK/ws","displayName":"main"}}}\n';;
+  "terminal create") printf '{"ok":true,"result":{"terminal":{"handle":"term_smoke"}}}\n';;
+  *) printf '{"ok":false}\n'; exit 1;;
+esac
+FAKE
+  chmod +x "$WORK/orca-bin/orca"
+  mkdir -p "$WORK/ws"
+}
+
+run_surface() {
+  env -i PATH="$WORK/orca-bin:$PATH" HOME="$WORK/home" AGENTSURFACE_NO_BALANCE=1 \
+    CLAUDE_CONFIG_DIR="$WORK/claude" CODEX_HOME="$WORK/codex" PI_CODING_AGENT_DIR="$WORK/pi" \
+    bun "$ROOT/src/main.ts" "$@"
+}
+
+install_fake_orca
+cd "$WORK/ws"
+expect_exit 0 run_surface --x-harness claude --x-surface --x-no-yolo --x-json
+expect_out '"run_id"'
+expect_out '"terminal":"term_smoke"'
+RUN_ID="$(python3 -c "import json;print(json.load(open('$WORK/out'))['data']['run_id'])")"
+expect_exit 0 run_surface --x-harness claude --x-surface --x-no-yolo --x-dry-run
+expect_out "claude --model opus --effort medium"
+expect_exit 0 run_surface x-runs
+expect_out "$RUN_ID"
+expect_exit 0 run_surface x-run "$RUN_ID"
+expect_out "term_smoke"
+expect_exit 0 run_surface x-doctor --x-json
+expect_out '"surface"'
+expect_exit 1 run_surface x-run 99999999-9999-4999-9999-999999999999
+expect_exit 2 run_surface --x-harness claude --x-workspace name:main
+expect_exit 2 run_surface --x-harness claude --x-surface --x-workspace a --x-new-workspace b
+expect_exit 2 run_surface --x-harness codex --x-surface login
+cd "$ROOT"
+
 # The narrative is on stderr, so stdout stays exactly the command
 expect_exit 0 run --x-harness claude --x-no-yolo --x-dry-run
 if [[ "$(cat "$WORK/out")" != "claude --model opus --effort medium" ]]; then
@@ -176,9 +219,9 @@ if [[ "$(cat "$WORK/out")" != "claude --model opus --effort medium" ]]; then
   cat "$WORK/out" >&2
   exit 1
 fi
-grep -q "^open    claude$" "$WORK/err" || { echo "FAIL: no narrative on stderr" >&2; exit 1; }
-grep -q "^model   opus · default$" "$WORK/err" || { echo "FAIL: model row missing" >&2; exit 1; }
-grep -q "^effort  medium · default$" "$WORK/err" || { echo "FAIL: effort row missing" >&2; exit 1; }
+grep -q "^open      claude$" "$WORK/err" || { echo "FAIL: no narrative on stderr" >&2; exit 1; }
+grep -q "^model     opus · default$" "$WORK/err" || { echo "FAIL: model row missing" >&2; exit 1; }
+grep -q "^effort    medium · default$" "$WORK/err" || { echo "FAIL: effort row missing" >&2; exit 1; }
 expect_exit 0 run --x-harness claude --x-dry-run --x-json --x-verbose
 if [[ -s "$WORK/err" ]]; then
   echo "FAIL: --x-json did not silence the narrative" >&2
@@ -186,6 +229,6 @@ if [[ -s "$WORK/err" ]]; then
   exit 1
 fi
 expect_exit 0 run --x-harness claude --x-dry-run --x-verbose
-grep -q "^config  " "$WORK/err" || { echo "FAIL: --x-verbose printed no mechanism" >&2; exit 1; }
+grep -q "^config    " "$WORK/err" || { echo "FAIL: --x-verbose printed no mechanism" >&2; exit 1; }
 
 echo "smoke: all commands behaved"

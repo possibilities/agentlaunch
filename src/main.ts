@@ -1,6 +1,12 @@
 #!/usr/bin/env bun
 import type { Context, Outcome } from "./commands.ts";
-import { doctorCommand, launchCommand, resumeCommand } from "./commands.ts";
+import {
+  doctorCommand,
+  launchCommand,
+  resumeCommand,
+  runCommand,
+  runsCommand,
+} from "./commands.ts";
 import { failure, success } from "./envelope.ts";
 import { CliError, UsageError } from "./errors.ts";
 import { HARNESS_NAMES } from "./harness.ts";
@@ -9,6 +15,7 @@ import { launch } from "./launch.ts";
 import { createNarrator } from "./narrate.ts";
 import type { Partitioned, XSpec } from "./partition.ts";
 import { partition } from "./partition.ts";
+import { BACKEND_NAMES } from "./surface.ts";
 
 const SCHEMA_VERSION = 1;
 
@@ -17,32 +24,43 @@ const SCHEMA_VERSION = 1;
 const GLOBAL: XSpec = {
   value: new Set<string>([]),
   bool: new Set(["--x-json", "--x-help"]),
-  scoped: new Set<string>([]),
+  scoped: new Map<string, readonly string[]>(),
 };
 
 interface RouteFlags {
   value?: string[];
   bool?: string[];
-  scoped?: string[];
+  scoped?: Array<[string, readonly string[]]>;
 }
 
+/** Yolo scopes to a harness; the surface flag scopes to a backend. */
+const YOLO_SCOPES: Array<[string, readonly string[]]> = [
+  ["--x-yolo", HARNESS_NAMES],
+  ["--x-no-yolo", HARNESS_NAMES],
+];
+
+const SURFACE_FLAGS: RouteFlags = {
+  value: ["--x-workspace", "--x-new-workspace", "--x-project"],
+  scoped: [["--x-surface", BACKEND_NAMES]],
+};
+
 const LAUNCH_FLAGS: RouteFlags = {
-  value: ["--x-harness", "--x-account"],
+  value: ["--x-harness", "--x-account", ...(SURFACE_FLAGS.value ?? [])],
   bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
-  scoped: ["--x-yolo", "--x-no-yolo"],
+  scoped: [...YOLO_SCOPES, ...(SURFACE_FLAGS.scoped ?? [])],
 };
 
 const RESUME_FLAGS: RouteFlags = {
-  value: ["--x-account", "--x-harness"],
+  value: ["--x-account", "--x-harness", ...(SURFACE_FLAGS.value ?? [])],
   bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
-  scoped: ["--x-yolo", "--x-no-yolo"],
+  scoped: [...YOLO_SCOPES, ...(SURFACE_FLAGS.scoped ?? [])],
 };
 
 function specFor(flags: RouteFlags): XSpec {
   return {
     value: new Set([...GLOBAL.value, ...(flags.value ?? [])]),
     bool: new Set([...GLOBAL.bool, ...(flags.bool ?? [])]),
-    scoped: new Set([...GLOBAL.scoped, ...(flags.scoped ?? [])]),
+    scoped: new Map([...GLOBAL.scoped, ...(flags.scoped ?? [])]),
   };
 }
 
@@ -110,6 +128,16 @@ async function main(argv: string[]): Promise<number> {
     spec = specFor({});
     own = argv.slice(1);
     run = doctorCommand;
+  } else if (first === "x-runs") {
+    helpTopic = "x-runs";
+    spec = specFor({});
+    own = argv.slice(1);
+    run = runsCommand;
+  } else if (first === "x-run") {
+    helpTopic = "x-run";
+    spec = specFor({ bool: ["--x-verbose"] });
+    own = argv.slice(1);
+    run = runCommand;
   } else {
     helpTopic = "launch";
     spec = specFor(LAUNCH_FLAGS);
@@ -120,7 +148,7 @@ async function main(argv: string[]): Promise<number> {
 
   let parts: Partitioned;
   try {
-    parts = partition(own, spec, HARNESS_NAMES);
+    parts = partition(own, spec);
   } catch (error) {
     if (!(error instanceof UsageError)) throw error;
     console.error(error.message);

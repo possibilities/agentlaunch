@@ -231,7 +231,7 @@ describe("surface", () => {
     const parsed = envelope(result);
     expect(parsed.data?.["redactions"]).toEqual(["--dangerously-skip-permissions"]);
     const narrated = run(["--x-harness", "pi", "-a", "--x-no-yolo", "--x-dry-run"]);
-    expect(narrated.stderr).toContain("yolo    off · removed -a · explicitly forwarded");
+    expect(narrated.stderr).toContain("yolo      off · removed -a · explicitly forwarded");
   });
 
   test("bare x-* words in command position are reserved", () => {
@@ -309,13 +309,13 @@ describe("surface", () => {
     // stdout stays a runnable shell line, so --x-dry-run can be piped.
     expect(result.stdout.trim()).toBe("claude --model opus --effort medium");
     const rows = result.stderr.trimEnd().split("\n");
-    expect(rows[0]).toBe("open    claude");
-    expect(rows[1]).toMatch(/^cwd {5}\S/);
-    expect(rows).toContain("model   opus · default");
-    expect(rows).toContain("effort  medium · default");
-    expect(rows).toContain("yolo    off · permission prompts stay on");
-    expect(rows).toContain("account skipped · balancing off (AGENTSURFACE_NO_BALANCE)");
-    expect(rows).toContain("dry run nothing launched · command on stdout");
+    expect(rows[0]).toBe("open      claude");
+    expect(rows[1]).toMatch(/^cwd {7}\S/);
+    expect(rows).toContain("model     opus · default");
+    expect(rows).toContain("effort    medium · default");
+    expect(rows).toContain("yolo      off · permission prompts stay on");
+    expect(rows).toContain("account   skipped · balancing off (AGENTSURFACE_NO_BALANCE)");
+    expect(rows).toContain("dry run   nothing launched · command on stdout");
     for (const row of rows) expect(row.slice(0, 8)).toMatch(/^\S.{0,6} +$|^\S{8}$/);
   });
 
