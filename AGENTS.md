@@ -123,10 +123,13 @@ the adapters; append a new numbered record rather than editing an old one.
   priority order, families, models, effort sets inheriting model > family
   > harness, defaults in `defaults` objects — while the adapters in
   `harness.ts` own every emission spelling, provider semantics included.
-  Every launch consumes it through the `--x-harness` value; the resolved
-  model and effort are injected, narrated, and owned per dimension (colon
-  forms fault on forwarded counterparts, the name form yields). zod 4 is
-  the one runtime dependency, adopted with the fleet's config conventions.
+  Every launch consumes it through two flags (ADR 0018): `--x-harness`
+  takes a harness name and nothing else, `--x-level` takes a
+  `<model>:<effort>` pair the catalog validates as one, and at least one of
+  them is required. The resolved model and effort are injected and
+  narrated; `--x-level` owns both dimensions and faults on a forwarded
+  counterpart, a launch without one yields per dimension. zod 4 is the one
+  runtime dependency, adopted with the fleet's config conventions.
 - Surfaces are pluggable (ADR 0012): the surface API is backend-generic
   and documented; Orca is the first backend, not the concept, and nothing
   Orca-shaped may leak outside its adapter. One operation lands a

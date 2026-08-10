@@ -247,44 +247,47 @@ export interface ModelRequest {
   effort?: string | undefined;
 }
 
-const HARNESS_VALUE_FORMS = "use <harness>, <model>:<effort>, or <harness>:<model>:<effort>";
+/** The union value ADR 0018 retired: a colon in the --x-harness value used
+ * to carry a model and an effort. Named rather than reported as an unknown
+ * harness, because the old spelling is in every operator's muscle memory. */
+function assertNotUnionValue(value: string): void {
+  if (!value.includes(":")) return;
+  const parts = value.split(":");
+  const level = parts.length === 3 ? parts.slice(1).join(":") : value;
+  const harness = parts.length === 3 ? parts[0] : "<harness>";
+  throw new UsageError(
+    `the --x-harness union value is retired: pass --x-harness ${harness} --x-level ${level}`,
+  );
+}
+
+/** The --x-harness value (ADR 0018): a harness name, and nothing else — on
+ * a launch and on x-resume alike. */
+export function parseHarnessFlag(value: string): HarnessName {
+  assertNotUnionValue(value);
+  if (isHarnessName(value)) return value;
+  throw new UsageError(`"${value}" is not a harness (expected claude, codex, or pi)`);
+}
 
 /**
- * The --x-harness value (ADR 0011): a harness name launches that harness's
- * defaults; <model>:<effort> selects the earliest harness offering the
- * combination; <harness>:<model>:<effort> pins and validates. Colons claim
- * the value strictly — no sparse forms, no empty parts.
+ * The --x-level value (ADR 0018): <model>:<effort>, both parts required. The
+ * pair is one decision because the catalog validates it as one — which
+ * efforts a model allows is the catalog's to know, not the operator's to
+ * remember.
  */
-export function parseHarnessValue(value: string): ModelRequest {
-  if (!value.includes(":")) {
-    if (isHarnessName(value)) return { harness: value };
-    throw new UsageError(`"${value}" is not a harness value: ${HARNESS_VALUE_FORMS}`);
-  }
+export function parseLevel(value: string): { model: string; effort: string } {
   const parts = value.split(":");
-  if (parts.length === 2) {
-    const [model, effort] = parts as [string, string];
-    if (model === "" || effort === "") {
-      throw new UsageError(
-        `"${value}" is not a harness value: the <model>:<effort> form needs both parts`,
-      );
-    }
-    return { model, effort };
+  if (parts.length !== 2) {
+    throw new UsageError(
+      `"${value}" is not a level: --x-level takes <model>:<effort>${
+        parts.length === 3 ? ", and the harness now travels on --x-harness" : ""
+      }`,
+    );
   }
-  if (parts.length === 3) {
-    const [harness, model, effort] = parts as [string, string, string];
-    if (harness === "" || model === "" || effort === "") {
-      throw new UsageError(
-        `"${value}" is not a harness value: the <harness>:<model>:<effort> form needs all three parts`,
-      );
-    }
-    if (!isHarnessName(harness)) {
-      throw new UsageError(
-        `"${value}" is not a harness value: "${harness}" is not a harness (expected claude, codex, or pi)`,
-      );
-    }
-    return { harness, model, effort };
+  const [model, effort] = parts as [string, string];
+  if (model === "" || effort === "") {
+    throw new UsageError(`"${value}" is not a level: <model>:<effort> needs both parts`);
   }
-  throw new UsageError(`"${value}" is not a harness value: ${HARNESS_VALUE_FORMS}`);
+  return { model, effort };
 }
 
 export interface Resolution {
@@ -297,12 +300,13 @@ export interface Resolution {
 }
 
 /**
- * Resolve a harness value against the catalog. The three request shapes
- * mirror the grammar (ADR 0011): {harness} launches that harness's
- * defaults; {model, effort} walks the harnesses in catalog order and the
- * earliest one offering that combination wins; {harness, model, effort}
- * validates against the named harness. Model and effort always come in
- * pairs — there are no sparse requests.
+ * Resolve a request against the catalog. The three shapes are the three
+ * ways the two flags combine (ADR 0018): {harness} — --x-harness alone —
+ * launches that harness's defaults; {model, effort} — --x-level alone —
+ * walks the harnesses in catalog order and the earliest one offering that
+ * combination wins; {harness, model, effort} — both — validates against the
+ * named harness. Model and effort always come in pairs, because a level is
+ * one value.
  */
 export function resolveRequest(catalog: Catalog, request: ModelRequest): Resolution {
   if (request.harness !== undefined) {
@@ -314,7 +318,7 @@ export function resolveRequest(catalog: Catalog, request: ModelRequest): Resolut
     return resolvePinned(entry, request.model, request.effort ?? "");
   }
   if (request.model === undefined || request.effort === undefined) {
-    throw new UsageError("a harness value names a harness, or a model and an effort");
+    throw new UsageError("a launch names a harness, a level, or both");
   }
   for (const entry of catalog.harnesses) {
     const model = entry.models.find((candidate) => candidate.model === request.model);

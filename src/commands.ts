@@ -4,7 +4,8 @@ import {
   BUILTIN_CATALOG_PATH,
   catalogPath,
   loadCatalog,
-  parseHarnessValue,
+  parseHarnessFlag,
+  parseLevel,
   resolveRequest,
 } from "./catalog.ts";
 import { configPath, loadConfig } from "./config.ts";
@@ -21,7 +22,6 @@ import {
   modelDimensionToken,
   nameArguments,
   nameDimensionToken,
-  parseHarnessName,
   sessionFileFacts,
   sessionStore,
   utilityInvocation,
@@ -70,15 +70,20 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
       `unknown x command "${head}" — bare x-* words in command position are agentsurface's own; a prompt starting with "x-" needs the harness's -p spelling`,
     );
   }
-  const value = parts.values["x-harness"];
-  if (value === undefined) {
+  const harnessFlag = parts.values["x-harness"];
+  const levelFlag = parts.values["x-level"];
+  if (harnessFlag === undefined && levelFlag === undefined) {
     throw new UsageError(
-      "a launch names its harness: pass --x-harness <harness>, <model>:<effort>, or <harness>:<model>:<effort>",
+      "a launch names what it runs: pass --x-harness <harness>, --x-level <model>:<effort>, or both",
     );
   }
-  const request = parseHarnessValue(value);
+  const level = levelFlag === undefined ? null : parseLevel(levelFlag);
   const catalog = loadCatalog(context.env, context.home);
-  const resolution = resolveRequest(catalog, request);
+  const resolution = resolveRequest(catalog, {
+    harness: harnessFlag === undefined ? undefined : parseHarnessFlag(harnessFlag),
+    model: level?.model,
+    effort: level?.effort,
+  });
   const harness = resolution.harness;
   context.narrator.row("open", harness);
   context.narrator.row("cwd", tildePath(context.cwd, context.home));
@@ -87,19 +92,25 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
   const name = runName(parts);
   // A named run's terminal reads as the operator's own label; without one it
   // keeps saying what was launched.
-  const surface = surfaceRequest(parts, context.cwd, name ?? value, name);
+  const surface = surfaceRequest(
+    parts,
+    context.cwd,
+    name ?? (levelFlag === undefined ? harness : `${harness} ${levelFlag}`),
+    name,
+  );
   if (utility && surface !== null) {
     throw new UsageError(
       `"${head}" is a utility invocation; it passes through and cannot be placed on a surface`,
     );
   }
-  // Colon forms own both dimensions (ADR 0011): they fault on a forwarded
-  // counterpart, and mean nothing on a utility invocation. The name route
-  // yields per dimension — the caller's native spelling wins, unjudged.
-  const requested = request.model !== undefined;
+  // A level owns both dimensions (ADR 0011, on --x-level since 0018): it
+  // faults on a forwarded counterpart, and means nothing on a utility
+  // invocation. Without one the launch yields per dimension — the caller's
+  // native spelling wins, unjudged.
+  const requested = level !== null;
   if (utility && requested) {
     throw new UsageError(
-      `"${head}" is a utility invocation; model and effort do not apply — pass --x-harness ${harness}`,
+      `"${head}" is a utility invocation; model and effort do not apply — drop --x-level`,
     );
   }
   if (utility && name !== null) {
@@ -141,12 +152,12 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
     const effortToken = effortDimensionToken(harness, tokens);
     if (requested && modelToken !== null) {
       throw new UsageError(
-        `--x-harness ${value} set the model; drop the forwarded "${modelToken}"`,
+        `--x-level ${levelFlag} set the model; drop the forwarded "${modelToken}"`,
       );
     }
     if (requested && effortToken !== null) {
       throw new UsageError(
-        `--x-harness ${value} set the effort; drop the forwarded "${effortToken}"`,
+        `--x-level ${levelFlag} set the effort; drop the forwarded "${effortToken}"`,
       );
     }
     model =
@@ -183,7 +194,7 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
     utility,
     model,
     effort,
-    surface === null ? null : { ...surface, kind: "open", harnessValue: value },
+    surface === null ? null : { ...surface, kind: "open", level: levelFlag ?? null },
   );
 }
 
@@ -363,11 +374,16 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
   const [sessionId, ...forwarded] = parts.harness;
   if (sessionId === undefined) throw new UsageError("x-resume requires a session id");
   assertSessionId(sessionId);
+  if (parts.values["x-level"] !== undefined) {
+    throw new UsageError(
+      "x-resume takes no level: a session continues on the model and effort it was started with",
+    );
+  }
   const harnessFlag = parts.values["x-harness"];
   let harness: HarnessName;
   let sessionPath: string | null = null;
   if (harnessFlag !== undefined) {
-    harness = parseHarnessName(harnessFlag);
+    harness = parseHarnessFlag(harnessFlag);
     context.narrator.row("resume", facts(harness, sessionId, "by --x-harness"));
     context.narrator.row("cwd", tildePath(context.cwd, context.home));
   } else {
@@ -436,7 +452,7 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
     false,
     NO_DIMENSION,
     NO_DIMENSION,
-    surface === null ? null : { ...surface, kind: "resume", harnessValue: harnessFlag ?? null },
+    surface === null ? null : { ...surface, kind: "resume", level: null },
   );
 }
 
@@ -664,7 +680,7 @@ export async function runCommand(context: Context, parts: Partitioned): Promise<
     label("created", record.created_at),
     label("kind", record.kind),
     label("backend", record.backend),
-    label("harness", facts(record.harness, record.harness_value ?? undefined)),
+    label("harness", facts(record.harness, record.level ?? record.harness_value ?? undefined)),
     label(
       "workspace",
       facts(record.workspace.name, tildePath(record.workspace.path, context.home)),
@@ -846,7 +862,9 @@ interface SurfaceLaunch {
   title: string;
   name: string | null;
   kind: "open" | "resume";
-  harnessValue: string | null;
+  /** The --x-level value as typed, null when the launch took the harness's
+   * defaults — and always on a resume, which takes no level. */
+  level: string | null;
   from: FromRequest;
 }
 
@@ -983,7 +1001,7 @@ async function finishLaunch(
         kind: surface.kind,
         backend: surface.backend.name,
         harness: spec.harness,
-        harness_value: surface.harnessValue,
+        level: surface.level,
         name: surface.name,
         workspace: {
           name: placement.workspace.name,

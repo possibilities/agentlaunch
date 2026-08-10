@@ -236,9 +236,9 @@ describe("balanced launch", () => {
     expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-sol"]);
   });
 
-  test("a colon harness value routes on its requested model", () => {
+  test("a level routes on its requested model", () => {
     const world = makeWorld();
-    const result = run(world, ["--x-harness", "gpt-5.6-luna:max", "--x-no-yolo", "--x-dry-run"]);
+    const result = run(world, ["--x-level", "gpt-5.6-luna:max", "--x-no-yolo", "--x-dry-run"]);
     expect(result.code).toBe(0);
     expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-luna"]);
   });

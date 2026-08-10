@@ -76,8 +76,8 @@ expect_exit 0 run x-doctor --x-json
 expect_out '"harnesses"'
 expect_out '"catalog"'
 
-# Launches resolve the --x-harness value against the catalog and inject the
-# resolved model and effort in the harness's own spelling. Yolo is on by
+# Launches resolve --x-harness and --x-level against the catalog and inject
+# the resolved model and effort in the harness's own spelling. Yolo is on by
 # default (ADR 0009).
 expect_exit 0 run --x-harness claude --x-dry-run
 expect_out "claude --dangerously-skip-permissions --model 'opus\[1m\]' --effort medium"
@@ -86,27 +86,32 @@ expect_out "codex --model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"'"
 expect_exit 0 run --x-harness pi --x-no-yolo --x-dry-run
 expect_out "pi --model openai-codex/gpt-5.6-sol --thinking high"
 
-# Colon forms: model:effort walks catalog order, harness:model:effort pins.
-expect_exit 0 run --x-harness gpt-5.6-sol:ultra --x-no-yolo --x-dry-run
+# A level alone walks catalog order; with --x-harness it pins (ADR 0018).
+expect_exit 0 run --x-level gpt-5.6-sol:ultra --x-no-yolo --x-dry-run
 expect_out "codex --model gpt-5.6-sol -c 'model_reasoning_effort=\"ultra\"'"
-expect_exit 0 run --x-harness sonnet:high --x-no-yolo --x-dry-run
+expect_exit 0 run --x-level sonnet:high --x-no-yolo --x-dry-run
 expect_out "claude --model sonnet --effort high"
-expect_exit 0 run --x-harness pi:gpt-5.6-luna:max --x-no-yolo --x-dry-run
+expect_exit 0 run --x-harness pi --x-level gpt-5.6-luna:max --x-no-yolo --x-dry-run
 expect_out "pi --model openai-codex/gpt-5.6-luna --thinking max"
 
-# The name route yields per dimension to forwarded native flags.
+# A launch without a level yields per dimension to forwarded native flags.
 expect_exit 0 run --x-harness claude --model sonnet --x-no-yolo --x-dry-run
 expect_out "claude --effort medium --model sonnet"
 expect_exit 0 run --x-harness claude "hello there" --x-no-yolo --x-dry-run --x-json
 expect_out '"model_source":"default"'
 
-# Colon forms own both dimensions; conflicts and misses are usage faults.
-expect_exit 2 run --x-harness claude:opus:high --model sonnet --x-dry-run
-expect_exit 2 run --x-harness claude:opus:high --effort low --x-dry-run
-expect_exit 2 run --x-harness gpt-5.5:ultra --x-dry-run
+# A level owns both dimensions; conflicts, misses, and half-levels fault.
+expect_exit 2 run --x-harness claude --x-level opus:high --model sonnet --x-dry-run
+expect_exit 2 run --x-level opus:high --effort low --x-dry-run
+expect_exit 2 run --x-level gpt-5.5:ultra --x-dry-run
+expect_exit 2 run --x-level opus --x-dry-run
 expect_exit 2 run --x-harness opus --x-dry-run
-expect_exit 2 run --x-harness claude:opus --x-dry-run
-expect_exit 2 run --x-harness cursor:m:e --x-dry-run
+expect_exit 2 run --x-harness cursor --x-dry-run
+expect_exit 2 run --x-dry-run
+
+# The retired union value names its replacement rather than misreading.
+expect_exit 2 run --x-harness pi:gpt-5.6-luna:max --x-dry-run
+expect_err "pass --x-harness pi --x-level gpt-5.6-luna:max"
 
 # --x-no-yolo redacts an explicitly forwarded yolo flag, narrated.
 expect_exit 0 run --x-harness claude --dangerously-skip-permissions --x-no-yolo --x-dry-run
@@ -132,12 +137,12 @@ expect_out "claude --dangerously-skip-permissions"
 expect_exit 2 run --x-harness pi --x-yolo --x-no-yolo --x-dry-run
 rm "$WORK/home/.config/agentsurface/config.json"
 
-# Utility invocations pass through uninjected; colon forms refuse them.
+# Utility invocations pass through uninjected; a level refuses them.
 expect_exit 0 run --x-harness codex --x-dry-run login
 expect_out "codex login"
 expect_exit 0 run --x-harness claude --x-dry-run --version
 expect_out "claude --version"
-expect_exit 2 run --x-harness codex:gpt-5.5:high login --x-dry-run
+expect_exit 2 run --x-harness codex --x-level gpt-5.5:high login --x-dry-run
 
 # Usage faults exit 2 before anything runs
 expect_exit 2 run --x-bogus
@@ -160,6 +165,8 @@ expect_exit 0 run x-resume "$SESSION_ID" --x-dry-run
 expect_out "claude --resume $SESSION_ID --dangerously-skip-permissions"
 expect_exit 0 run x-resume "$SESSION_ID" --x-harness pi --x-no-yolo --x-dry-run
 expect_out "pi --session $SESSION_ID"
+expect_exit 2 run x-resume "$SESSION_ID" --x-level opus:high --x-dry-run
+expect_err "x-resume takes no level"
 expect_exit 1 run x-resume 99999999-9999-4999-9999-999999999999
 expect_exit 1 run x-resume 99999999-9999-4999-9999-999999999999 --x-dry-run --x-json
 expect_out '"code":"session_not_found"'

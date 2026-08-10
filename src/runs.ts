@@ -22,7 +22,12 @@ export interface RunRecord {
   kind: "open" | "resume";
   backend: string;
   harness: HarnessName;
-  harness_value: string | null;
+  /** The --x-level value as typed, null when none was given (ADR 0018). */
+  level?: string | null;
+  /** What `level` was called before the flags split — records written then
+   * hold a whole `--x-harness` union value here. Read, never written: a run
+   * record outlives the workspace, so the old ones stay readable. */
+  harness_value?: string | null;
   /** The operator's own label for this run (`--x-name`), free text and never
    * unique — a handle to read back, not an identity. Absent on records
    * written before run names existed, which reads the same as unnamed. */

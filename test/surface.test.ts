@@ -59,14 +59,14 @@ describe("surface", () => {
     expect(run(["--version"]).stdout.trim()).toBe(VERSION);
   });
 
-  test("help lands on stdout; launches without --x-harness are usage faults", () => {
+  test("help lands on stdout; launches naming neither flag are usage faults", () => {
     expect(run([]).stdout).toContain("agentsurface — one launcher");
     expect(run(["--agent-teaser"]).stdout).toContain("Launch agent harnesses");
     expect(run(["--agent-help"]).stdout).toContain("agent runbook");
     expect(run(["--x-help"]).stdout).toContain("Launch a harness in this terminal");
     const missing = run(["land"]);
     expect(missing.code).toBe(2);
-    expect(missing.stderr).toContain("a launch names its harness");
+    expect(missing.stderr).toContain("a launch names what it runs");
   });
 
   test("the retired grammar is refused loudly, never misread", () => {
@@ -125,9 +125,9 @@ describe("surface", () => {
     ]);
   });
 
-  test("colon forms request both dimensions and pick by catalog order", () => {
+  test("a level requests both dimensions and picks by catalog order", () => {
     const walked = run([
-      "--x-harness",
+      "--x-level",
       "gpt-5.6-sol:ultra",
       "--x-dry-run",
       "--x-json",
@@ -139,7 +139,9 @@ describe("surface", () => {
     expect(data?.["effort"]).toBe("ultra");
     const pinned = run([
       "--x-harness",
-      "pi:gpt-5.6-luna:max",
+      "pi",
+      "--x-level",
+      "gpt-5.6-luna:max",
       "--x-dry-run",
       "--x-json",
       "--x-no-yolo",
@@ -153,17 +155,21 @@ describe("surface", () => {
     ]);
   });
 
-  test("bad harness values and misses are usage faults", () => {
+  test("bad values, the retired union, and misses are usage faults", () => {
     expect(run(["--x-harness", "opus"]).code).toBe(2);
-    expect(run(["--x-harness", "claude:opus"]).code).toBe(2);
-    expect(run(["--x-harness", "a:b:c:d"]).code).toBe(2);
-    expect(run(["--x-harness", "cursor:m:e"]).code).toBe(2);
-    const miss = run(["--x-harness", "gpt-5.5:ultra"]);
+    expect(run(["--x-level", "opus"]).code).toBe(2);
+    expect(run(["--x-level", "a:b:c:d"]).code).toBe(2);
+    expect(run(["--x-harness", "cursor"]).code).toBe(2);
+    expect(run(["--x-dry-run"]).stderr).toContain("a launch names what it runs");
+    const union = run(["--x-harness", "pi:gpt-5.6-luna:max"]);
+    expect(union.code).toBe(2);
+    expect(union.stderr).toContain("--x-harness pi --x-level gpt-5.6-luna:max");
+    const miss = run(["--x-level", "gpt-5.5:ultra"]);
     expect(miss.code).toBe(2);
     expect(miss.stderr).toContain('no harness offers model "gpt-5.5" at effort "ultra"');
   });
 
-  test("the name route yields per dimension to forwarded native flags", () => {
+  test("a launch without a level yields per dimension to forwarded native flags", () => {
     const result = run([
       "--x-harness",
       "claude",
@@ -180,16 +186,26 @@ describe("surface", () => {
     expect(data?.["effort_source"]).toBe("default");
   });
 
-  test("a colon form faults on a forwarded model or effort counterpart", () => {
-    const model = run(["--x-harness", "claude:opus:high", "--model", "sonnet", "--x-dry-run"]);
+  test("a level faults on a forwarded model or effort counterpart", () => {
+    const model = run([
+      "--x-harness",
+      "claude",
+      "--x-level",
+      "opus:high",
+      "--model",
+      "sonnet",
+      "--x-dry-run",
+    ]);
     expect(model.code).toBe(2);
     expect(model.stderr).toContain("set the model");
-    const effort = run(["--x-harness", "claude:opus:high", "--effort", "low", "--x-dry-run"]);
+    const effort = run(["--x-level", "opus:high", "--effort", "low", "--x-dry-run"]);
     expect(effort.code).toBe(2);
     expect(effort.stderr).toContain("set the effort");
     const codex = run([
       "--x-harness",
-      "codex:gpt-5.5:high",
+      "codex",
+      "--x-level",
+      "gpt-5.5:high",
       "-c",
       'model_reasoning_effort="low"',
       "--x-dry-run",
@@ -197,15 +213,22 @@ describe("surface", () => {
     expect(codex.code).toBe(2);
   });
 
-  test("utility invocations get no injection, and colon forms refuse them", () => {
+  test("utility invocations get no injection, and a level refuses them", () => {
     const utility = run(["--x-harness", "codex", "--x-dry-run", "--x-json", "login"]);
     const parsed = envelope(utility);
     expect(parsed.data?.["command"]).toEqual(["codex", "login"]);
     expect(parsed.data?.["utility"]).toBe(true);
     expect(parsed.data?.["model"]).toBeNull();
-    const colon = run(["--x-harness", "codex:gpt-5.5:high", "login", "--x-dry-run"]);
-    expect(colon.code).toBe(2);
-    expect(colon.stderr).toContain("utility invocation");
+    const level = run([
+      "--x-harness",
+      "codex",
+      "--x-level",
+      "gpt-5.5:high",
+      "login",
+      "--x-dry-run",
+    ]);
+    expect(level.code).toBe(2);
+    expect(level.stderr).toContain("utility invocation");
   });
 
   test("yolo is on by default and rides after the injected dimensions", () => {

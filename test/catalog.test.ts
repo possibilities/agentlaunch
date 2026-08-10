@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadCatalog, parseHarnessValue, resolveRequest } from "../src/catalog.ts";
+import { loadCatalog, parseHarnessFlag, parseLevel, resolveRequest } from "../src/catalog.ts";
 import { CliError, UsageError } from "../src/errors.ts";
 import type { Environ } from "../src/paths.ts";
 
@@ -43,35 +43,34 @@ const CUSTOM = {
   ],
 };
 
-describe("parseHarnessValue", () => {
-  test("a bare harness name pins that harness", () => {
-    expect(parseHarnessValue("claude")).toEqual({ harness: "claude" });
-    expect(parseHarnessValue("pi")).toEqual({ harness: "pi" });
+describe("parseHarnessFlag", () => {
+  test("takes a harness name and nothing else", () => {
+    expect(parseHarnessFlag("claude")).toBe("claude");
+    expect(parseHarnessFlag("pi")).toBe("pi");
+    expect(() => parseHarnessFlag("opus")).toThrow(/is not a harness/);
   });
 
-  test("one colon is model:effort, both parts required", () => {
-    expect(parseHarnessValue("gpt-5.6-sol:high")).toEqual({
-      model: "gpt-5.6-sol",
-      effort: "high",
-    });
-    expect(() => parseHarnessValue("gpt-5.6-sol:")).toThrow(/needs both parts/);
-    expect(() => parseHarnessValue(":high")).toThrow(/needs both parts/);
+  test("the retired union value points at the split, not at an unknown harness", () => {
+    expect(() => parseHarnessFlag("gpt-5.6-sol:high")).toThrow(
+      /union value is retired: pass --x-harness <harness> --x-level gpt-5\.6-sol:high/,
+    );
+    expect(() => parseHarnessFlag("pi:gpt-5.6-luna:max")).toThrow(
+      /pass --x-harness pi --x-level gpt-5\.6-luna:max/,
+    );
+  });
+});
+
+describe("parseLevel", () => {
+  test("model:effort, both parts required", () => {
+    expect(parseLevel("gpt-5.6-sol:high")).toEqual({ model: "gpt-5.6-sol", effort: "high" });
+    expect(() => parseLevel("gpt-5.6-sol:")).toThrow(/needs both parts/);
+    expect(() => parseLevel(":high")).toThrow(/needs both parts/);
   });
 
-  test("two colons are harness:model:effort, all parts required", () => {
-    expect(parseHarnessValue("pi:gpt-5.6-luna:max")).toEqual({
-      harness: "pi",
-      model: "gpt-5.6-luna",
-      effort: "max",
-    });
-    expect(() => parseHarnessValue("claude:opus:")).toThrow(/needs all three parts/);
-    expect(() => parseHarnessValue("::")).toThrow(/needs all three parts/);
-    expect(() => parseHarnessValue("cursor:m:e")).toThrow(/"cursor" is not a harness/);
-  });
-
-  test("anything else is a pointed usage fault", () => {
-    expect(() => parseHarnessValue("opus")).toThrow(/is not a harness value/);
-    expect(() => parseHarnessValue("a:b:c:d")).toThrow(/is not a harness value/);
+  test("a lone model, a triple, or anything else is a pointed usage fault", () => {
+    expect(() => parseLevel("fable")).toThrow(/takes <model>:<effort>/);
+    expect(() => parseLevel("claude:opus:high")).toThrow(/the harness now travels on --x-harness/);
+    expect(() => parseLevel("a:b:c:d")).toThrow(/is not a level/);
   });
 });
 

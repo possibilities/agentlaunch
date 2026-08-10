@@ -3,17 +3,19 @@ export const VERSION = "0.1.0";
 export const TOP_HELP = `agentsurface — one launcher for agent harnesses
 
 Usage:
-  agentsurface --x-harness <value> [tokens…]    Launch a harness here
+  agentsurface --x-harness <harness> [tokens…]  Launch a harness here
   agentsurface x-resume <session-id> [tokens…]  Reopen a stored session by id
   agentsurface x-runs                           List recorded surface runs
   agentsurface x-run <run-id|name>              Show one run; discover its session id
   agentsurface x-land <workspace-ref>           Merge a workspace back and release it
   agentsurface x-doctor                         Report binaries, stores, config, catalog, surface
 
-The --x-harness value (run \`agentsurface --x-help\` for the full story):
-  claude                 That harness, launched on its catalog defaults
-  gpt-5.6-sol:high       The earliest harness offering model:effort wins
-  codex:gpt-5.5:xhigh    Pinned: the model and effort must be valid there
+What runs, in two flags (run \`agentsurface --x-help\` for the full story):
+  --x-harness claude                 That harness on its catalog defaults
+  --x-level gpt-5.6-sol:high         The earliest harness offering the
+                                     level wins — here, codex
+  --x-harness codex --x-level gpt-5.5:xhigh
+                                     Pinned: the level must be valid there
 
 One partition rule: a token starting --x- is agentsurface's, and every other
 token is the harness's, forwarded in the order typed. Unknown --x-* flags
@@ -21,7 +23,10 @@ are usage faults; unknown harness flags are the harness's to judge. Bare
 x-* words in command position are reserved for agentsurface.
 
 Launch x-flags:
-  --x-harness <value>    Which harness/model/effort to launch (required)
+  --x-harness <harness>  claude|codex|pi — which harness to launch
+  --x-level <model>:<effort>
+                         What it runs at; both parts required. One of
+                         --x-harness and --x-level is required.
   --x-name <name>        Name this run (claude/pi --name; codex has none)
   --x-surface [backend]  Land on a surface instead of this terminal
   --x-workspace <sel>    Surface workspace to land in (default: current)
@@ -48,32 +53,37 @@ a surface landing returns a run id instead and exits 0.
 `;
 
 export const HELP: Record<string, string> = {
-  launch: `agentsurface --x-harness <value> [tokens…]
+  launch: `agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…]
 
 Launch a harness in this terminal and cwd. Every token that does not start
 with --x- is the harness's and is forwarded in the order typed — prompts,
 flags, and subcommands alike. The wrapper execs the harness and exits with
 its exit code.
 
-The --x-harness value (ADR 0011), resolved against the catalog:
-  <harness>                    claude | codex | pi — launched on its
-                               catalog defaults (model and effort filled)
-  <model>:<effort>             both parts required; the earliest harness in
-                               catalog order offering that combination wins
-  <harness>:<model>:<effort>   all parts required; pinned — the model and
-                               effort must be valid there or the launch is
-                               a usage fault
+What runs is two flags (ADR 0018), resolved against the catalog:
+  --x-harness <harness>        claude | codex | pi. Alone, the harness is
+                               launched on its catalog defaults (model and
+                               effort filled).
+  --x-level <model>:<effort>   The level: both parts required, and one
+                               value because the catalog validates them as
+                               one — which efforts a model allows is the
+                               catalog's to know. Alone, the earliest
+                               harness in catalog order offering that level
+                               wins; it is a usage fault if none does.
+  both                         Pinned — the level must be valid on that
+                               harness or the launch is a usage fault.
+At least one of the two is required, so a typo can never launch anything.
 
 The resolved model and effort are injected at the head of the forwarded
 tokens in the harness's own spelling — --model everywhere (pi gets the
 provider-combined form, e.g. openai-codex/gpt-5.6-sol), and --effort
 (claude), -c model_reasoning_effort="…" (codex), or --thinking (pi).
-A colon form owns both dimensions: a forwarded native model/effort flag
-beside it is a usage fault. The bare-harness form yields per dimension —
-a forwarded --model (or --effort/--thinking/-c model_reasoning_effort=…)
+--x-level owns both dimensions: a forwarded native model/effort flag beside
+it is a usage fault. Without it the launch yields per dimension — a
+forwarded --model (or --effort/--thinking/-c model_reasoning_effort=…)
 wins and nothing is injected for that dimension. Utility invocations
-(codex login, claude mcp, bare --version…) get no injection at all, and a
-colon form on one is a usage fault.
+(codex login, claude mcp, bare --version…) get no injection at all, and
+--x-level on one is a usage fault.
 
 Surface x-flags (ADR 0012/0013 — the launch lands on a surface and the
 command returns an envelope instead of becoming the harness):
@@ -158,8 +168,8 @@ parseable envelope (which silences the rows).
 
 Examples:
   agentsurface --x-harness claude "fix the failing tests"
-  agentsurface --x-harness gpt-5.6-sol:ultra "hard problem"
-  agentsurface --x-harness pi:gpt-5.6-luna:max
+  agentsurface --x-level gpt-5.6-sol:ultra "hard problem"
+  agentsurface --x-harness pi --x-level gpt-5.6-luna:max
   agentsurface --x-harness claude --model sonnet "quick question"
   agentsurface --x-harness codex --x-dry-run --x-json
   agentsurface --x-harness claude --x-surface "fix the tests"
@@ -175,8 +185,7 @@ forwarded to the harness after the resume spelling. Resumes take no
 model/effort injection — a session continues on its own model.
 
 x-flags:
-  --x-harness <name>     claude|codex|pi — skip store detection (names
-                         only here; colon forms belong to launches)
+  --x-harness <name>     claude|codex|pi — skip store detection
   --x-surface [backend]  Resume onto a surface: the session continues in a
                          workspace instead of this terminal. Defaults to
                          the workspace containing the session's own cwd;
@@ -281,20 +290,20 @@ the workspace it was born in.
 };
 
 export const AGENT_TEASER =
-  "Launch agent harnesses (claude, codex, pi) in place or on a surface: agentsurface --x-harness <harness | model:effort | harness:model:effort> [tokens…] resolves against the catalog and injects the model/effort in the harness's own spelling; --x-surface lands the launch in a managed workspace (Orca) and returns a run id; x-resume <session-id> reopens a session with cross-store detection; x-runs/x-run inspect landed runs; x-land merges a finished workspace back to the main line and releases it; x-doctor reports install health.";
+  "Launch agent harnesses (claude, codex, pi) in place or on a surface: agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…] resolves against the catalog and injects the model/effort in the harness's own spelling; --x-surface lands the launch in a managed workspace (Orca) and returns a run id; x-resume <session-id> reopens a session with cross-store detection; x-runs/x-run inspect landed runs; x-land merges a finished workspace back to the main line and releases it; x-doctor reports install health.";
 
 export const AGENT_HELP = `agentsurface agent runbook
 
 What it is
   One launcher for agent harnesses (claude, codex, pi). As a runner,
-  \`agentsurface --x-harness <value> [tokens…]\` starts a session in this
+  \`agentsurface --x-harness <harness> [tokens…]\` starts a session in this
   terminal and cwd, and \`x-resume\` reopens a stored session by id. With
   --x-surface the same launch lands on a surface instead — a managed
   workspace behind a pluggable backend API (Orca is the first backend) —
   and the command returns a run id instead of becoming the harness.
 
 Commands
-  agentsurface --x-harness <value> [tokens…]  [--x-surface [backend]]
+  agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…]  [--x-surface [backend]]
   agentsurface x-resume <session-id> [tokens…]  [--x-harness claude|codex|pi] [--x-surface]
   agentsurface x-runs [--x-json]
   agentsurface x-run <run-id | run-name> [--x-json]
@@ -307,18 +316,19 @@ Rules
     the harness's, forwarded in the order typed. Unknown --x-* flags are
     usage faults; unknown harness tokens are forwarded, not judged. Bare
     x-* words in command position are reserved for agentsurface.
-  - The --x-harness value (ADR 0011) resolves against the catalog
+  - What runs is two flags (ADR 0018), resolved against the catalog
     (built-in catalog.json, replaced outright by
-    ~/.config/agentsurface/catalog.json): a harness name launches its
-    defaults; <model>:<effort> picks the earliest harness in catalog order
-    offering the combination; <harness>:<model>:<effort> pins and
-    validates. No sparse colon forms. The resolved model and effort are
-    injected at the head of the forwarded tokens in the harness's own
-    spelling. A colon form owns both dimensions and faults on a forwarded
-    native counterpart; the bare-harness form yields per dimension to a
-    forwarded --model / --effort / --thinking / -c
-    model_reasoning_effort=…. Utility invocations get no injection, and a
-    colon form on one is a usage fault.
+    ~/.config/agentsurface/catalog.json): --x-harness <harness> alone
+    launches that harness's defaults; --x-level <model>:<effort> alone
+    picks the earliest harness in catalog order offering that level; both
+    together pin and validate. At least one is required. A level takes
+    both parts — it is one value because the catalog validates the pair as
+    one. The resolved model and effort are injected at the head of the
+    forwarded tokens in the harness's own spelling. --x-level owns both
+    dimensions and faults on a forwarded native counterpart; without it a
+    launch yields per dimension to a forwarded --model / --effort /
+    --thinking / -c model_reasoning_effort=…. Utility invocations get no
+    injection, and --x-level on one is a usage fault.
   - Yolo is on by default (ADR 0009): claude
     --dangerously-skip-permissions, codex
     --dangerously-bypass-approvals-and-sandbox, pi --approve —
@@ -370,7 +380,7 @@ Rules
 
 Examples
   agentsurface --x-harness claude "fix the failing tests"
-  agentsurface --x-harness gpt-5.6-sol:ultra "hard problem"
-  agentsurface --x-harness pi:gpt-5.6-luna:max --x-dry-run --x-json
+  agentsurface --x-level gpt-5.6-sol:ultra "hard problem"
+  agentsurface --x-harness pi --x-level gpt-5.6-luna:max --x-dry-run --x-json
   agentsurface x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
 `;

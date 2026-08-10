@@ -194,7 +194,8 @@ describe("surface landings", () => {
     const record = readRecord(world, data.run_id!);
     expect(record.kind).toBe("open");
     expect(record.harness).toBe("claude");
-    expect(record.harness_value).toBe("claude");
+    // No --x-level, so the record has no level to hold.
+    expect(record.level).toBeNull();
     expect(record.terminal).toBe("term_test-1");
     expect(record.session_id).toBeNull();
     expect(record.command).toEqual(["claude", "--model", "opus[1m]", "--effort", "medium", "hi"]);

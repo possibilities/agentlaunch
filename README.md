@@ -3,7 +3,7 @@
 [![CI](https://github.com/possibilities/agentsurface/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/possibilities/agentsurface/actions/workflows/ci.yml)
 
 One launcher for every agent harness. `agentsurface --x-harness claude` (or
-`codex`, or `pi`) starts that harness in this terminal; name a model instead
+`codex`, or `pi`) starts that harness in this terminal; name a level instead
 and the catalog picks the harness that offers it.
 
 Every launch is balanced across accounts and yolo'd by default. `x-resume`
@@ -21,8 +21,8 @@ the deployed SHA to `~/.local/state/agentsurface/deployed-sha`.
 ## Use
 
     agentsurface --x-harness claude "fix the failing tests"
-    agentsurface --x-harness gpt-5.6-sol:ultra "hard problem"
-    agentsurface --x-harness pi:gpt-5.6-luna:max
+    agentsurface --x-level gpt-5.6-sol:ultra "hard problem"
+    agentsurface --x-harness pi --x-level gpt-5.6-luna:max
     agentsurface --x-harness claude --model sonnet "quick question"
     agentsurface x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
     agentsurface x-resume 019fcb41-6f70-7283-aa42-97510cb09818 --x-harness codex
@@ -35,19 +35,23 @@ usage faults; unknown harness flags are the harness's to judge, so a harness
 upgrade never changes how a command parses here. Bare `x-*` words in command
 position are reserved for agentsurface (`x-resume`, `x-doctor`).
 
-Every launch names what it runs through the **harness value** (ADR 0011). A
-bare name launches that harness on its catalog defaults. `gpt-5.6-sol:ultra`
-resolves to the earliest harness in catalog order offering that model at that
-effort. `pi:gpt-5.6-luna:max` pins and validates.
+Every launch names what it runs through two flags (ADR 0018), at least one of
+them required. `--x-harness claude` launches that harness on its catalog
+defaults. `--x-level gpt-5.6-sol:ultra` names a **level** — a model and an
+effort, both parts required — and resolves to the earliest harness in catalog
+order offering it. Together they pin and validate. A level keeps its two parts
+in one value because the catalog validates them as one pair: which efforts a
+model allows is the catalog's to know, not something to match up in your head
+before typing.
 
 The resolved model and effort are injected in the harness's own spelling, and
 narrated: `--model` everywhere (pi gets `openai-codex/gpt-5.6-sol`), then
 `--effort` (claude), `-c model_reasoning_effort="…"` (codex), or `--thinking`
-(pi). A colon form owns both dimensions, so a native model or effort flag
-forwarded beside it is a usage fault. The bare-name form yields per dimension:
-a forwarded `--model sonnet` wins that dimension and only the effort is
-injected. Utility invocations (`codex login`, bare `--version`) take no
-injection, and resumes never do — a session continues on its own model.
+(pi). `--x-level` owns both dimensions, so a native model or effort flag
+forwarded beside it is a usage fault. Without one, a launch yields per
+dimension: a forwarded `--model sonnet` wins that dimension and only the
+effort is injected. Utility invocations (`codex login`, bare `--version`) take
+no injection, and resumes never do — a session continues on its own model.
 
 `x-resume` without `--x-harness` detects which session store owns the id, and
 refuses with the candidates named when that is ambiguous. `--x-dry-run` prints
@@ -184,10 +188,10 @@ source of truth (`bun run generate:schemas`).
   defaults-bearing includes without own defaults is a fault), and per model
   (`{"effort": …}` only, overriding the harness's resolved default when that
   model is chosen). There is no default harness; every launch names one.
-- **Resolution** is the `--x-harness` value: a harness name launches its
-  defaults, `model:effort` walks the harness order and the earliest offering
-  wins (`gpt-5.6-sol:ultra` picks codex over pi), and a full triple pins and
-  validates.
+- **Resolution** is the two launch flags: `--x-harness` alone launches that
+  harness's defaults, `--x-level` alone walks the harness order and the
+  earliest offering wins (`gpt-5.6-sol:ultra` picks codex over pi), and both
+  together pin and validate.
 - **Validation** is strict and total at load. Unknown keys or families,
   providers without semantics, duplicates after family expansion, missing
   effort chains, and unsatisfiable defaults are all `catalog_invalid`, and a
