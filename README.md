@@ -103,6 +103,50 @@ A surface dry run resolves read-only. A refused surface (runtime unreachable,
 workspace missing) fails the launch loudly, never falling back to this
 terminal. Utility invocations cannot land.
 
+## Landing finished work
+
+    agentsurface x-land name:fix-tests --x-dry-run
+    agentsurface x-land name:fix-tests
+    agentsurface x-land run:<run-id> --x-force
+
+`x-land` is the other end of a run's life: it merges a workspace's finished
+work back to the main line and lets the surface go, in that order (ADR 0016).
+Survey, refuse, merge, release, reconcile — a checkout is never removed until
+its work provably landed somewhere else. The workspace is named the way
+`--x-from` names one: `run:<run-id>` through our own registry, or the backend's
+own selector.
+
+Git work is done with git, in the repository's primary checkout, which is found
+with `git worktree list` rather than asked of the backend. The surface is
+consulted only for what it alone knows — which workspace, whose repo, what is
+still attached — and does only what it alone can: stop terminals, remove the
+workspace.
+
+**Nothing half-happens.** A merge conflict is rolled back with `git merge
+--abort` and raised as `land_conflict` naming the conflicted files, with the
+target branch exactly as it was; resolve it in the workspace and run `x-land`
+again. Refusals name what is in the way and the flag that clears it:
+
+| Blocker | Means | Cleared by |
+|---|---|---|
+| `dirty` | uncommitted or untracked changes | `--x-abandon` |
+| `terminals` | live terminals in the workspace | `--x-force` |
+| `children` | workspaces descend from this one | `--x-force` |
+| `base_branch` | the primary checkout is on another branch | `git switch` |
+| `base_dirty` | the primary checkout is unclean | commit or stash |
+
+The two force flags are deliberately separate: `--x-force` clears operational
+obstacles and can lose no work, `--x-abandon` discards work and skips the merge
+entirely, and neither implies the other. Committing is judgment, so a dirty
+workspace is refused rather than committed for you. The repository's own
+primary checkout is refused unconditionally. Merging is local — nothing is
+pushed. `--x-dry-run` reports the same survey and blockers and changes nothing,
+which is how to ask "can this be landed?" without a second command.
+
+Run records are **stamped, not deleted**: `closed_at` and `closed_as`
+(`landed` | `abandoned`). A record is the last thing tying a run id to a
+session id, and the session outlives the workspace it was born in.
+
 ## The catalog
 
 `catalog.json`, shipped with the checkout, is the ordered description of

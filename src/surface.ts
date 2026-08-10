@@ -22,7 +22,7 @@ export type WorkspaceIntent =
   | { kind: "new"; name: string; project: string | null; path: string };
 
 /**
- * What a landing came from (ADR 0015). Provenance is stated by the caller and
+ * What a placement came from (ADR 0015). Provenance is stated by the caller and
  * never inferred: `none` is a value rather than the absence of one, because a
  * backend that would otherwise read its own environment has to be told
  * explicitly not to. The vocabulary here is ours; what a backend *means* by a
@@ -43,12 +43,12 @@ export type Provenance =
       workspace: { name: string; path: string; id: string | null };
     };
 
-export interface LandRequest {
+export interface PlaceRequest {
   spec: LaunchSpec;
   intent: WorkspaceIntent;
   /** Display name for the landed terminal; run names will feed this. */
   title: string;
-  /** What this landing descends from — always stated, never inferred. */
+  /** What this placement descends from — always stated, never inferred. */
   provenance: Provenance;
   /** Dry runs resolve read-only: no registration, no creation, no terminal. */
   dryRun: boolean;
@@ -56,7 +56,7 @@ export interface LandRequest {
   env: Environ;
 }
 
-export interface Landing {
+export interface Placement {
   backend: string;
   /** The ensure outcome for the project, when the intent implied one. */
   project: { name: string; created: boolean } | null;
@@ -69,6 +69,63 @@ export interface Landing {
   provenance: { recorded: boolean; detail: string };
 }
 
+/** One thing a backend runs inside a workspace — an Orca terminal, a herdr
+ * pane or agent. Releasing a workspace stops them; the handle is the same
+ * address a run record carries. */
+export interface Attachment {
+  handle: string;
+  title: string;
+  /** Whether the backend still considers it live. */
+  live: boolean;
+}
+
+/**
+ * What a backend knows about an existing workspace that nobody else does:
+ * its identity, whether it is the repository's primary checkout, what its
+ * worktrees are cut from, and what is still running inside it. Git facts are
+ * deliberately absent — a workspace is a directory plus the backend's
+ * bookkeeping, and the directory half is git's to answer, read with git.
+ */
+export interface Survey {
+  backend: string;
+  workspace: { name: string; path: string; id: string | null };
+  /** The ref this backend cuts new workspaces from — repo policy where the
+   * backend records one, null where it has no opinion. */
+  baseRef: string | null;
+  /** The repository's own checkout, which exists to be worked in and never
+   * to be released. */
+  primary: boolean;
+  /** Workspaces the backend records as descending from this one; releasing a
+   * parent leaves them without one. */
+  children: number;
+  attachments: Attachment[];
+}
+
+export interface SurveyRequest {
+  /** The backend's own workspace selector; `run:` refs are resolved to one
+   * before they reach here. */
+  selector: string;
+  narrator: Narrator;
+  env: Environ;
+}
+
+export interface ReleaseRequest {
+  selector: string;
+  /** Stop live attachments first. False leaves them to the backend's own
+   * removal semantics, which may refuse. */
+  stopAttachments: boolean;
+  narrator: Narrator;
+  env: Environ;
+}
+
+/** What releasing actually did. A backend that also disposes of the branch
+ * says so, because the caller finishes that job with git otherwise. */
+export interface Released {
+  stopped: string[];
+  removed: boolean;
+  detail: string;
+}
+
 export interface BackendHealth {
   reachable: boolean;
   detail: string;
@@ -76,9 +133,15 @@ export interface BackendHealth {
 
 export interface SurfaceBackend {
   readonly name: string;
-  /** Land a finished launch spec: ensure the entities the intent implies,
+  /** Place a finished launch spec: ensure the entities the intent implies,
    * start the command in the workspace, report where it landed. */
-  land(request: LandRequest): Promise<Landing>;
+  place(request: PlaceRequest): Promise<Placement>;
+  /** Report an existing workspace: identity, attachments, and the facts only
+   * this backend holds. Read-only. */
+  survey(request: SurveyRequest): Promise<Survey>;
+  /** Let go of a workspace: stop what is attached, then remove it. The
+   * inverse of place, and the only destructive operation on the seam. */
+  release(request: ReleaseRequest): Promise<Released>;
   /** Health for x-doctor; never throws — diagnosis is the caller's job. */
   doctor(env: Environ): Promise<BackendHealth>;
 }

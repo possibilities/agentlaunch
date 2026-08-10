@@ -24,6 +24,7 @@ import {
   sessionStore,
   utilityInvocation,
 } from "./harness.ts";
+import { landWorkspace } from "./land.ts";
 import type { Narrator } from "./narrate.ts";
 import { facts, shellLine, tildePath } from "./narrate.ts";
 import type { Partitioned } from "./partition.ts";
@@ -35,6 +36,7 @@ import {
   readRunRecord,
   resolveRun,
   runsDirectory,
+  stampClosedRuns,
   writeRunRecord,
 } from "./runs.ts";
 import type { Provenance, SurfaceBackend, WorkspaceIntent } from "./surface.ts";
@@ -83,7 +85,7 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
   const surface = surfaceRequest(parts, context.cwd, value);
   if (utility && surface !== null) {
     throw new UsageError(
-      `"${head}" is a utility invocation; it passes through and cannot land on a surface`,
+      `"${head}" is a utility invocation; it passes through and cannot be placed on a surface`,
     );
   }
   // Colon forms own both dimensions (ADR 0011): they fault on a forwarded
@@ -150,7 +152,7 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
 }
 
 /** The surface flags as one decision: which backend, and the workspace
- * intent the landing should satisfy. The anchor path — the invocation cwd
+ * intent the placement should satisfy. The anchor path — the invocation cwd
  * on a launch, the session's own cwd on a resume — is what "current" means
  * and what a new workspace's project is inferred from. Null anchor happens
  * only on a resume whose session file is nowhere local. */
@@ -184,7 +186,7 @@ function surfaceRequest(
                 ? "--x-no-from"
                 : null;
     if (stray !== null) {
-      throw new UsageError(`${stray} says where a surface landing lives; add --x-surface`);
+      throw new UsageError(`${stray} says where a placed launch lives; add --x-surface`);
     }
     return null;
   }
@@ -192,7 +194,7 @@ function surfaceRequest(
     throw new UsageError("--x-from names what this run came from and --x-no-from says nothing did");
   }
   // Lineage is set when a workspace is created, so naming it for a workspace
-  // that already exists would mean rewriting history the landing did not make.
+  // that already exists would mean rewriting history the placement did not make.
   if ((from !== undefined || noFrom) && newWorkspace === undefined) {
     throw new UsageError(
       `${from !== undefined ? "--x-from" : "--x-no-from"} only qualifies --x-new-workspace; an existing workspace keeps the provenance it has`,
@@ -604,6 +606,130 @@ export async function runCommand(context: Context, parts: Partitioned): Promise<
   return { kind: "result", data: record, human: lines.join("\n") };
 }
 
+/**
+ * x-land (ADR 0016): merge a workspace's work back to the main line, let the
+ * surface go, and reconcile the registry. The ref vocabulary is the one
+ * --x-from already established — `run:<run-id>` resolves through our own
+ * registry, anything else is the backend's selector — so an agent that can
+ * say where a run came from can say which workspace to land without learning
+ * a second grammar.
+ */
+export async function landCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  const [ref, ...rest] = parts.harness;
+  if (ref === undefined) throw new UsageError("x-land requires a workspace reference");
+  if (rest.length > 0) throw new UsageError("x-land takes exactly one workspace reference");
+  // Same scoped spelling as a launch's --x-surface: bare means the default
+  // backend, a vocabulary word names one.
+  const scopes = [...new Set((parts.scoped.get("x-surface") ?? []).filter((s) => s !== "all"))];
+  if (scopes.length > 1) {
+    throw new UsageError(
+      `--x-surface names more than one backend (${scopes.join(", ")}); pick one`,
+    );
+  }
+  const backend = surfaceBackend(scopes[0] ?? DEFAULT_BACKEND);
+  const dryRun = parts.bools.has("x-dry-run");
+  const force = parts.bools.has("x-force");
+  const abandon = parts.bools.has("x-abandon");
+  const selector = await resolveWorkspaceRef(context, ref, backend.name);
+
+  context.narrator.row("land", facts(backend.name, selector, dryRun ? "dry run" : undefined));
+  const result = await landWorkspace(
+    { env: context.env, home: context.home, narrator: context.narrator },
+    backend,
+    { selector, into: parts.values["x-into"], force, abandon, dryRun },
+    (workspacePath, closedAs) =>
+      stampClosedRuns(context.env, context.home, workspacePath, closedAs),
+  );
+
+  // On a dry run the survey *is* the result, and it goes to stdout — so the
+  // narrative says only which workspace was read, and never restates it
+  // (ADR 0007). A real land's stdout is one line, so its decisions are rows.
+  if (!dryRun) {
+    context.narrator.row(
+      "workspace",
+      facts(result.workspace.name, tildePath(result.workspace.path, context.home)),
+    );
+    context.narrator.row(
+      "branch",
+      facts(
+        result.branch ?? "detached",
+        result.into === null ? "abandoned" : `into ${result.into}`,
+        result.unpushed === null || result.unpushed === 0
+          ? undefined
+          : `${result.unpushed} unpushed`,
+      ),
+    );
+    context.narrator.row(
+      "release",
+      facts(
+        result.removed ? "workspace removed" : "workspace kept",
+        result.stopped.length > 0 ? `${result.stopped.length} terminal(s) stopped` : undefined,
+        result.branch_deleted ? "branch deleted" : "branch kept",
+      ),
+    );
+    if (result.runs.length > 0) {
+      context.narrator.row("runs", facts(`${result.runs.length} stamped`, ...result.runs));
+    }
+  }
+
+  const lines = dryRun
+    ? [
+        `${"workspace".padEnd(10)}${facts(result.workspace.name, result.workspace.path)}`,
+        `${"branch".padEnd(10)}${facts(result.branch ?? "detached", result.into === null ? "abandon" : `into ${result.into}`)}`,
+        `${"commits".padEnd(10)}${facts(
+          result.commits === null ? "not counted" : `${result.commits} to merge`,
+          result.behind === null || result.behind === 0 ? undefined : `${result.behind} behind`,
+          result.unpushed === null || result.unpushed === 0
+            ? undefined
+            : `${result.unpushed} unpushed`,
+        )}`,
+        `${"terminals".padEnd(10)}${
+          result.attachments.length === 0
+            ? "none"
+            : result.attachments.map((a) => facts(a.title, a.live ? "live" : "stopped")).join(" · ")
+        }`,
+        `${"blockers".padEnd(10)}${
+          result.blockers.length === 0
+            ? "none · ready to land"
+            : result.blockers
+                .map((b) => facts(b.code, b.detail, b.cleared_by ?? "no override"))
+                .join(`\n${" ".repeat(10)}`)
+        }`,
+      ]
+    : [
+        `${"landed".padEnd(10)}${facts(result.workspace.name, result.branch ?? "detached", result.merge ?? "")}`,
+      ];
+  return { kind: "result", data: result, human: lines.join("\n") };
+}
+
+/** The --x-from vocabulary, reused: ours before anyone's, and a ref with no
+ * colon is a fault rather than a guess at which namespace was meant. */
+async function resolveWorkspaceRef(
+  context: Context,
+  ref: string,
+  backend: string,
+): Promise<string> {
+  if (ref.startsWith(RUN_REF)) {
+    const runId = ref.slice(RUN_REF.length);
+    const record = await readRunRecord(context.env, context.home, runId);
+    if (record.backend !== backend) {
+      context.narrator.detail(
+        "land",
+        `run ${runId} landed on ${record.backend} · matching by path on ${backend}`,
+      );
+    }
+    return record.workspace.id !== null && record.backend === backend
+      ? `id:${record.workspace.id}`
+      : `path:${record.workspace.path}`;
+  }
+  if (!ref.includes(":")) {
+    throw new UsageError(
+      `x-land "${ref}" is neither run:<run-id> nor a backend workspace selector (orca takes name:, path:, branch:, id:)`,
+    );
+  }
+  return ref;
+}
+
 /** A record written before provenance existed has no field at all, which
  * reads the same as one that stated nothing — neither descends from a run. */
 function describeProvenance(provenance: Provenance | null): string {
@@ -666,7 +792,7 @@ async function finishLaunch(
   surface: SurfaceLaunch | null = null,
 ): Promise<Outcome> {
   const dryRun = parts.bools.has("x-dry-run");
-  // A surface landing returns instead of becoming the harness, so its
+  // A placed launch returns instead of becoming the harness, so its
   // envelope needs no dry run.
   if (parts.bools.has("x-json") && !dryRun && surface === null) {
     throw new UsageError(
@@ -729,7 +855,7 @@ async function finishLaunch(
 
   if (surface !== null) {
     const provenance = await resolveProvenance(context, surface.from, surface.backend.name);
-    const landing = await surface.backend.land({
+    const placement = await surface.backend.place({
       spec: launchSpec,
       intent: surface.intent,
       title: surface.title,
@@ -739,27 +865,27 @@ async function finishLaunch(
       env: context.env,
     });
     context.narrator.row("surface", surface.backend.name);
-    if (landing.project !== null) {
+    if (placement.project !== null) {
       context.narrator.row(
         "project",
         facts(
-          landing.project.name,
-          landing.project.created ? (dryRun ? "would register" : "registered") : "existing",
+          placement.project.name,
+          placement.project.created ? (dryRun ? "would register" : "registered") : "existing",
         ),
       );
     }
     context.narrator.row(
       "workspace",
       facts(
-        landing.workspace.name,
-        landing.workspace.created
+        placement.workspace.name,
+        placement.workspace.created
           ? "created"
           : dryRun && surface.intent.kind === "new"
             ? "would create"
             : "existing",
-        landing.workspace.path === null
+        placement.workspace.path === null
           ? undefined
-          : tildePath(landing.workspace.path, context.home),
+          : tildePath(placement.workspace.path, context.home),
       ),
     );
     // Provenance is decided only where a workspace is created; an existing
@@ -767,10 +893,10 @@ async function finishLaunch(
     if (surface.intent.kind === "new") {
       // A dry run records nothing by definition, so the note is reserved for
       // a backend that could not express what was asked.
-      const unrecorded = !landing.provenance.recorded && !dryRun;
+      const unrecorded = !placement.provenance.recorded && !dryRun;
       context.narrator.row(
         "from",
-        facts(landing.provenance.detail, unrecorded ? "not recorded" : undefined),
+        facts(placement.provenance.detail, unrecorded ? "not recorded" : undefined),
       );
     }
     let runId: string | null = null;
@@ -784,12 +910,12 @@ async function finishLaunch(
         harness: spec.harness,
         harness_value: surface.harnessValue,
         workspace: {
-          name: landing.workspace.name,
+          name: placement.workspace.name,
           // Outside a dry run a landed workspace always has its path.
-          path: landing.workspace.path ?? context.cwd,
-          id: landing.workspace.id,
+          path: placement.workspace.path ?? context.cwd,
+          id: placement.workspace.id,
         },
-        terminal: landing.terminal,
+        terminal: placement.terminal,
         command: launchSpec.command,
         session_id: spec.sessionId,
         from: provenance.kind === "none" ? null : provenance,
@@ -809,13 +935,13 @@ async function finishLaunch(
       run_id: runId,
       surface: {
         backend: surface.backend.name,
-        project: landing.project,
-        workspace: landing.workspace,
-        terminal: landing.terminal,
+        project: placement.project,
+        workspace: placement.workspace,
+        terminal: placement.terminal,
         provenance: {
           requested: provenance,
-          recorded: landing.provenance.recorded,
-          detail: landing.provenance.detail,
+          recorded: placement.provenance.recorded,
+          detail: placement.provenance.detail,
         },
       },
     };

@@ -4,10 +4,15 @@ import type { Narrator } from "./narrate.ts";
 import { shellLine } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
 import type {
+  Attachment,
   BackendHealth,
-  Landing,
-  LandRequest,
+  Placement,
+  PlaceRequest,
+  Released,
+  ReleaseRequest,
   SurfaceBackend,
+  Survey,
+  SurveyRequest,
   WorkspaceIntent,
 } from "./surface.ts";
 
@@ -25,7 +30,7 @@ const START_RECOVERY = "start Orca: `orca open` (or `orca serve` for a headless 
 export const orcaBackend: SurfaceBackend = {
   name: "orca",
 
-  async land(request: LandRequest): Promise<Landing> {
+  async place(request: PlaceRequest): Promise<Placement> {
     await assertReachable(request.env, request.narrator);
     const resolved = await resolveWorkspace(request);
     const terminal = request.dryRun
@@ -37,6 +42,80 @@ export const orcaBackend: SurfaceBackend = {
       workspace: resolved.workspace,
       terminal,
       provenance: resolved.provenance,
+    };
+  },
+
+  async survey(request: SurveyRequest): Promise<Survey> {
+    await assertReachable(request.env, request.narrator);
+    const shown = await orcaTry(request.env, request.narrator, [
+      "worktree",
+      "show",
+      "--worktree",
+      request.selector,
+    ]);
+    const record = objectField(shown, "worktree");
+    const worktree = readWorktree(record);
+    if (record === null || worktree === null) {
+      throw new CliError(
+        "workspace_not_found",
+        `no orca workspace matches "${request.selector}"`,
+        "orca worktree list names them; orca selectors are name:, path:, branch:, id:",
+      );
+    }
+    // The base ref is repo policy rather than a guess, and only the repo
+    // record carries it.
+    const repoId = stringField(record, "repoId");
+    let baseRef: string | null = null;
+    if (repoId !== null) {
+      const repo = await orcaTry(request.env, request.narrator, [
+        "repo",
+        "show",
+        "--repo",
+        `id:${repoId}`,
+      ]);
+      baseRef = stringField(objectField(repo, "repo"), "worktreeBaseRef");
+    }
+    const children = record["childWorktreeIds"];
+    return {
+      backend: "orca",
+      workspace: worktree,
+      baseRef,
+      primary: record["isMainWorktree"] === true,
+      children: Array.isArray(children) ? children.length : 0,
+      attachments: await listTerminals(request, request.selector),
+    };
+  },
+
+  async release(request: ReleaseRequest): Promise<Released> {
+    await assertReachable(request.env, request.narrator);
+    const stopped: string[] = [];
+    if (request.stopAttachments) {
+      const live = (await listTerminals(request, request.selector)).filter(
+        (attachment) => attachment.live,
+      );
+      if (live.length > 0) {
+        await orcaJson(request.env, request.narrator, [
+          "terminal",
+          "stop",
+          "--worktree",
+          request.selector,
+        ]);
+        stopped.push(...live.map((attachment) => attachment.handle));
+      }
+    }
+    // Never --force: Orca's own force force-removes the checkout, which
+    // discards uncommitted work. Everything that would need forcing was a
+    // blocker the caller already cleared, so a plain rm must succeed here.
+    await orcaJson(request.env, request.narrator, [
+      "worktree",
+      "rm",
+      "--worktree",
+      request.selector,
+    ]);
+    return {
+      stopped,
+      removed: true,
+      detail: stopped.length > 0 ? `stopped ${stopped.length} terminal(s)` : "no live terminals",
     };
   },
 
@@ -67,13 +146,13 @@ interface ResolvedWorkspace {
 }
 
 /** Orca's lineage is set at creation, so an existing workspace keeps whatever
- * it already had — landing a run in it is not a reason to rewrite it. */
+ * it already had — placing a run in it is not a reason to rewrite it. */
 const NOT_CREATED = {
   recorded: false,
   detail: "workspace already exists · lineage unchanged",
 };
 
-async function resolveWorkspace(request: LandRequest): Promise<ResolvedWorkspace> {
+async function resolveWorkspace(request: PlaceRequest): Promise<ResolvedWorkspace> {
   const { intent } = request;
   switch (intent.kind) {
     case "current": {
@@ -111,7 +190,7 @@ async function resolveWorkspace(request: LandRequest): Promise<ResolvedWorkspace
  * why "none" has to be spelled out (ADR 0015). A run's own workspace id is
  * Orca's only when Orca recorded it; otherwise the path still identifies the
  * checkout, since an Orca worktree is one. */
-function parentArgs(provenance: LandRequest["provenance"]): { args: string[]; detail: string } {
+function parentArgs(provenance: PlaceRequest["provenance"]): { args: string[]; detail: string } {
   switch (provenance.kind) {
     case "none":
       return { args: ["--no-parent"], detail: "none" };
@@ -137,7 +216,7 @@ function parentArgs(provenance: LandRequest["provenance"]): { args: string[]; de
  * registered on demand — from --x-project when given, else from the git
  * toplevel of the anchoring path. Dry runs stop at reporting what would be. */
 async function createWorkspace(
-  request: LandRequest,
+  request: PlaceRequest,
   intent: Extract<WorkspaceIntent, { kind: "new" }>,
 ): Promise<ResolvedWorkspace> {
   const repo = await ensureRepo(request, intent);
@@ -182,7 +261,7 @@ interface EnsuredRepo {
 }
 
 async function ensureRepo(
-  request: LandRequest,
+  request: PlaceRequest,
   intent: Extract<WorkspaceIntent, { kind: "new" }>,
 ): Promise<EnsuredRepo> {
   const repos = await listRepos(request);
@@ -215,7 +294,7 @@ async function ensureRepo(
 }
 
 async function createTerminal(
-  request: LandRequest,
+  request: PlaceRequest,
   worktreeId: string | null,
   worktreePath: string | null,
 ): Promise<string> {
@@ -253,7 +332,14 @@ interface OrcaWorktree {
   id: string;
 }
 
-async function findWorktree(request: LandRequest, selector: string): Promise<OrcaWorktree | null> {
+/** Every Orca lookup needs only these two, and all three request types carry
+ * them — so the helpers below serve place, survey, and release alike. */
+interface OrcaCall {
+  env: Environ;
+  narrator: Narrator;
+}
+
+async function findWorktree(request: OrcaCall, selector: string): Promise<OrcaWorktree | null> {
   const result = await orcaTry(request.env, request.narrator, [
     "worktree",
     "show",
@@ -266,7 +352,7 @@ async function findWorktree(request: LandRequest, selector: string): Promise<Orc
 /** A path inside a workspace resolves via its git toplevel — a worktree is
  * a checkout, so the repository root is the workspace path. */
 async function findWorktreeByToplevel(
-  request: LandRequest,
+  request: OrcaCall,
   path: string,
 ): Promise<OrcaWorktree | null> {
   let toplevel: string;
@@ -287,13 +373,39 @@ function readWorktree(record: Record<string, unknown> | null): OrcaWorktree | nu
   return { id, path, name: stringField(record, "displayName") ?? basename(path) };
 }
 
+/** Orca runs agents in terminals, so a terminal is what a workspace has
+ * attached. `connected` is its own word for still-live. */
+async function listTerminals(request: OrcaCall, selector: string): Promise<Attachment[]> {
+  const result = await orcaTry(request.env, request.narrator, [
+    "terminal",
+    "list",
+    "--worktree",
+    selector,
+  ]);
+  const terminals = result?.["terminals"];
+  if (!Array.isArray(terminals)) return [];
+  const out: Attachment[] = [];
+  for (const entry of terminals) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const record = entry as Record<string, unknown>;
+    const handle = stringField(record, "handle");
+    if (handle === null) continue;
+    out.push({
+      handle,
+      title: stringField(record, "title") ?? handle,
+      live: record["connected"] === true,
+    });
+  }
+  return out;
+}
+
 interface OrcaRepo {
   id: string;
   name: string;
   path: string;
 }
 
-async function listRepos(request: LandRequest): Promise<OrcaRepo[]> {
+async function listRepos(request: OrcaCall): Promise<OrcaRepo[]> {
   const result = await orcaJson(request.env, request.narrator, ["repo", "list"]);
   const repos = result["repos"];
   if (!Array.isArray(repos)) return [];

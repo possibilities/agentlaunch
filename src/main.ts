@@ -2,6 +2,7 @@
 import type { Context, Outcome } from "./commands.ts";
 import {
   doctorCommand,
+  landCommand,
   launchCommand,
   resumeCommand,
   runCommand,
@@ -49,6 +50,12 @@ const LAUNCH_FLAGS: RouteFlags = {
   value: ["--x-harness", "--x-account", ...(SURFACE_FLAGS.value ?? [])],
   bool: ["--x-dry-run", "--x-no-balance", "--x-verbose", ...(SURFACE_FLAGS.bool ?? [])],
   scoped: [...YOLO_SCOPES, ...(SURFACE_FLAGS.scoped ?? [])],
+};
+
+const LAND_FLAGS: RouteFlags = {
+  value: ["--x-into"],
+  bool: ["--x-dry-run", "--x-force", "--x-abandon", "--x-verbose"],
+  scoped: [["--x-surface", BACKEND_NAMES]],
 };
 
 const RESUME_FLAGS: RouteFlags = {
@@ -129,6 +136,11 @@ async function main(argv: string[]): Promise<number> {
     spec = specFor({});
     own = argv.slice(1);
     run = doctorCommand;
+  } else if (first === "x-land") {
+    helpTopic = "x-land";
+    spec = specFor(LAND_FLAGS);
+    own = argv.slice(1);
+    run = landCommand;
   } else if (first === "x-runs") {
     helpTopic = "x-runs";
     spec = specFor({});

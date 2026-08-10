@@ -178,7 +178,12 @@ install_fake_orca() {
 printf '%s\n' "\$*" >> "$WORK/orca-argv.log"
 case "\$1 \$2" in
   "status --json") printf '{"ok":true,"result":{"runtime":{"reachable":true,"state":"ready","appVersion":"smoke"}}}\n';;
-  "worktree show") printf '{"ok":true,"result":{"worktree":{"id":"repo1::$WORK/ws","path":"$WORK/ws","displayName":"main"}}}\n';;
+  "worktree show") case "\$4" in
+      name:landme) printf '{"ok":true,"result":{"worktree":{"id":"repo1::$WORK/landme","path":"$WORK/landme","displayName":"landme","repoId":"repo1","isMainWorktree":false,"childWorktreeIds":[]}}}\n';;
+      *) printf '{"ok":true,"result":{"worktree":{"id":"repo1::$WORK/ws","path":"$WORK/ws","displayName":"main"}}}\n';;
+    esac;;
+  "repo show") printf '{"ok":true,"result":{"repo":{"id":"repo1","path":"$WORK/ws","displayName":"proj","worktreeBaseRef":"main"}}}\n';;
+  "terminal list") printf '{"ok":true,"result":{"terminals":[]}}\n';;
   "worktree create") printf '{"ok":true,"result":{"worktree":{"id":"repo1::$WORK/child","path":"$WORK/child","displayName":"child"}}}\n';;
   "repo list") printf '{"ok":true,"result":{"repos":[{"id":"repo1","path":"$WORK/ws","displayName":"proj"}]}}\n';;
   "terminal create") printf '{"ok":true,"result":{"terminal":{"handle":"term_smoke"}}}\n';;
@@ -228,6 +233,26 @@ grep -q -- "--no-parent" "$WORK/orca-argv.log" ||
   { echo "FAIL: an omitted --x-from did not state none" >&2; exit 1; }
 expect_exit 2 run_surface --x-harness claude --x-surface --x-from name:a
 expect_exit 2 run_surface --x-harness claude --x-from name:a
+
+# Land (ADR 0016) against a real repository, dry run only: the survey reads
+# git for real, and nothing is merged, released, or removed.
+git -C "$WORK/ws" init -q -b main
+git -C "$WORK/ws" config user.email smoke@example.invalid
+git -C "$WORK/ws" config user.name smoke
+: >"$WORK/ws/seed.txt"
+git -C "$WORK/ws" add -A
+git -C "$WORK/ws" commit -qm seed
+git -C "$WORK/ws" worktree add -q -b landme "$WORK/landme"
+: >"$WORK/landme/work.txt"
+git -C "$WORK/landme" add -A
+git -C "$WORK/landme" commit -qm "work"
+expect_exit 0 run_surface x-land name:landme --x-dry-run --x-json
+expect_out '"blockers":\[\]'
+expect_out '"into":"main"'
+expect_out '"commits":1'
+[[ -d "$WORK/landme" ]] || { echo "FAIL: a land dry run removed the workspace" >&2; exit 1; }
+# A ref with no colon is a usage fault, never a guess at the namespace.
+expect_exit 2 run_surface x-land landme
 cd "$ROOT"
 
 # The narrative is on stderr, so stdout stays exactly the command

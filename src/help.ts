@@ -7,6 +7,7 @@ Usage:
   agentsurface x-resume <session-id> [tokens…]  Reopen a stored session by id
   agentsurface x-runs                           List recorded surface runs
   agentsurface x-run <run-id>                   Show one run; discover its session id
+  agentsurface x-land <workspace-ref>           Merge a workspace back and release it
   agentsurface x-doctor                         Report binaries, stores, config, catalog, surface
 
 The --x-harness value (run \`agentsurface --x-help\` for the full story):
@@ -221,10 +222,50 @@ back to the record, so it happens at most once. The terminal field is the
 backend's handle for the landed terminal — the address a future steer
 command will use.
 `,
+  "x-land": `agentsurface x-land <run:<run-id> | backend-selector> [flags]
+
+  --x-surface [backend]   Which surface holds the workspace (default: orca)
+  --x-into <branch>       Merge target; default is the repo's own base ref
+  --x-force               Proceed past live terminals and child workspaces
+  --x-abandon             Discard the work: skip the merge, release anyway
+  --x-dry-run             Report the survey and the blockers; change nothing
+  --x-json                The envelope instead of the rows
+
+Merge a workspace's finished work back to the main line and let the surface
+go (ADR 0016). The order is the safety property — survey, refuse, merge,
+release, reconcile — so a checkout is never removed until its work provably
+landed somewhere else.
+
+Git work is done with git, in the repository's own primary checkout, which
+is found with git rather than asked of the backend. The surface is consulted
+only for what it alone knows (which workspace, whose repo, what is attached)
+and does only what it alone can (stop terminals, remove the workspace).
+
+Nothing half-happens. A merge conflict is rolled back with git merge --abort
+and raised as land_conflict with the conflicted paths, leaving the target
+branch exactly as it was; resolve it in the workspace and run x-land again.
+
+Refusals name what is in the way, each with the flag that clears it:
+
+  dirty          uncommitted or untracked changes  → --x-abandon
+  terminals      live terminals in the workspace   → --x-force
+  children       workspaces descend from this one  → --x-force
+  base_branch    the primary checkout is elsewhere → git switch <branch>
+  base_dirty     the primary checkout is unclean   → commit or stash it
+
+Committing is judgment, so x-land never invents a commit; a dirty workspace
+is refused rather than guessed at. The repository's primary checkout is
+refused unconditionally — no flag makes landing it a good idea. Merging is
+local: nothing is pushed, and the unpushed count is reported, not acted on.
+
+Run records are stamped closed_at/closed_as rather than deleted — a record
+is the last thing tying a run id to a session id, and the session outlives
+the workspace it was born in.
+`,
 };
 
 export const AGENT_TEASER =
-  "Launch agent harnesses (claude, codex, pi) in place or on a surface: agentsurface --x-harness <harness | model:effort | harness:model:effort> [tokens…] resolves against the catalog and injects the model/effort in the harness's own spelling; --x-surface lands the launch in a managed workspace (Orca) and returns a run id; x-resume <session-id> reopens a session with cross-store detection; x-runs/x-run inspect landed runs; x-doctor reports install health.";
+  "Launch agent harnesses (claude, codex, pi) in place or on a surface: agentsurface --x-harness <harness | model:effort | harness:model:effort> [tokens…] resolves against the catalog and injects the model/effort in the harness's own spelling; --x-surface lands the launch in a managed workspace (Orca) and returns a run id; x-resume <session-id> reopens a session with cross-store detection; x-runs/x-run inspect landed runs; x-land merges a finished workspace back to the main line and releases it; x-doctor reports install health.";
 
 export const AGENT_HELP = `agentsurface agent runbook
 
@@ -241,6 +282,7 @@ Commands
   agentsurface x-resume <session-id> [tokens…]  [--x-harness claude|codex|pi] [--x-surface]
   agentsurface x-runs [--x-json]
   agentsurface x-run <run-id> [--x-json]
+  agentsurface x-land <run:<run-id> | selector> [--x-into <branch>] [--x-force] [--x-abandon] [--x-dry-run] [--x-json]
   agentsurface x-doctor [--x-json]
 
 Rules

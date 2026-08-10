@@ -33,6 +33,11 @@ export interface RunRecord {
    * bookkeeping, kept whether or not the backend could record it, and
    * absent on records written before provenance existed. */
   from?: Provenance | null;
+  /** When x-land released the workspace this run lived in (ADR 0016).
+   * Stamped rather than deleted: a finished run is the last thing tying a
+   * run id to a session id, and what to prune is a decision of its own. */
+  closed_at?: string | null;
+  closed_as?: "landed" | "abandoned" | null;
 }
 
 /** Same alphabet as session ids: every character glob- and path-literal. */
@@ -88,6 +93,29 @@ export async function listRunRecords(env: Environ, home: string): Promise<RunRec
   }
   records.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   return records;
+}
+
+/**
+ * Reconcile the registry after a workspace is released (ADR 0016). Records
+ * are stamped, never removed: the record is the last thing tying a run id to
+ * a session id, and the session outlives the workspace it was born in. An
+ * already-stamped record is left alone, so a re-run never rewrites history.
+ */
+export async function stampClosedRuns(
+  env: Environ,
+  home: string,
+  workspacePath: string,
+  closedAs: "landed" | "abandoned",
+): Promise<string[]> {
+  const closedAt = new Date().toISOString();
+  const stamped: string[] = [];
+  for (const record of await listRunRecords(env, home)) {
+    if (record.workspace.path !== workspacePath) continue;
+    if (record.closed_at != null) continue;
+    writeRunRecord(env, home, { ...record, closed_at: closedAt, closed_as: closedAs });
+    stamped.push(record.run_id);
+  }
+  return stamped;
 }
 
 /**
