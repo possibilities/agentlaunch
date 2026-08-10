@@ -30,8 +30,14 @@ import type { Partitioned } from "./partition.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
 import type { RunRecord } from "./runs.ts";
-import { listRunRecords, resolveRun, runsDirectory, writeRunRecord } from "./runs.ts";
-import type { SurfaceBackend, WorkspaceIntent } from "./surface.ts";
+import {
+  listRunRecords,
+  readRunRecord,
+  resolveRun,
+  runsDirectory,
+  writeRunRecord,
+} from "./runs.ts";
+import type { Provenance, SurfaceBackend, WorkspaceIntent } from "./surface.ts";
 import { BACKENDS, DEFAULT_BACKEND, surfaceBackend } from "./surface.ts";
 
 export interface Context {
@@ -152,11 +158,18 @@ function surfaceRequest(
   parts: Partitioned,
   anchor: string | null,
   title: string,
-): { backend: SurfaceBackend; intent: WorkspaceIntent; title: string } | null {
+): {
+  backend: SurfaceBackend;
+  intent: WorkspaceIntent;
+  title: string;
+  from: FromRequest;
+} | null {
   const scopes = parts.scoped.get("x-surface");
   const workspace = parts.values["x-workspace"];
   const newWorkspace = parts.values["x-new-workspace"];
   const project = parts.values["x-project"];
+  const from = parts.values["x-from"];
+  const noFrom = parts.bools.has("x-no-from");
   if (scopes === undefined) {
     const stray =
       workspace !== undefined
@@ -165,11 +178,25 @@ function surfaceRequest(
           ? "--x-new-workspace"
           : project !== undefined
             ? "--x-project"
-            : null;
+            : from !== undefined
+              ? "--x-from"
+              : noFrom
+                ? "--x-no-from"
+                : null;
     if (stray !== null) {
       throw new UsageError(`${stray} says where a surface landing lives; add --x-surface`);
     }
     return null;
+  }
+  if (from !== undefined && noFrom) {
+    throw new UsageError("--x-from names what this run came from and --x-no-from says nothing did");
+  }
+  // Lineage is set when a workspace is created, so naming it for a workspace
+  // that already exists would mean rewriting history the landing did not make.
+  if ((from !== undefined || noFrom) && newWorkspace === undefined) {
+    throw new UsageError(
+      `${from !== undefined ? "--x-from" : "--x-no-from"} only qualifies --x-new-workspace; an existing workspace keeps the provenance it has`,
+    );
   }
   const names = [...new Set(scopes.filter((scope) => scope !== "all"))];
   if (names.length > 1) {
@@ -196,10 +223,18 @@ function surfaceRequest(
       backend,
       title,
       intent: { kind: "new", name: newWorkspace, project: project ?? null, path: anchor ?? "" },
+      // Omission is a decision, not a gap (ADR 0015): a backend that would
+      // otherwise infer gets told there is nothing to descend from.
+      from: from === undefined ? { kind: "none" } : { kind: "ref", ref: from },
     };
   }
   if (workspace !== undefined) {
-    return { backend, title, intent: { kind: "existing", selector: workspace } };
+    return {
+      backend,
+      title,
+      intent: { kind: "existing", selector: workspace },
+      from: { kind: "none" },
+    };
   }
   if (anchor === null) {
     throw new CliError(
@@ -208,7 +243,47 @@ function surfaceRequest(
       "pass --x-workspace <selector> or --x-new-workspace <name>",
     );
   }
-  return { backend, title, intent: { kind: "current", path: anchor } };
+  return { backend, title, intent: { kind: "current", path: anchor }, from: { kind: "none" } };
+}
+
+/** The provenance flags as typed, before the run registry is consulted:
+ * resolving a `run:` reference is a read, so it waits for the launch build. */
+type FromRequest = { kind: "none" } | { kind: "ref"; ref: string };
+
+const RUN_REF = "run:";
+
+/** Our own vocabulary first (ADR 0015): a `run:` reference resolves through
+ * the run registry, so an agent naming what it spawned from never has to know
+ * the backend's selector spelling. Anything else is the backend's own
+ * selector, carried opaquely the way --x-workspace already is. */
+async function resolveProvenance(
+  context: Context,
+  from: FromRequest,
+  backend: string,
+): Promise<Provenance> {
+  if (from.kind === "none") return { kind: "none" };
+  if (!from.ref.startsWith(RUN_REF)) {
+    if (!from.ref.includes(":")) {
+      throw new UsageError(
+        `--x-from "${from.ref}" is neither run:<run-id> nor a backend workspace selector (orca takes name:, path:, branch:, id:)`,
+      );
+    }
+    return { kind: "selector", selector: from.ref };
+  }
+  const runId = from.ref.slice(RUN_REF.length);
+  const record = await readRunRecord(context.env, context.home, runId);
+  if (record.backend !== backend) {
+    context.narrator.detail(
+      "from",
+      `run ${runId} landed on ${record.backend} · matching by path on ${backend}`,
+    );
+  }
+  return {
+    kind: "run",
+    runId,
+    backend: record.backend,
+    workspace: record.workspace,
+  };
 }
 
 /** First model value in the forwarded tokens — --model, --model=, or
@@ -521,11 +596,26 @@ export async function runCommand(context: Context, parts: Partitioned): Promise<
       "workspace",
       facts(record.workspace.name, tildePath(record.workspace.path, context.home)),
     ),
+    label("from", describeProvenance(record.from ?? null)),
     label("terminal", record.terminal ?? "none recorded"),
     label("session", record.session_id ?? "not yet discovered"),
     label("command", shellLine(record.command)),
   ];
   return { kind: "result", data: record, human: lines.join("\n") };
+}
+
+/** A record written before provenance existed has no field at all, which
+ * reads the same as one that stated nothing — neither descends from a run. */
+function describeProvenance(provenance: Provenance | null): string {
+  if (provenance === null) return "none";
+  switch (provenance.kind) {
+    case "none":
+      return "none";
+    case "selector":
+      return provenance.selector;
+    case "run":
+      return facts(`run ${provenance.runId}`, provenance.workspace.name);
+  }
 }
 
 /** Doctor reports a malformed config instead of dying on it — diagnosis is
@@ -560,6 +650,7 @@ interface SurfaceLaunch {
   title: string;
   kind: "open" | "resume";
   harnessValue: string | null;
+  from: FromRequest;
 }
 
 async function finishLaunch(
@@ -637,10 +728,12 @@ async function finishLaunch(
   };
 
   if (surface !== null) {
+    const provenance = await resolveProvenance(context, surface.from, surface.backend.name);
     const landing = await surface.backend.land({
       spec: launchSpec,
       intent: surface.intent,
       title: surface.title,
+      provenance,
       dryRun,
       narrator: context.narrator,
       env: context.env,
@@ -669,6 +762,17 @@ async function finishLaunch(
           : tildePath(landing.workspace.path, context.home),
       ),
     );
+    // Provenance is decided only where a workspace is created; an existing
+    // one keeps what it had, so there is no decision to report.
+    if (surface.intent.kind === "new") {
+      // A dry run records nothing by definition, so the note is reserved for
+      // a backend that could not express what was asked.
+      const unrecorded = !landing.provenance.recorded && !dryRun;
+      context.narrator.row(
+        "from",
+        facts(landing.provenance.detail, unrecorded ? "not recorded" : undefined),
+      );
+    }
     let runId: string | null = null;
     if (!dryRun) {
       runId = crypto.randomUUID();
@@ -688,6 +792,7 @@ async function finishLaunch(
         terminal: landing.terminal,
         command: launchSpec.command,
         session_id: spec.sessionId,
+        from: provenance.kind === "none" ? null : provenance,
       };
       const recordPath = writeRunRecord(context.env, context.home, record);
       context.narrator.detail("record", tildePath(recordPath, context.home));
@@ -707,6 +812,11 @@ async function finishLaunch(
         project: landing.project,
         workspace: landing.workspace,
         terminal: landing.terminal,
+        provenance: {
+          requested: provenance,
+          recorded: landing.provenance.recorded,
+          detail: landing.provenance.detail,
+        },
       },
     };
     return {

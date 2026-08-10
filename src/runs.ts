@@ -6,6 +6,7 @@ import type { HarnessName } from "./harness.ts";
 import { sessionFileFacts, sessionStore } from "./harness.ts";
 import type { Environ } from "./paths.ts";
 import { stateDirectory } from "./paths.ts";
+import type { Provenance } from "./surface.ts";
 
 /**
  * The run registry (ADR 0014): a run is a session plus where it landed, and
@@ -28,6 +29,10 @@ export interface RunRecord {
   terminal: string | null;
   command: string[];
   session_id: string | null;
+  /** What the caller said this run descends from (ADR 0015) — our own
+   * bookkeeping, kept whether or not the backend could record it, and
+   * absent on records written before provenance existed. */
+  from?: Provenance | null;
 }
 
 /** Same alphabet as session ids: every character glob- and path-literal. */

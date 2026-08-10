@@ -40,19 +40,20 @@ const YOLO_SCOPES: Array<[string, readonly string[]]> = [
 ];
 
 const SURFACE_FLAGS: RouteFlags = {
-  value: ["--x-workspace", "--x-new-workspace", "--x-project"],
+  value: ["--x-workspace", "--x-new-workspace", "--x-project", "--x-from"],
+  bool: ["--x-no-from"],
   scoped: [["--x-surface", BACKEND_NAMES]],
 };
 
 const LAUNCH_FLAGS: RouteFlags = {
   value: ["--x-harness", "--x-account", ...(SURFACE_FLAGS.value ?? [])],
-  bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
+  bool: ["--x-dry-run", "--x-no-balance", "--x-verbose", ...(SURFACE_FLAGS.bool ?? [])],
   scoped: [...YOLO_SCOPES, ...(SURFACE_FLAGS.scoped ?? [])],
 };
 
 const RESUME_FLAGS: RouteFlags = {
   value: ["--x-account", "--x-harness", ...(SURFACE_FLAGS.value ?? [])],
-  bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
+  bool: ["--x-dry-run", "--x-no-balance", "--x-verbose", ...(SURFACE_FLAGS.bool ?? [])],
   scoped: [...YOLO_SCOPES, ...(SURFACE_FLAGS.scoped ?? [])],
 };
 

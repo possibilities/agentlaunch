@@ -21,11 +21,35 @@ export type WorkspaceIntent =
   | { kind: "existing"; selector: string }
   | { kind: "new"; name: string; project: string | null; path: string };
 
+/**
+ * What a landing came from (ADR 0015). Provenance is stated by the caller and
+ * never inferred: `none` is a value rather than the absence of one, because a
+ * backend that would otherwise read its own environment has to be told
+ * explicitly not to. The vocabulary here is ours; what a backend *means* by a
+ * parent is its own flavor, and an honest adapter reports what it could not
+ * record rather than silently dropping it.
+ */
+export type Provenance =
+  /** Explicitly nothing to descend from. */
+  | { kind: "none" }
+  /** A workspace named in the backend's own selector vocabulary. */
+  | { kind: "selector"; selector: string }
+  /** The workspace a previous run landed in. The path is portable across
+   * backends; the id belongs to the backend that recorded it. */
+  | {
+      kind: "run";
+      runId: string;
+      backend: string;
+      workspace: { name: string; path: string; id: string | null };
+    };
+
 export interface LandRequest {
   spec: LaunchSpec;
   intent: WorkspaceIntent;
   /** Display name for the landed terminal; run names will feed this. */
   title: string;
+  /** What this landing descends from — always stated, never inferred. */
+  provenance: Provenance;
   /** Dry runs resolve read-only: no registration, no creation, no terminal. */
   dryRun: boolean;
   narrator: Narrator;
@@ -40,6 +64,9 @@ export interface Landing {
   workspace: { name: string; path: string | null; id: string | null; created: boolean };
   /** Backend-issued handle for the landed terminal; null on a dry run. */
   terminal: string | null;
+  /** What the backend did with the requested provenance. Backends differ in
+   * what they can express, so a drop is reported, never silent. */
+  provenance: { recorded: boolean; detail: string };
 }
 
 export interface BackendHealth {

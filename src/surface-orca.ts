@@ -36,6 +36,7 @@ export const orcaBackend: SurfaceBackend = {
       project: resolved.project,
       workspace: resolved.workspace,
       terminal,
+      provenance: resolved.provenance,
     };
   },
 
@@ -62,7 +63,15 @@ export const orcaBackend: SurfaceBackend = {
 interface ResolvedWorkspace {
   project: { name: string; created: boolean } | null;
   workspace: { name: string; path: string | null; id: string | null; created: boolean };
+  provenance: { recorded: boolean; detail: string };
 }
+
+/** Orca's lineage is set at creation, so an existing workspace keeps whatever
+ * it already had — landing a run in it is not a reason to rewrite it. */
+const NOT_CREATED = {
+  recorded: false,
+  detail: "workspace already exists · lineage unchanged",
+};
 
 async function resolveWorkspace(request: LandRequest): Promise<ResolvedWorkspace> {
   const { intent } = request;
@@ -78,7 +87,7 @@ async function resolveWorkspace(request: LandRequest): Promise<ResolvedWorkspace
           "pass --x-workspace <selector> to pick one, or --x-new-workspace <name> to create one",
         );
       }
-      return { project: null, workspace: { ...worktree, created: false } };
+      return { project: null, workspace: { ...worktree, created: false }, provenance: NOT_CREATED };
     }
     case "existing": {
       const worktree = await findWorktree(request, intent.selector);
@@ -89,10 +98,38 @@ async function resolveWorkspace(request: LandRequest): Promise<ResolvedWorkspace
           "orca worktree list names them; orca selectors are name:, path:, branch:, id:",
         );
       }
-      return { project: null, workspace: { ...worktree, created: false } };
+      return { project: null, workspace: { ...worktree, created: false }, provenance: NOT_CREATED };
     }
     case "new":
       return await createWorkspace(request, intent);
+  }
+}
+
+/** Orca's flavor of provenance: an arbitrary, reassignable lineage link
+ * between worktrees, decoupled from git. Left unsaid, `worktree create`
+ * infers a parent from `ORCA_WORKTREE_ID` in the calling terminal — which is
+ * why "none" has to be spelled out (ADR 0015). A run's own workspace id is
+ * Orca's only when Orca recorded it; otherwise the path still identifies the
+ * checkout, since an Orca worktree is one. */
+function parentArgs(provenance: LandRequest["provenance"]): { args: string[]; detail: string } {
+  switch (provenance.kind) {
+    case "none":
+      return { args: ["--no-parent"], detail: "none" };
+    case "selector":
+      return {
+        args: ["--parent-worktree", provenance.selector],
+        detail: provenance.selector,
+      };
+    case "run": {
+      const selector =
+        provenance.backend === "orca" && provenance.workspace.id !== null
+          ? `id:${provenance.workspace.id}`
+          : `path:${provenance.workspace.path}`;
+      return {
+        args: ["--parent-worktree", selector],
+        detail: `run ${provenance.runId} · ${provenance.workspace.name}`,
+      };
+    }
   }
 }
 
@@ -104,10 +141,12 @@ async function createWorkspace(
   intent: Extract<WorkspaceIntent, { kind: "new" }>,
 ): Promise<ResolvedWorkspace> {
   const repo = await ensureRepo(request, intent);
+  const parent = parentArgs(request.provenance);
   if (request.dryRun || repo.id === null) {
     return {
       project: { name: repo.name, created: repo.created },
       workspace: { name: intent.name, path: null, id: null, created: false },
+      provenance: { recorded: false, detail: parent.detail },
     };
   }
   const created = await orcaJson(request.env, request.narrator, [
@@ -117,6 +156,7 @@ async function createWorkspace(
     intent.name,
     "--repo",
     `id:${repo.id}`,
+    ...parent.args,
   ]);
   const direct = readWorktree(objectField(created, "worktree"));
   const worktree = direct ?? (await findWorktree(request, `name:${intent.name}`));
@@ -130,6 +170,7 @@ async function createWorkspace(
   return {
     project: { name: repo.name, created: repo.created },
     workspace: { ...worktree, created: true },
+    provenance: { recorded: true, detail: parent.detail },
   };
 }
 

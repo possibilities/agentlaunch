@@ -25,6 +25,8 @@ Launch x-flags:
   --x-workspace <sel>    Surface workspace to land in (default: current)
   --x-new-workspace <n>  Create the workspace, registering its project
   --x-project <sel>      Project for --x-new-workspace (default: inferred)
+  --x-from <ref>         What the new workspace descends from
+  --x-no-from            Say it descends from nothing (also the default)
   --x-yolo [harness]     Force this launch's permission gates down
   --x-no-yolo [harness]  Keep gates up — removes a forwarded yolo flag too
   --x-account <sel>      Pin the balanced launch to one account
@@ -83,10 +85,27 @@ command returns an envelope instead of becoming the harness):
                          --x-project, else the cwd's git repository.
   --x-project <sel>      Project for --x-new-workspace — a registered name,
                          or path:<repo> to register one on demand.
+  --x-from <ref>         What the new workspace descends from:
+                         run:<run-id> (resolved through our own run
+                         registry, so an agent naming what it spawned from
+                         needs no backend spelling), or the backend's own
+                         workspace selector.
+  --x-no-from            It descends from nothing.
+
+Provenance is stated, never inferred (ADR 0015). --x-from and --x-no-from
+qualify --x-new-workspace only: lineage is set where a workspace is
+created, and an existing one keeps what it has. Saying nothing means
+nothing — the backend is told "none" explicitly, because one that would
+otherwise read its own environment (orca infers a parent from the calling
+terminal) has to be told not to. What a parent means is each backend's own
+flavor; the envelope reports what was actually recorded, so an adapter that
+cannot express a request says so instead of dropping it.
+
 A landing writes a run record and prints its run id on stdout; --x-json
 works without --x-dry-run here and the envelope adds run_id and surface
-{backend, project, workspace, terminal}. The session id is discovered
-later (x-run <run-id>), never assigned. A utility invocation cannot land.
+{backend, project, workspace, terminal, provenance}. The session id is
+discovered later (x-run <run-id>), never assigned. A utility invocation
+cannot land.
 
 Other x-flags (processed here, never forwarded):
   --x-yolo [harness]     Force permission gates down for this launch
@@ -149,8 +168,9 @@ x-flags:
   --x-surface [backend]  Resume onto a surface: the session continues in a
                          workspace instead of this terminal. Defaults to
                          the workspace containing the session's own cwd;
-                         --x-workspace / --x-new-workspace (+ --x-project)
-                         override, as on a launch. Lands a run record.
+                         --x-workspace / --x-new-workspace (+ --x-project,
+                         --x-from) override, as on a launch. Lands a run
+                         record.
   --x-yolo, --x-no-yolo  As on a launch; resumes inject and redact the same
   --x-account <sel>      Pin the balanced launch to one account
   --x-no-balance         Launch unbalanced (raw harness command)

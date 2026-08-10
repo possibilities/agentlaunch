@@ -175,9 +175,12 @@ install_fake_orca() {
   mkdir -p "$WORK/orca-bin"
   cat >"$WORK/orca-bin/orca" <<FAKE
 #!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$WORK/orca-argv.log"
 case "\$1 \$2" in
   "status --json") printf '{"ok":true,"result":{"runtime":{"reachable":true,"state":"ready","appVersion":"smoke"}}}\n';;
   "worktree show") printf '{"ok":true,"result":{"worktree":{"id":"repo1::$WORK/ws","path":"$WORK/ws","displayName":"main"}}}\n';;
+  "worktree create") printf '{"ok":true,"result":{"worktree":{"id":"repo1::$WORK/child","path":"$WORK/child","displayName":"child"}}}\n';;
+  "repo list") printf '{"ok":true,"result":{"repos":[{"id":"repo1","path":"$WORK/ws","displayName":"proj"}]}}\n';;
   "terminal create") printf '{"ok":true,"result":{"terminal":{"handle":"term_smoke"}}}\n';;
   *) printf '{"ok":false}\n'; exit 1;;
 esac
@@ -210,6 +213,21 @@ expect_exit 1 run_surface x-run 99999999-9999-4999-9999-999999999999
 expect_exit 2 run_surface --x-harness claude --x-workspace name:main
 expect_exit 2 run_surface --x-harness claude --x-surface --x-workspace a --x-new-workspace b
 expect_exit 2 run_surface --x-harness codex --x-surface login
+
+# Provenance (ADR 0015): stated by --x-from, and "none" when nothing said so.
+: >"$WORK/orca-argv.log"
+expect_exit 0 run_surface --x-harness claude --x-surface --x-new-workspace child \
+  --x-project proj --x-no-yolo --x-from "run:$RUN_ID" --x-json
+expect_out "\"detail\":\"run $RUN_ID · main\""
+grep -q -- "--parent-worktree id:repo1::$WORK/ws" "$WORK/orca-argv.log" ||
+  { echo "FAIL: --x-from did not reach orca" >&2; exit 1; }
+: >"$WORK/orca-argv.log"
+expect_exit 0 run_surface --x-harness claude --x-surface --x-new-workspace child2 \
+  --x-project proj --x-no-yolo --x-json
+grep -q -- "--no-parent" "$WORK/orca-argv.log" ||
+  { echo "FAIL: an omitted --x-from did not state none" >&2; exit 1; }
+expect_exit 2 run_surface --x-harness claude --x-surface --x-from name:a
+expect_exit 2 run_surface --x-harness claude --x-from name:a
 cd "$ROOT"
 
 # The narrative is on stderr, so stdout stays exactly the command

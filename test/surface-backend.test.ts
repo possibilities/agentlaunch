@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Envelope } from "../src/envelope.ts";
 import type { RunRecord } from "../src/runs.ts";
+import type { Provenance } from "../src/surface.ts";
 
 type AnyEnvelope = Envelope<Record<string, unknown>>;
 
@@ -25,11 +26,15 @@ interface SurfaceData {
     project: { name: string; created: boolean } | null;
     workspace: { name: string; path: string | null; id: string | null; created: boolean };
     terminal: string | null;
+    provenance: { requested: Provenance; recorded: boolean; detail: string };
   };
 }
 
 const MAIN = join(import.meta.dir, "..", "src", "main.ts");
 const SESSION_ID = "05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60";
+/** The adapter's word for "this workspace already existed, so its lineage is
+ * not the landing's to set". */
+const NOT_CREATED_DETAIL = "workspace already exists · lineage unchanged";
 
 let roots: string[] = [];
 
@@ -180,6 +185,8 @@ describe("surface landings", () => {
         created: false,
       },
       terminal: "term_test-1",
+      // An existing workspace keeps the lineage it has (ADR 0015).
+      provenance: { requested: { kind: "none" }, recorded: false, detail: NOT_CREATED_DETAIL },
     });
     expect(data.run_id).not.toBeNull();
     const record = readRecord(world, data.run_id!);
@@ -260,7 +267,9 @@ describe("surface landings", () => {
     });
     const calls = orcaCalls(world);
     expect(calls).toContain(`repo add --path ${realpathSync(repo)} --json`);
-    expect(calls).toContain("worktree create --name fix-things --repo id:repo9 --json");
+    // No --x-from means provenance is explicitly none, not left to Orca's
+    // env inference (ADR 0015).
+    expect(calls).toContain("worktree create --name fix-things --repo id:repo9 --no-parent --json");
   });
 
   test("a registered project is found, not re-registered", () => {
@@ -384,6 +393,132 @@ describe("surface landings", () => {
     const calls = orcaCalls(world);
     expect(calls).toContain(`worktree show --worktree path:${world.workspace} --json`);
     expect(calls.some((call) => call.includes(`claude --resume ${SESSION_ID}`))).toBe(true);
+  });
+});
+
+/**
+ * Provenance (ADR 0015). The vocabulary is ours — `run:` references resolve
+ * through our own registry — and Orca's flavor of it is a `--parent-worktree`
+ * selector. The load-bearing case is the last one: omitting the flag emits
+ * `--no-parent`, because on a backend that infers, saying nothing is not the
+ * same as saying none.
+ */
+describe("provenance", () => {
+  /** A new workspace in the already-registered project, so the ensure path
+   * needs no git repository of its own. */
+  function landNew(world: World, args: string[]): RunResult {
+    const created = join(world.root, "worktrees", "child");
+    answerFile(world, "worktree-create", {
+      ok: true,
+      result: { worktree: { id: `repo1::${created}`, path: created, displayName: "child" } },
+    });
+    return run(world, [
+      "--x-harness",
+      "codex",
+      "--x-surface",
+      "--x-new-workspace",
+      "child",
+      "--x-project",
+      "proj",
+      "--x-no-yolo",
+      "--x-json",
+      ...args,
+    ]);
+  }
+
+  test("--x-from carries a backend selector through untouched", () => {
+    const world = makeWorld();
+    const result = landNew(world, ["--x-from", "name:parent-ws"]);
+    expect(result.code).toBe(0);
+    const data = surfaceData(result);
+    expect(data.surface.provenance).toEqual({
+      requested: { kind: "selector", selector: "name:parent-ws" },
+      recorded: true,
+      detail: "name:parent-ws",
+    });
+    expect(orcaCalls(world)).toContain(
+      "worktree create --name child --repo id:repo1 --parent-worktree name:parent-ws --json",
+    );
+    expect(readRecord(world, data.run_id!).from).toEqual({
+      kind: "selector",
+      selector: "name:parent-ws",
+    });
+  });
+
+  test("--x-from run:<id> resolves through our own registry", () => {
+    const world = makeWorld();
+    // One landing, then a second that descends from it — the agent-spawning-
+    // agent case, expressed entirely in run ids.
+    const first = surfaceData(
+      run(world, ["--x-harness", "codex", "--x-surface", "--x-no-yolo", "--x-json"]),
+    );
+    const parentRun = first.run_id!;
+    const result = landNew(world, ["--x-from", `run:${parentRun}`]);
+    expect(result.code).toBe(0);
+    const data = surfaceData(result);
+    expect(data.surface.provenance.recorded).toBe(true);
+    expect(data.surface.provenance.detail).toBe(`run ${parentRun} · main`);
+    expect(orcaCalls(world)).toContain(
+      `worktree create --name child --repo id:repo1 --parent-worktree id:repo1::${world.workspace} --json`,
+    );
+    expect(readRecord(world, data.run_id!).from).toEqual({
+      kind: "run",
+      runId: parentRun,
+      backend: "orca",
+      workspace: { name: "main", path: world.workspace, id: `repo1::${world.workspace}` },
+    });
+  });
+
+  test("--x-no-from and an omitted flag both mean explicitly none", () => {
+    const explicit = makeWorld();
+    expect(landNew(explicit, ["--x-no-from"]).code).toBe(0);
+    const silent = makeWorld();
+    const result = landNew(silent, []);
+    expect(result.code).toBe(0);
+    const created = "worktree create --name child --repo id:repo1 --no-parent --json";
+    expect(orcaCalls(explicit)).toContain(created);
+    expect(orcaCalls(silent)).toContain(created);
+    const data = surfaceData(result);
+    expect(data.surface.provenance).toEqual({
+      requested: { kind: "none" },
+      recorded: true,
+      detail: "none",
+    });
+    expect(readRecord(silent, data.run_id!).from).toBeNull();
+  });
+
+  test("an unknown parent run is a domain error, not a silent none", () => {
+    const world = makeWorld();
+    const result = landNew(world, ["--x-from", "run:2f4a9c1e-0000-4000-8000-000000000000"]);
+    expect(result.code).toBe(1);
+    const envelope = JSON.parse(result.stdout) as AnyEnvelope;
+    expect(envelope.error?.code).toBe("run_not_found");
+    expect(orcaCalls(world).some((call) => call.startsWith("worktree create"))).toBe(false);
+  });
+
+  test("a ref that is neither run: nor a selector is a usage fault", () => {
+    const world = makeWorld();
+    const result = landNew(world, ["--x-from", "parent"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("run:<run-id>");
+    expect(orcaCalls(world).some((call) => call.startsWith("worktree create"))).toBe(false);
+  });
+
+  test("provenance flags are usage faults where they cannot apply", () => {
+    const world = makeWorld();
+    const cases: Array<[string, string[]]> = [
+      [
+        "both at once",
+        ["--x-surface", "--x-new-workspace", "c", "--x-from", "name:a", "--x-no-from"],
+      ],
+      ["an existing workspace keeps what it has", ["--x-surface", "--x-from", "name:a"]],
+      ["the current workspace keeps what it has", ["--x-surface", "--x-no-from"]],
+      ["no surface at all", ["--x-from", "name:a"]],
+    ];
+    for (const [reason, args] of cases) {
+      const result = run(world, ["--x-harness", "codex", "--x-no-yolo", ...args]);
+      expect(result.code, reason).toBe(2);
+    }
   });
 });
 

@@ -78,10 +78,21 @@ worktrees implement workspaces. Where a launch lands:
   repository. Ensure never invents a name — no flags and no enclosing workspace
   is a loud fault, not a conjured worktree.
 
+A new workspace also says what it came from. **Provenance is stated, never
+inferred** (ADR 0015): `--x-from run:<run-id>` names a previous run — resolved
+through agentsurface's own registry, so an agent naming what it spawned from
+never learns a backend's selector spelling — or takes the backend's own
+workspace selector; `--x-no-from` says nothing did. Saying nothing *means*
+nothing: the backend is told "none" explicitly, because one that would
+otherwise read its own environment (Orca infers a parent from the calling
+terminal) has to be told not to, and a command should not change meaning with
+the tab it was typed in. What a parent means is each backend's own flavor, so
+the envelope reports what was actually recorded rather than assuming it took.
+
 Every landing writes a **run record** (ADR 0014): one JSON file under
 `~/.local/state/agentsurface/runs/`, whose run id is printed. Under `--x-json`,
 legal here without `--x-dry-run`, the envelope carries `run_id` and
-`surface {backend, project, workspace, terminal}`.
+`surface {backend, project, workspace, terminal, provenance}`.
 
 The session id is *discovered*, never assigned. Codex mints its id only at
 startup, so `x-run <run-id>` matches the store entry born in the run's
