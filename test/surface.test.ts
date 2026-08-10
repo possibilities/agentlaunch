@@ -91,6 +91,7 @@ describe("surface", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.data).toEqual({
       harness: "claude",
+      name: null,
       session_id: null,
       cwd: realpathSync(root),
       command: ["claude", "--model", "opus[1m]", "--effort", "medium", "fix the tests"],
@@ -331,5 +332,67 @@ describe("surface", () => {
     const loud = run(["--x-harness", "claude", "--x-dry-run", "--x-verbose"]);
     expect(loud.stderr).toContain("config  ");
     expect(loud.stderr).toContain("missing · yolo on everywhere");
+  });
+});
+
+describe("run names", () => {
+  test("a name is injected in the harness's own spelling", () => {
+    const result = run([
+      "--x-harness",
+      "claude",
+      "--x-name",
+      "fix the auth flow",
+      "--x-dry-run",
+      "--x-json",
+      "--x-no-yolo",
+    ]);
+    expect(result.code).toBe(0);
+    const data = envelope(result).data as Record<string, unknown>;
+    expect(data["name"]).toBe("fix the auth flow");
+    expect(data["command"]).toEqual([
+      "claude",
+      "--model",
+      "opus[1m]",
+      "--effort",
+      "medium",
+      "--name",
+      "fix the auth flow",
+    ]);
+  });
+
+  test("codex has no launch-time name, so a runner launch says so and drops it", () => {
+    const result = run([
+      "--x-harness",
+      "codex",
+      "--x-name",
+      "fix the auth flow",
+      "--x-dry-run",
+      "--x-no-yolo",
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("--name");
+    expect(result.stderr).toContain("codex has no launch-time name");
+  });
+
+  test("--x-name owns the dimension: a forwarded spelling is a usage fault", () => {
+    for (const forwarded of [["--name", "theirs"], ["-n", "theirs"], ["--name=theirs"]]) {
+      const result = run([
+        "--x-harness",
+        "claude",
+        "--x-name",
+        "ours",
+        ...forwarded,
+        "--x-dry-run",
+      ]);
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain("--x-name set the run name");
+    }
+  });
+
+  test("an empty name and a utility invocation are usage faults", () => {
+    expect(run(["--x-harness", "claude", "--x-name", "", "--x-dry-run"]).code).toBe(2);
+    const utility = run(["--x-harness", "codex", "--x-name", "x", "login", "--x-dry-run"]);
+    expect(utility.code).toBe(2);
+    expect(utility.stderr).toContain("opens no session to name");
   });
 });

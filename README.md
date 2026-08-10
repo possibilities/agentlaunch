@@ -79,7 +79,7 @@ worktrees implement workspaces. Where a launch lands:
   is a loud fault, not a conjured worktree.
 
 A new workspace also says what it came from. **Provenance is stated, never
-inferred** (ADR 0015): `--x-from run:<run-id>` names a previous run — resolved
+inferred** (ADR 0015): `--x-from run:<run-id-or-name>` names a previous run — resolved
 through agentsurface's own registry, so an agent naming what it spawned from
 never learns a backend's selector spelling — or takes the backend's own
 workspace selector; `--x-no-from` says nothing did. Saying nothing *means*
@@ -88,6 +88,16 @@ otherwise read its own environment (Orca infers a parent from the calling
 terminal) has to be told not to, and a command should not change meaning with
 the tab it was typed in. What a parent means is each backend's own flavor, so
 the envelope reports what was actually recorded rather than assuming it took.
+
+A run can carry the operator's own label. `--x-name <name>` is passed to the
+harness where one has a launch-time name (claude and pi `--name`; codex has
+none, so a runner launch narrates the drop rather than failing), and on a
+surface it titles the terminal, labels a workspace the landing created, and
+lands in the run record — so codex loses nothing there. **A name is a label,
+not an identity** (ADR 0017): free text, never unique, never invented. It reads
+back wherever a run id does — `x-run auth-flow`, `--x-from run:auth-flow`,
+`x-land run:auth-flow` — with the id tier matched first and several runs
+sharing a name refused by name rather than guessed between.
 
 Every landing writes a **run record** (ADR 0014): one JSON file under
 `~/.local/state/agentsurface/runs/`, whose run id is printed. Under `--x-json`,
@@ -113,8 +123,8 @@ terminal. Utility invocations cannot land.
 work back to the main line and lets the surface go, in that order (ADR 0016).
 Survey, refuse, merge, release, reconcile — a checkout is never removed until
 its work provably landed somewhere else. The workspace is named the way
-`--x-from` names one: `run:<run-id>` through our own registry, or the backend's
-own selector.
+`--x-from` names one: `run:<run-id-or-name>` through our own registry, or the
+backend's own selector.
 
 Git work is done with git, in the repository's primary checkout, which is found
 with `git worktree list` rather than asked of the backend. The surface is

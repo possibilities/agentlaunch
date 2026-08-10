@@ -246,11 +246,38 @@ async function createWorkspace(
       `orca worktree list --json should name it; then pass --x-workspace name:${intent.name}`,
     );
   }
+  const named = await labelWorkspace(request, worktree);
   return {
     project: { name: repo.name, created: repo.created },
-    workspace: { ...worktree, created: true },
+    workspace: { ...named, created: true },
     provenance: { recorded: true, detail: parent.detail },
   };
+}
+
+/**
+ * A run name is what Orca's card should read. `worktree create` takes only
+ * the checkout's name — which is also its directory and branch, so it stays
+ * the slug the operator typed — while `worktree set --display-name` is the
+ * only setter for the label the app shows. Orca stores both verbatim, so the
+ * name reaches the card exactly as typed. Only a workspace this placement
+ * created is labelled: relabelling one that already existed would rename
+ * somebody else's card as a side effect of landing in it.
+ */
+async function labelWorkspace(
+  request: PlaceRequest,
+  worktree: { name: string; path: string; id: string | null },
+): Promise<{ name: string; path: string; id: string | null }> {
+  if (request.name === null) return worktree;
+  await orcaJson(request.env, request.narrator, [
+    "worktree",
+    "set",
+    "--worktree",
+    worktree.id !== null ? `id:${worktree.id}` : `path:${worktree.path}`,
+    "--display-name",
+    request.name,
+  ]);
+  request.narrator.detail("name", `${request.name} · orca display name`);
+  return { ...worktree, name: request.name };
 }
 
 interface EnsuredRepo {

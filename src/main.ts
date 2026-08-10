@@ -47,7 +47,7 @@ const SURFACE_FLAGS: RouteFlags = {
 };
 
 const LAUNCH_FLAGS: RouteFlags = {
-  value: ["--x-harness", "--x-account", ...(SURFACE_FLAGS.value ?? [])],
+  value: ["--x-harness", "--x-account", "--x-name", ...(SURFACE_FLAGS.value ?? [])],
   bool: ["--x-dry-run", "--x-no-balance", "--x-verbose", ...(SURFACE_FLAGS.bool ?? [])],
   scoped: [...YOLO_SCOPES, ...(SURFACE_FLAGS.scoped ?? [])],
 };
@@ -59,7 +59,7 @@ const LAND_FLAGS: RouteFlags = {
 };
 
 const RESUME_FLAGS: RouteFlags = {
-  value: ["--x-account", "--x-harness", ...(SURFACE_FLAGS.value ?? [])],
+  value: ["--x-account", "--x-harness", "--x-name", ...(SURFACE_FLAGS.value ?? [])],
   bool: ["--x-dry-run", "--x-no-balance", "--x-verbose", ...(SURFACE_FLAGS.bool ?? [])],
   scoped: [...YOLO_SCOPES, ...(SURFACE_FLAGS.scoped ?? [])],
 };

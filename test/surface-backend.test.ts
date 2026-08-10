@@ -79,6 +79,7 @@ function makeWorld(): World {
       `  "status --json") answer status;;`,
       `  "worktree show") answer worktree-show;;`,
       `  "worktree create") answer worktree-create;;`,
+      `  "worktree set") answer worktree-set;;`,
       `  "worktree list") answer worktree-list;;`,
       `  "repo list") answer repo-list;;`,
       `  "repo add") cp "$dir/repo-list-after.json" "$dir/repo-list.json"; answer repo-add;;`,
@@ -104,6 +105,7 @@ function makeWorld(): World {
     ok: true,
     result: { repos: [{ id: "repo1", path: workspace, displayName: "proj" }] },
   });
+  answer("worktree-set", { ok: true, result: {} });
   answer("terminal-create", {
     ok: true,
     result: { terminal: { handle: "term_test-1", worktreeId: `repo1::${workspace}` } },
@@ -500,7 +502,7 @@ describe("provenance", () => {
     const world = makeWorld();
     const result = landNew(world, ["--x-from", "parent"]);
     expect(result.code).toBe(2);
-    expect(result.stderr).toContain("run:<run-id>");
+    expect(result.stderr).toContain("run:<run-id-or-name>");
     expect(orcaCalls(world).some((call) => call.startsWith("worktree create"))).toBe(false);
   });
 
@@ -603,5 +605,109 @@ describe("run records", () => {
       { backend: "orca", reachable: true, detail: "runtime ready · v1.4.177" },
     ]);
     expect(data.surface.runs).toBe(1);
+  });
+});
+
+describe("run names", () => {
+  function landNamed(world: World, name: string, args: string[] = []): string {
+    const result = run(world, [
+      "--x-harness",
+      "codex",
+      "--x-surface",
+      "--x-name",
+      name,
+      "--x-no-yolo",
+      "--x-json",
+      ...args,
+    ]);
+    expect(result.code).toBe(0);
+    return surfaceData(result).run_id!;
+  }
+
+  test("the name titles the terminal and lands in the record", () => {
+    const world = makeWorld();
+    const runId = landNamed(world, "fix the auth flow");
+    const record = readRecord(world, runId);
+    expect(record.name).toBe("fix the auth flow");
+    expect(orcaCalls(world)).toContain(
+      `terminal create --worktree id:repo1::${world.workspace} --command env AGENTSURFACE_LAUNCH=1 codex --model gpt-5.6-sol -c 'model_reasoning_effort="high"' --title fix the auth flow --json`,
+    );
+  });
+
+  test("a created workspace is labelled with the name, verbatim", () => {
+    const world = makeWorld();
+    // Creating a workspace infers the project from the anchor's git toplevel.
+    Bun.spawnSync({ cmd: ["git", "init", "-q", world.workspace] });
+    const created = join(world.root, "worktrees", "auth");
+    answerFile(world, "worktree-create", {
+      ok: true,
+      result: { worktree: { id: `repo1::${created}`, path: created, displayName: "auth" } },
+    });
+    landNamed(world, "fix the auth flow", ["--x-new-workspace", "auth"]);
+    // Orca stores what it is given: the checkout keeps the slug, the card
+    // reads the name as typed.
+    expect(orcaCalls(world)).toContain(
+      "worktree create --name auth --repo id:repo1 --no-parent --json",
+    );
+    expect(orcaCalls(world)).toContain(
+      `worktree set --worktree id:repo1::${created} --display-name fix the auth flow --json`,
+    );
+  });
+
+  test("a workspace that already existed is never relabelled", () => {
+    const world = makeWorld();
+    landNamed(world, "fix the auth flow");
+    expect(orcaCalls(world).some((call) => call.startsWith("worktree set"))).toBe(false);
+  });
+
+  test("x-run and x-runs read a run back by its name", () => {
+    const world = makeWorld();
+    const runId = landNamed(world, "auth-flow");
+    const shown = run(world, ["x-run", "auth-flow", "--x-json"]);
+    expect(shown.code).toBe(0);
+    const record = (JSON.parse(shown.stdout) as AnyEnvelope).data as unknown as RunRecord;
+    expect(record.run_id).toBe(runId);
+    const list = run(world, ["x-runs"]);
+    expect(list.stdout).toContain("auth-flow");
+  });
+
+  test("two runs sharing a name refuse rather than guess", () => {
+    const world = makeWorld();
+    const first = landNamed(world, "auth-flow");
+    const second = landNamed(world, "auth-flow");
+    const result = run(world, ["x-run", "auth-flow", "--x-json"]);
+    expect(result.code).toBe(1);
+    const envelope = JSON.parse(result.stdout) as AnyEnvelope;
+    expect(envelope.error?.code).toBe("ambiguous_run");
+    expect(envelope.error?.message).toContain(first);
+    expect(envelope.error?.message).toContain(second);
+    // The id tier is exact, so either run is still reachable by id.
+    expect(run(world, ["x-run", first, "--x-json"]).code).toBe(0);
+  });
+
+  test("--x-from resolves a run by name", () => {
+    const world = makeWorld();
+    Bun.spawnSync({ cmd: ["git", "init", "-q", world.workspace] });
+    landNamed(world, "parent-run");
+    const created = join(world.root, "worktrees", "child");
+    answerFile(world, "worktree-create", {
+      ok: true,
+      result: { worktree: { id: `repo1::${created}`, path: created, displayName: "child" } },
+    });
+    const result = run(world, [
+      "--x-harness",
+      "codex",
+      "--x-surface",
+      "--x-new-workspace",
+      "child",
+      "--x-from",
+      "run:parent-run",
+      "--x-no-yolo",
+      "--x-json",
+    ]);
+    expect(result.code).toBe(0);
+    expect(orcaCalls(world)).toContain(
+      `worktree create --name child --repo id:repo1 --parent-worktree id:repo1::${world.workspace} --json`,
+    );
   });
 });

@@ -8,6 +8,8 @@ import {
   effortDimensionToken,
   modelArguments,
   modelDimensionToken,
+  nameArguments,
+  nameDimensionToken,
   parseHarnessName,
   sessionStore,
   utilityInvocation,
@@ -185,6 +187,23 @@ describe("model and effort spellings", () => {
     expect(effortDimensionToken("codex", ["-c", "other=1"])).toBeNull();
     expect(effortDimensionToken("codex", ["--effort", "max"])).toBeNull();
     expect(effortDimensionToken("claude", ["--thinking", "high"])).toBeNull();
+  });
+});
+
+describe("run-name spellings", () => {
+  test("claude and pi take --name; codex has none at launch", () => {
+    expect(nameArguments("claude", "auth flow")).toEqual(["--name", "auth flow"]);
+    expect(nameArguments("pi", "auth flow")).toEqual(["--name", "auth flow"]);
+    expect(nameArguments("codex", "auth flow")).toBeNull();
+  });
+
+  test("name-dimension detection sees --name, --name=, and the -n alias", () => {
+    expect(nameDimensionToken("claude", ["-p", "hi", "--name", "x"])).toBe("--name");
+    expect(nameDimensionToken("pi", ["--name=x"])).toBe("--name=x");
+    expect(nameDimensionToken("claude", ["-n", "x"])).toBe("-n");
+    // Codex has no launch-time name, so nothing there can conflict.
+    expect(nameDimensionToken("codex", ["--name", "x"])).toBeNull();
+    expect(nameDimensionToken("pi", ["hello"])).toBeNull();
   });
 });
 

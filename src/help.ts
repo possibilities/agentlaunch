@@ -6,7 +6,7 @@ Usage:
   agentsurface --x-harness <value> [tokens…]    Launch a harness here
   agentsurface x-resume <session-id> [tokens…]  Reopen a stored session by id
   agentsurface x-runs                           List recorded surface runs
-  agentsurface x-run <run-id>                   Show one run; discover its session id
+  agentsurface x-run <run-id|name>              Show one run; discover its session id
   agentsurface x-land <workspace-ref>           Merge a workspace back and release it
   agentsurface x-doctor                         Report binaries, stores, config, catalog, surface
 
@@ -22,6 +22,7 @@ x-* words in command position are reserved for agentsurface.
 
 Launch x-flags:
   --x-harness <value>    Which harness/model/effort to launch (required)
+  --x-name <name>        Name this run (claude/pi --name; codex has none)
   --x-surface [backend]  Land on a surface instead of this terminal
   --x-workspace <sel>    Surface workspace to land in (default: current)
   --x-new-workspace <n>  Create the workspace, registering its project
@@ -87,11 +88,21 @@ command returns an envelope instead of becoming the harness):
   --x-project <sel>      Project for --x-new-workspace — a registered name,
                          or path:<repo> to register one on demand.
   --x-from <ref>         What the new workspace descends from:
-                         run:<run-id> (resolved through our own run
+                         run:<run-id-or-name> (resolved through our own run
                          registry, so an agent naming what it spawned from
                          needs no backend spelling), or the backend's own
                          workspace selector.
   --x-no-from            It descends from nothing.
+
+  --x-name <name>        Name this run. Passed to the harness where it has
+                         a launch-time name (claude and pi --name); codex
+                         has none, so a runner launch narrates the drop.
+                         On a surface it is the terminal title, the label
+                         of a workspace this landing created, and the run
+                         record's name — so codex loses nothing there.
+                         A name is a label, not an identity: run:<name>
+                         reads a run back wherever run:<run-id> does, and
+                         several runs sharing one is a refusal naming them.
 
 Provenance is stated, never inferred (ADR 0015). --x-from and --x-no-from
 qualify --x-new-workspace only: lineage is set where a workspace is
@@ -208,21 +219,26 @@ reachability and version, plus how many runs are recorded.
 `,
   "x-runs": `agentsurface x-runs [--x-json]
 
-List recorded surface runs, newest first: run id, backend, harness,
-workspace, session id (or "not yet discovered"), and landing time. Records
+List recorded surface runs, newest first: run id, name (when the landing
+gave one), backend, harness, workspace, session id (or "not yet
+discovered"), and landing time. Records
 live one file per run under ~/.local/state/agentsurface/runs/ and are
 written by every non-dry surface landing (ADR 0014).
 `,
-  "x-run": `agentsurface x-run <run-id> [--x-json]
+  "x-run": `agentsurface x-run <run-id | run-name> [--x-json]
 
-Show one recorded run. When its session id is still unknown, the harness's
+Show one recorded run, named by its id or by the name --x-name gave it —
+the id tier is exact, so a name never shadows a record. Names are labels
+rather than identities: several runs sharing one is an ambiguous_run
+refusal naming the candidates, and open runs are preferred over landed
+ones. When its session id is still unknown, the harness's
 session store is searched for the session born in the run's workspace at or
 after the landing (every store records the cwd); a discovery is written
 back to the record, so it happens at most once. The terminal field is the
 backend's handle for the landed terminal — the address a future steer
 command will use.
 `,
-  "x-land": `agentsurface x-land <run:<run-id> | backend-selector> [flags]
+  "x-land": `agentsurface x-land <run:<run-id-or-name> | backend-selector> [flags]
 
   --x-surface [backend]   Which surface holds the workspace (default: orca)
   --x-into <branch>       Merge target; default is the repo's own base ref
@@ -281,8 +297,8 @@ Commands
   agentsurface --x-harness <value> [tokens…]  [--x-surface [backend]]
   agentsurface x-resume <session-id> [tokens…]  [--x-harness claude|codex|pi] [--x-surface]
   agentsurface x-runs [--x-json]
-  agentsurface x-run <run-id> [--x-json]
-  agentsurface x-land <run:<run-id> | selector> [--x-into <branch>] [--x-force] [--x-abandon] [--x-dry-run] [--x-json]
+  agentsurface x-run <run-id | run-name> [--x-json]
+  agentsurface x-land <run:<run-id-or-name> | selector> [--x-into <branch>] [--x-force] [--x-abandon] [--x-dry-run] [--x-json]
   agentsurface x-doctor [--x-json]
 
 Rules

@@ -23,6 +23,10 @@ export interface RunRecord {
   backend: string;
   harness: HarnessName;
   harness_value: string | null;
+  /** The operator's own label for this run (`--x-name`), free text and never
+   * unique — a handle to read back, not an identity. Absent on records
+   * written before run names existed, which reads the same as unnamed. */
+  name?: string | null;
   workspace: { name: string; path: string; id: string | null };
   /** Backend-issued terminal handle — an address for steering, not the
    * run's identity; its lifetime is the backend runtime's. */
@@ -93,6 +97,59 @@ export async function listRunRecords(env: Environ, home: string): Promise<RunRec
   }
   records.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   return records;
+}
+
+/**
+ * Runs carrying a name, newest first. Nothing enforces uniqueness — a name
+ * is a label, so two runs may share one — which is why this returns every
+ * match and lets the caller refuse rather than guess. Closed runs are
+ * reported apart: their workspace is gone, so a reference almost never means
+ * them, but hiding them entirely would turn "landed already" into "never
+ * existed".
+ */
+export async function findRunsByName(
+  env: Environ,
+  home: string,
+  name: string,
+): Promise<{ open: RunRecord[]; closed: RunRecord[] }> {
+  const matches = (await listRunRecords(env, home)).filter((record) => record.name === name);
+  return {
+    open: matches.filter((record) => record.closed_at == null),
+    closed: matches.filter((record) => record.closed_at != null),
+  };
+}
+
+/**
+ * A run reference, resolved in tiers: an exact run id first, then a run
+ * name. One word covers both because a name is what an operator remembers
+ * and an id is what a machine kept — and the id tier is exact, so a name
+ * shaped like an id never shadows the record it names. Names are not unique,
+ * so several matches is a refusal naming the candidates rather than a guess;
+ * open runs are preferred, since a closed one's workspace is already gone.
+ */
+export async function resolveRunReference(
+  env: Environ,
+  home: string,
+  reference: string,
+): Promise<RunRecord> {
+  if (RUN_ID.test(reference) && existsSync(recordPath(env, home, reference))) {
+    return await readRunRecord(env, home, reference);
+  }
+  const { open, closed } = await findRunsByName(env, home, reference);
+  const tier = open.length > 0 ? open : closed;
+  if (tier.length === 1) return tier[0]!;
+  if (tier.length > 1) {
+    throw new CliError(
+      "ambiguous_run",
+      `${tier.length} runs are named "${reference}": ${tier.map((record) => record.run_id).join(", ")}`,
+      "name one by its run id instead",
+    );
+  }
+  throw new CliError(
+    "run_not_found",
+    `no run has the id or name "${reference}" under ${runsDirectory(env, home)}`,
+    "agentsurface x-runs lists the recorded runs",
+  );
 }
 
 /**
@@ -168,9 +225,9 @@ function birthTime(path: string): number | null {
 export async function resolveRun(
   env: Environ,
   home: string,
-  runId: string,
+  reference: string,
 ): Promise<{ record: RunRecord; discovered: boolean }> {
-  const record = await readRunRecord(env, home, runId);
+  const record = await resolveRunReference(env, home, reference);
   if (record.session_id !== null) return { record, discovered: false };
   const sessionId = await discoverSessionId(record, env, home);
   if (sessionId === null) return { record, discovered: false };

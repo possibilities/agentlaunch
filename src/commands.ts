@@ -19,6 +19,8 @@ import {
   HARNESS_NAMES,
   modelArguments,
   modelDimensionToken,
+  nameArguments,
+  nameDimensionToken,
   parseHarnessName,
   sessionFileFacts,
   sessionStore,
@@ -33,8 +35,8 @@ import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
 import type { RunRecord } from "./runs.ts";
 import {
   listRunRecords,
-  readRunRecord,
   resolveRun,
+  resolveRunReference,
   runsDirectory,
   stampClosedRuns,
   writeRunRecord,
@@ -82,7 +84,10 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
   context.narrator.row("cwd", tildePath(context.cwd, context.home));
 
   const utility = utilityInvocation(harness, tokens);
-  const surface = surfaceRequest(parts, context.cwd, value);
+  const name = runName(parts);
+  // A named run's terminal reads as the operator's own label; without one it
+  // keeps saying what was launched.
+  const surface = surfaceRequest(parts, context.cwd, name ?? value, name);
   if (utility && surface !== null) {
     throw new UsageError(
       `"${head}" is a utility invocation; it passes through and cannot be placed on a surface`,
@@ -97,7 +102,36 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
       `"${head}" is a utility invocation; model and effort do not apply — pass --x-harness ${harness}`,
     );
   }
+  if (utility && name !== null) {
+    throw new UsageError(
+      `"${head}" is a utility invocation; it opens no session to name — drop --x-name`,
+    );
+  }
   let stream = tokens;
+  if (name !== null) {
+    const nameToken = nameDimensionToken(harness, tokens);
+    if (nameToken !== null) {
+      throw new UsageError(`--x-name set the run name; drop the forwarded "${nameToken}"`);
+    }
+    const args = nameArguments(harness, name);
+    if (args === null) {
+      // Codex has no launch-time name. A placed run keeps the name anyway —
+      // terminal title, card, and record — so on a surface this is mechanism
+      // rather than loss, and only a runner launch really drops it.
+      context.narrator.row(
+        "name",
+        facts(
+          name,
+          surface === null
+            ? "not passed · codex has no launch-time name"
+            : "surface only · codex has no launch-time name",
+        ),
+      );
+    } else {
+      stream = [...args, ...tokens];
+      context.narrator.row("name", facts(name, args.join(" ")));
+    }
+  }
   let model: DimensionReport = { value: null, source: null };
   let effort: DimensionReport = { value: null, source: null };
   if (utility) {
@@ -126,10 +160,12 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
       effortToken === null
         ? { value: resolution.effort, source: resolution.effortDefaulted ? "default" : "requested" }
         : { value: null, source: "forwarded" };
+    // Onto the stream, not the raw tokens: the name may already have been
+    // injected ahead of them.
     stream = [
       ...(modelToken === null ? modelArguments(resolution.model.spelling) : []),
       ...(effortToken === null ? effortArguments(harness, resolution.effort) : []),
-      ...tokens,
+      ...stream,
     ];
     context.narrator.row("model", facts(model.value ?? undefined, model.source ?? undefined));
     context.narrator.row("effort", facts(effort.value ?? undefined, effort.source ?? undefined));
@@ -160,10 +196,12 @@ function surfaceRequest(
   parts: Partitioned,
   anchor: string | null,
   title: string,
+  name: string | null,
 ): {
   backend: SurfaceBackend;
   intent: WorkspaceIntent;
   title: string;
+  name: string | null;
   from: FromRequest;
 } | null {
   const scopes = parts.scoped.get("x-surface");
@@ -224,6 +262,7 @@ function surfaceRequest(
     return {
       backend,
       title,
+      name,
       intent: { kind: "new", name: newWorkspace, project: project ?? null, path: anchor ?? "" },
       // Omission is a decision, not a gap (ADR 0015): a backend that would
       // otherwise infer gets told there is nothing to descend from.
@@ -234,6 +273,7 @@ function surfaceRequest(
     return {
       backend,
       title,
+      name,
       intent: { kind: "existing", selector: workspace },
       from: { kind: "none" },
     };
@@ -245,7 +285,23 @@ function surfaceRequest(
       "pass --x-workspace <selector> or --x-new-workspace <name>",
     );
   }
-  return { backend, title, intent: { kind: "current", path: anchor }, from: { kind: "none" } };
+  return {
+    backend,
+    title,
+    name,
+    intent: { kind: "current", path: anchor },
+    from: { kind: "none" },
+  };
+}
+
+/** The operator's own label for a run, as typed. Free text — it names
+ * nothing on disk, so it needs no id alphabet — but an empty one would
+ * label nothing while looking deliberate. */
+function runName(parts: Partitioned): string | null {
+  const name = parts.values["x-name"];
+  if (name === undefined) return null;
+  if (name.trim() === "") throw new UsageError("--x-name needs a name");
+  return name;
 }
 
 /** The provenance flags as typed, before the run registry is consulted:
@@ -267,22 +323,25 @@ async function resolveProvenance(
   if (!from.ref.startsWith(RUN_REF)) {
     if (!from.ref.includes(":")) {
       throw new UsageError(
-        `--x-from "${from.ref}" is neither run:<run-id> nor a backend workspace selector (orca takes name:, path:, branch:, id:)`,
+        `--x-from "${from.ref}" is neither run:<run-id-or-name> nor a backend workspace selector (orca takes name:, path:, branch:, id:)`,
       );
     }
     return { kind: "selector", selector: from.ref };
   }
-  const runId = from.ref.slice(RUN_REF.length);
-  const record = await readRunRecord(context.env, context.home, runId);
+  const record = await resolveRunReference(
+    context.env,
+    context.home,
+    from.ref.slice(RUN_REF.length),
+  );
   if (record.backend !== backend) {
     context.narrator.detail(
       "from",
-      `run ${runId} landed on ${record.backend} · matching by path on ${backend}`,
+      `run ${record.run_id} landed on ${record.backend} · matching by path on ${backend}`,
     );
   }
   return {
     kind: "run",
-    runId,
+    runId: record.run_id,
     backend: record.backend,
     workspace: record.workspace,
   };
@@ -351,7 +410,17 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
     anchor = path === null ? null : (await sessionFileFacts(harness, path)).cwd;
     if (anchor !== null) context.narrator.detail("anchor", `${anchor} · the session's cwd`);
   }
-  const surface = surfaceRequest(parts, anchor, `${harness} resume`);
+  // A resume takes no injection ever, so a name here is purely the surface's
+  // and the record's: it labels where the conversation was picked up, and
+  // never renames the session the harness already knows.
+  const resumeName = runName(parts);
+  if (resumeName !== null) {
+    context.narrator.row(
+      "name",
+      facts(resumeName, "surface and record · a resume injects nothing"),
+    );
+  }
+  const surface = surfaceRequest(parts, anchor, resumeName ?? `${harness} resume`, resumeName);
 
   const model = await resumeRoutingModel(context, harness, sessionId, sessionPath, forwarded);
   if (model !== undefined) context.narrator.detail("model", `${model} · drives routing`);
@@ -562,6 +631,7 @@ export async function runsCommand(context: Context, parts: Partitioned): Promise
   const lines = records.map((record) =>
     facts(
       record.run_id,
+      record.name ?? undefined,
       record.backend,
       record.harness,
       record.workspace.name,
@@ -577,10 +647,10 @@ export async function runsCommand(context: Context, parts: Partitioned): Promise
 }
 
 export async function runCommand(context: Context, parts: Partitioned): Promise<Outcome> {
-  const [runId, ...rest] = parts.harness;
-  if (runId === undefined) throw new UsageError("x-run requires a run id");
-  if (rest.length > 0) throw new UsageError("x-run takes exactly one run id");
-  const { record, discovered } = await resolveRun(context.env, context.home, runId);
+  const [reference, ...rest] = parts.harness;
+  if (reference === undefined) throw new UsageError("x-run requires a run id or name");
+  if (rest.length > 0) throw new UsageError("x-run takes exactly one run id or name");
+  const { record, discovered } = await resolveRun(context.env, context.home, reference);
   if (discovered) {
     context.narrator.row(
       "session",
@@ -590,6 +660,7 @@ export async function runCommand(context: Context, parts: Partitioned): Promise<
   const label = (name: string, value: string): string => `${name.padEnd(10)}${value}`;
   const lines = [
     label("run", record.run_id),
+    label("name", record.name ?? "unnamed"),
     label("created", record.created_at),
     label("kind", record.kind),
     label("backend", record.backend),
@@ -710,12 +781,11 @@ async function resolveWorkspaceRef(
   backend: string,
 ): Promise<string> {
   if (ref.startsWith(RUN_REF)) {
-    const runId = ref.slice(RUN_REF.length);
-    const record = await readRunRecord(context.env, context.home, runId);
+    const record = await resolveRunReference(context.env, context.home, ref.slice(RUN_REF.length));
     if (record.backend !== backend) {
       context.narrator.detail(
         "land",
-        `run ${runId} landed on ${record.backend} · matching by path on ${backend}`,
+        `run ${record.run_id} landed on ${record.backend} · matching by path on ${backend}`,
       );
     }
     return record.workspace.id !== null && record.backend === backend
@@ -724,7 +794,7 @@ async function resolveWorkspaceRef(
   }
   if (!ref.includes(":")) {
     throw new UsageError(
-      `x-land "${ref}" is neither run:<run-id> nor a backend workspace selector (orca takes name:, path:, branch:, id:)`,
+      `x-land "${ref}" is neither run:<run-id-or-name> nor a backend workspace selector (orca takes name:, path:, branch:, id:)`,
     );
   }
   return ref;
@@ -774,6 +844,7 @@ interface SurfaceLaunch {
   backend: SurfaceBackend;
   intent: WorkspaceIntent;
   title: string;
+  name: string | null;
   kind: "open" | "resume";
   harnessValue: string | null;
   from: FromRequest;
@@ -840,6 +911,9 @@ async function finishLaunch(
 
   const data = {
     harness: spec.harness,
+    // What was asked for, whether or not the harness had a spelling for it:
+    // on codex a runner launch drops it, and the narrative says so.
+    name: runName(parts),
     session_id: spec.sessionId,
     cwd: context.cwd,
     command: launchSpec.command,
@@ -859,6 +933,7 @@ async function finishLaunch(
       spec: launchSpec,
       intent: surface.intent,
       title: surface.title,
+      name: surface.name,
       provenance,
       dryRun,
       narrator: context.narrator,
@@ -909,6 +984,7 @@ async function finishLaunch(
         backend: surface.backend.name,
         harness: spec.harness,
         harness_value: surface.harnessValue,
+        name: surface.name,
         workspace: {
           name: placement.workspace.name,
           // Outside a dry run a landed workspace always has its path.

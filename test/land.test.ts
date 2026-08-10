@@ -410,6 +410,8 @@ describe("x-land", () => {
     const world = makeWorld();
     const result = run(world, ["x-land", "feature"]);
     expect(result.code).toBe(2);
-    expect(result.stderr).toContain("neither run:<run-id> nor a backend workspace selector");
+    expect(result.stderr).toContain(
+      "neither run:<run-id-or-name> nor a backend workspace selector",
+    );
   });
 });

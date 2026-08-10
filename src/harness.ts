@@ -52,6 +52,37 @@ export function effortArguments(harness: HarnessName, effort: string): string[] 
   }
 }
 
+/**
+ * How a run name is spelled at launch, or null where the harness has no
+ * launch-time name at all. Verified against the live CLIs: claude
+ * `-n, --name <name>` (its own help calls it the display name for the
+ * session picker and terminal title), pi `--name, -n <name>`, and codex
+ * none — its sessions carry names that `codex resume` accepts, but nothing
+ * assigns one at launch. The gap is why a name is surface metadata as well
+ * as a harness flag.
+ */
+export function nameArguments(harness: HarnessName, name: string): string[] | null {
+  switch (harness) {
+    case "claude":
+    case "pi":
+      return ["--name", name];
+    case "codex":
+      return null;
+  }
+}
+
+/** The first forwarded token that natively claims the name dimension —
+ * `--name`, `--name=…`, or the `-n` alias claude and pi share — or null.
+ * Codex has none, so nothing there can conflict. */
+export function nameDimensionToken(harness: HarnessName, tokens: readonly string[]): string | null {
+  if (harness === "codex") return null;
+  for (const token of tokens) {
+    if (token === "--name" || token.startsWith("--name=")) return token;
+    if (token === "-n" || token.startsWith("-n=")) return token;
+  }
+  return null;
+}
+
 /** The first forwarded token that natively claims the model dimension —
  * `--model`, `--model=…`, codex's `-m` — or null. Read for conflict and
  * yield decisions; the tokens themselves are never edited. */

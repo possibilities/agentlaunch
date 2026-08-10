@@ -57,6 +57,15 @@ expect_out() {
   fi
 }
 
+# The narrative is stderr's (ADR 0007), so a decision is checked there.
+expect_err() {
+  if ! grep -q -- "$1" "$WORK/err"; then
+    echo "FAIL: stderr does not contain: $1" >&2
+    cat "$WORK/err" >&2
+    exit 1
+  fi
+}
+
 # Help, version, doctor
 expect_exit 0 run --version
 expect_exit 0 run --agent-teaser
@@ -184,6 +193,7 @@ case "\$1 \$2" in
     esac;;
   "repo show") printf '{"ok":true,"result":{"repo":{"id":"repo1","path":"$WORK/ws","displayName":"proj","worktreeBaseRef":"main"}}}\n';;
   "terminal list") printf '{"ok":true,"result":{"terminals":[]}}\n';;
+  "worktree set") printf '{"ok":true,"result":{}}\n';;
   "worktree create") printf '{"ok":true,"result":{"worktree":{"id":"repo1::$WORK/child","path":"$WORK/child","displayName":"child"}}}\n';;
   "repo list") printf '{"ok":true,"result":{"repos":[{"id":"repo1","path":"$WORK/ws","displayName":"proj"}]}}\n';;
   "terminal create") printf '{"ok":true,"result":{"terminal":{"handle":"term_smoke"}}}\n';;
@@ -233,6 +243,21 @@ grep -q -- "--no-parent" "$WORK/orca-argv.log" ||
   { echo "FAIL: an omitted --x-from did not state none" >&2; exit 1; }
 expect_exit 2 run_surface --x-harness claude --x-surface --x-from name:a
 expect_exit 2 run_surface --x-harness claude --x-from name:a
+
+# Run names (ADR 0017): injected where the harness has one, carried on the
+# surface everywhere, and read back as a reference.
+expect_exit 0 run_surface --x-harness claude --x-name "fix the tests" --x-no-yolo --x-dry-run
+expect_out "--name 'fix the tests'"
+expect_exit 0 run_surface --x-harness codex --x-name "fix the tests" --x-no-yolo --x-dry-run
+expect_err "codex has no launch-time name"
+expect_exit 2 run_surface --x-harness claude --x-name ours --name theirs --x-dry-run
+: >"$WORK/orca-argv.log"
+expect_exit 0 run_surface --x-harness claude --x-surface --x-new-workspace child3 \
+  --x-project proj --x-name "auth flow" --x-no-yolo --x-json
+grep -q -- "--display-name auth flow" "$WORK/orca-argv.log" ||
+  { echo "FAIL: --x-name did not label the created workspace" >&2; exit 1; }
+expect_exit 0 run_surface x-run "auth flow"
+expect_out "auth flow"
 
 # Land (ADR 0016) against a real repository, dry run only: the survey reads
 # git for real, and nothing is merged, released, or removed.

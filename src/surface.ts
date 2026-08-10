@@ -46,8 +46,14 @@ export type Provenance =
 export interface PlaceRequest {
   spec: LaunchSpec;
   intent: WorkspaceIntent;
-  /** Display name for the landed terminal; run names will feed this. */
+  /** Display name for the landed terminal: the run name when the operator
+   * gave one, the harness value otherwise. */
   title: string;
+  /** The operator's own label for this run (`--x-name`), or null. Distinct
+   * from the title because a backend may name more than a terminal: where it
+   * labels a workspace it created, this is the label to use, stated as typed.
+   * A backend with nothing to name simply ignores it. */
+  name: string | null;
   /** What this placement descends from — always stated, never inferred. */
   provenance: Provenance;
   /** Dry runs resolve read-only: no registration, no creation, no terminal. */
