@@ -249,9 +249,10 @@ to be stamped for this — the harness names its own session, and the run
 registry holds the rest.
 
 Matching is exact where it can be: the session id the enclosing harness
-exports (claude and codex do; pi does not), falling back to the workspace
-you are working in. Two open runs of one harness in one workspace resolve
-to neither, which is an ambiguous_run refusal naming both.
+exports (claude and codex do; pi does not), against an open run of that same
+harness, falling back to the workspace you are working in. Two open runs of
+one harness in one workspace resolve to neither, which is an ambiguous_run
+refusal naming both.
 
 Not being on a surface is a refusal (not_placed) rather than an empty
 answer, so this doubles as the gate for guidance that only applies to a

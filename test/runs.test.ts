@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -14,9 +15,11 @@ import { join } from "node:path";
 import { CliError } from "../src/errors.ts";
 import type { RunRecord } from "../src/runs.ts";
 import {
+  discoverSessionId,
   listRunRecords,
   releaseRunName,
   reserveRunName,
+  resolveCallingRun,
   runServerListenUrl,
   runsDirectory,
   writeRunRecord,
@@ -214,5 +217,114 @@ describe("run server socket paths", () => {
     expect((failure as CliError).recovery).toContain("XDG_STATE_HOME");
     // Refused before anything was created, so nothing is left to clean up.
     expect(existsSync(join(home, ".local"))).toBe(false);
+  });
+});
+
+/** A claude session file at the store layout discoverSessionId scans: the id
+ * comes from the filename, the cwd from a "cwd" field anywhere in the head. */
+function writeClaudeSession(home: string, sessionId: string, cwd: string): void {
+  const projectDir = join(home, ".claude", "projects", "proj1");
+  mkdirSync(projectDir, { recursive: true });
+  writeFileSync(join(projectDir, `${sessionId}.jsonl`), `${JSON.stringify({ cwd })}\n`);
+}
+
+describe("session discovery", () => {
+  test("S5: the floor is placed_after, not the later created_at stamp", async () => {
+    const home = makeHome();
+    const workspace = join(home, "ws");
+    mkdirSync(workspace, { recursive: true });
+    const sessionId = "22222222-2222-2222-2222-222222222222";
+    writeClaudeSession(home, sessionId, workspace);
+    // The session file's real birth time is "now" — between a placed_after
+    // captured before the backend was ever called and a created_at stamped,
+    // by construction, after it returned: the ordering S5 exists to fix.
+    const run = record("run-1", {
+      workspace: { name: "ws", path: workspace, id: null },
+      placed_after: new Date(Date.now() - 60_000).toISOString(),
+      created_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    expect(await discoverSessionId(run, ENV, home)).toBe(sessionId);
+  });
+
+  test("S5: a record with no placed_after falls back to created_at", async () => {
+    const home = makeHome();
+    const workspace = join(home, "ws");
+    mkdirSync(workspace, { recursive: true });
+    const sessionId = "33333333-3333-3333-3333-333333333333";
+    writeClaudeSession(home, sessionId, workspace);
+    const run = record("run-1", {
+      workspace: { name: "ws", path: workspace, id: null },
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+    });
+    expect(run.placed_after).toBeUndefined();
+    expect(await discoverSessionId(run, ENV, home)).toBe(sessionId);
+  });
+
+  test("S7: the workspace join compares resolved paths, not raw strings", async () => {
+    const home = makeHome();
+    // /tmp is itself a symlink to /private/tmp on macOS — exactly the
+    // canonicalization difference a raw string compare misses.
+    const rawWorkspace = mkdtempSync(join("/tmp", "as-run-ws-"));
+    homes.push(rawWorkspace);
+    const resolvedWorkspace = realpathSync(rawWorkspace);
+    expect(resolvedWorkspace).not.toBe(rawWorkspace);
+    const sessionId = "11111111-1111-1111-1111-111111111111";
+    // The store records the resolved cwd the harness actually saw; the run
+    // record holds the unresolved path the Workspace was created from.
+    writeClaudeSession(home, sessionId, resolvedWorkspace);
+    const run = record("run-1", {
+      workspace: { name: "ws", path: rawWorkspace, id: null },
+      created_at: new Date(0).toISOString(),
+    });
+    expect(await discoverSessionId(run, ENV, home)).toBe(sessionId);
+  });
+});
+
+describe("resolving the calling run", () => {
+  test("S6: the session tier ignores a closed record, and says why in the refusal", async () => {
+    const home = makeHome();
+    await writeRunRecord(
+      ENV,
+      home,
+      record("run-closed", {
+        harness: "claude",
+        session_id: "sess-1",
+        closed_at: new Date().toISOString(),
+        closed_as: "landed",
+      }),
+    );
+    const failure = await resolveCallingRun(ENV, home, "/nowhere", {
+      harness: "claude",
+      sessionId: "sess-1",
+    }).catch((error: unknown) => error as CliError);
+    expect((failure as CliError).code).toBe("not_placed");
+    expect((failure as CliError).message).toContain("run-closed");
+    expect((failure as CliError).message).toContain("closed");
+  });
+
+  test("S6: the session tier ignores an open record of a different harness", async () => {
+    const home = makeHome();
+    await writeRunRecord(ENV, home, record("run-1", { harness: "codex", session_id: "sess-2" }));
+    const failure = await resolveCallingRun(ENV, home, "/nowhere", {
+      harness: "claude",
+      sessionId: "sess-2",
+    }).catch((error: unknown) => error as CliError);
+    expect((failure as CliError).code).toBe("not_placed");
+    expect((failure as CliError).message).toContain("run-1");
+  });
+
+  test("S6: an open record of the caller's own harness still wins on session id", async () => {
+    const home = makeHome();
+    await writeRunRecord(
+      ENV,
+      home,
+      record("run-open", { harness: "claude", session_id: "sess-3" }),
+    );
+    const { record: matched, matched: tier } = await resolveCallingRun(ENV, home, "/nowhere", {
+      harness: "claude",
+      sessionId: "sess-3",
+    });
+    expect(matched.run_id).toBe("run-open");
+    expect(tier).toBe("session");
   });
 });

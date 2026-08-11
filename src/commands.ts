@@ -1006,6 +1006,11 @@ async function finishLaunch(
   // its Run server socket from the run id (ADR 0026), and the socket has to
   // be in the composed command.
   const mintedRunId = surface !== null && !utility ? crypto.randomUUID() : null;
+  // The floor discovery scans a session store against (ADR 0014), captured
+  // now rather than when the record is written: Claude and Pi can write
+  // their session file the moment their terminal starts, which is inside
+  // `backend.place` below — well before the record's own `created_at`.
+  const placedAfter = mintedRunId !== null ? new Date().toISOString() : null;
 
   // A Placement claims an account, creates a Workspace, and starts a terminal
   // in it before the run record that describes all three can be written, so
@@ -1185,6 +1190,7 @@ async function finishLaunch(
         const record: RunRecord = {
           run_id: runId as string,
           created_at: new Date().toISOString(),
+          placed_after: placedAfter,
           kind: surface.kind,
           backend: surface.backend.name,
           harness: spec.harness,

@@ -28,7 +28,17 @@ import type { Provenance } from "./surface.ts";
  */
 export interface RunRecord {
   run_id: string;
+  /** When the record was written — after the backend Placement returned, so
+   * it postdates whatever the harness already did during Attachment. Not the
+   * birth-time floor discovery scans against; that is `placed_after`. */
   created_at: string;
+  /** The lower bound discovery scans a session store against (ADR 0014):
+   * captured before `backend.place` is called at all, since Claude and Pi can
+   * write their session file the moment their terminal starts, and that can
+   * race `created_at`'s later stamp. Absent on records written before this
+   * field existed, which falls back to `created_at` — the best bound those
+   * records have, even though it is the one this field exists to improve on. */
+  placed_after?: string | null;
   kind: "open" | "resume";
   backend: string;
   harness: HarnessName;
@@ -309,6 +319,17 @@ export async function stampClosedRuns(
  * every store carries the cwd (codex session_meta, pi header, claude's
  * in-record field), so the workspace path is the join key. Earliest birth
  * wins: a later run in the same workspace has its own later session.
+ *
+ * The birth-time floor is `placed_after`, not `created_at`: Claude and Pi can
+ * write their session file while a terminal is still being created, which is
+ * before the record — and its `created_at` — can be written at all. A record
+ * from before `placed_after` existed has no better floor than `created_at`,
+ * so that is its fallback.
+ *
+ * Both sides of the workspace join are resolved paths: the store records
+ * whatever cwd the harness actually saw, and a symlinked temp directory or an
+ * `/tmp` vs `/private/tmp` difference between that and the recorded Workspace
+ * path must not read as two different places.
  */
 export async function discoverSessionId(
   record: RunRecord,
@@ -325,7 +346,8 @@ export async function discoverSessionId(
   }
   const store = sessionStore(record.harness, env, home);
   if (!existsSync(store.root)) return null;
-  const placedAt = Date.parse(record.created_at);
+  const placedAt = Date.parse(record.placed_after ?? record.created_at);
+  const workspacePath = resolvedWorkspacePath(record.workspace.path);
   let found: { sessionId: string; bornAt: number } | null = null;
   for (const pattern of store.patternsFor("*")) {
     const glob = new Glob(pattern);
@@ -337,7 +359,8 @@ export async function discoverSessionId(
       if (bornAt === null || bornAt < placedAt) continue;
       if (found !== null && bornAt >= found.bornAt) continue;
       const facts = await sessionFileFacts(record.harness, path);
-      if (facts.cwd !== record.workspace.path || facts.sessionId === null) continue;
+      if (facts.cwd === null || resolvedWorkspacePath(facts.cwd) !== workspacePath) continue;
+      if (facts.sessionId === null) continue;
       found = { sessionId: facts.sessionId, bornAt };
     }
   }
@@ -811,10 +834,16 @@ async function sessionIdFromRunServer(env: Environ, listenUrl: string): Promise<
  * registry already holds both sides of the join.
  *
  * The session id is exact and is tried first — a harness that names its own
- * session leaves no room for doubt. The workspace is the fallback, for pi and
- * for any session placed before its id was discovered, and it carries the
- * ambiguity a workspace always has: two open runs of one harness there resolve
- * to neither, the same refusal a Placement lease exists to make rare.
+ * session leaves no room for doubt — but only against an open record of the
+ * caller's own harness, the same two conditions the workspace tier already
+ * enforces: a session id is per-harness (nothing stops a resumed session
+ * reusing one this registry also holds against a closed or foreign-harness
+ * record), and a closed run's Workspace is already gone, so matching it here
+ * would pass the gate on history rather than presence. The workspace is the
+ * fallback, for pi and for any session placed before its id was discovered,
+ * and it carries the ambiguity a workspace always has: two open runs of one
+ * harness there resolve to neither, the same refusal a Placement lease exists
+ * to make rare.
  */
 export async function resolveCallingRun(
   env: Environ,
@@ -823,9 +852,16 @@ export async function resolveCallingRun(
   caller: { harness: HarnessName; sessionId: string } | null,
 ): Promise<{ record: RunRecord; matched: "session" | "workspace" }> {
   const records = await listRunRecords(env, home);
+  // Newest first, so this is also the most recent record the session id ever
+  // named — kept only to enrich a later refusal, never to match on its own.
+  let staleSessionMatch: RunRecord | null = null;
   if (caller !== null) {
-    const bySession = records.find((record) => record.session_id === caller.sessionId);
-    if (bySession !== undefined) return { record: bySession, matched: "session" };
+    const bySession = records.filter((record) => record.session_id === caller.sessionId);
+    const open = bySession.find(
+      (record) => record.closed_at == null && record.harness === caller.harness,
+    );
+    if (open !== undefined) return { record: open, matched: "session" };
+    staleSessionMatch = bySession[0] ?? null;
   }
   const here = resolvedWorkspacePath(cwd);
   const open = records.filter(
@@ -842,9 +878,17 @@ export async function resolveCallingRun(
       "name one by its run id: agentsurface x-run <run-id>",
     );
   }
+  // "Never placed" and "placed once, not anymore" are different answers —
+  // the session id matched something, just nothing this gate can pass.
+  const history =
+    staleSessionMatch === null
+      ? ""
+      : staleSessionMatch.closed_at != null
+        ? ` — this session id was run:${staleSessionMatch.run_id}, closed ${staleSessionMatch.closed_at}`
+        : ` — this session id was run:${staleSessionMatch.run_id} on ${staleSessionMatch.harness}, not ${caller?.harness}`;
   throw new CliError(
     "not_placed",
-    "this session is not a run placed on a surface",
+    `this session is not a run placed on a surface${history}`,
     "agentsurface x-runs lists the placed runs",
   );
 }
