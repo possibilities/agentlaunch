@@ -3,7 +3,7 @@ import { CliError } from "./errors.ts";
 import type { Narrator } from "./narrate.ts";
 import { shellLine } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
-import { spawnBounded } from "./subprocess.ts";
+import { spawnBounded, whichInEnv } from "./subprocess.ts";
 import type {
   Attachment,
   BackendHealth,
@@ -125,7 +125,8 @@ export const orcaBackend: SurfaceBackend = {
   },
 
   async doctor(env: Environ): Promise<BackendHealth> {
-    if (Bun.which("orca") === null) return { reachable: false, detail: "orca is not on PATH" };
+    if (whichInEnv("orca", env) === null)
+      return { reachable: false, detail: "orca is not on PATH" };
     try {
       const status = await orcaJson(env, null, ["status"]);
       const runtime = objectField(status, "runtime");
@@ -551,7 +552,7 @@ async function runOrca(
   narrator: Narrator | null,
   args: string[],
 ): Promise<OrcaOutcome> {
-  const bin = Bun.which("orca");
+  const bin = whichInEnv("orca", env);
   if (bin === null) {
     throw new CliError(
       "surface_unavailable",

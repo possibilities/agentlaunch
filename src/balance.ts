@@ -3,6 +3,7 @@ import type { HarnessName, LaunchSpec } from "./harness.ts";
 import type { Narrator } from "./narrate.ts";
 import { shellLine } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
+import { whichInEnv } from "./subprocess.ts";
 
 /**
  * Balanced launches compose a swap prefix around the pure launch spec
@@ -222,7 +223,7 @@ async function runBalanceJson(
 ): Promise<Record<string, unknown>> {
   narrator.detail("balance", shellLine(argv));
   const [bin, ...rest] = argv as [string, ...string[]];
-  const resolved = Bun.which(bin);
+  const resolved = whichInEnv(bin, env);
   if (resolved === null) {
     throw new CliError(
       "balance_unavailable",

@@ -192,7 +192,7 @@ async function main(argv: string[]): Promise<number> {
 
   try {
     const outcome = await run(context, parts);
-    if (outcome.kind === "launch") return await launch(outcome.spec, context.narrator);
+    if (outcome.kind === "launch") return await launch(outcome.spec, context.narrator, context.env);
     emit(outcome, json);
     return 0;
   } catch (error) {

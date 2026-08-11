@@ -16,6 +16,7 @@ import type { HarnessName } from "./harness.ts";
 import { sessionFileFacts, sessionStore } from "./harness.ts";
 import type { Environ } from "./paths.ts";
 import { stateDirectory } from "./paths.ts";
+import { whichInEnv } from "./subprocess.ts";
 import type { Provenance } from "./surface.ts";
 
 /**
@@ -803,7 +804,7 @@ export function runServerListenUrl(env: Environ, home: string, runId: string): s
  * one the record claims, which is a reason to refuse, never to guess.
  */
 async function sessionIdFromRunServer(env: Environ, listenUrl: string): Promise<string | null> {
-  const swap = Bun.which("codex-swap");
+  const swap = whichInEnv("codex-swap", env);
   if (swap === null) return null;
   try {
     const child = Bun.spawn([swap, "app-server", "threads", "--listen", listenUrl, "--json"], {

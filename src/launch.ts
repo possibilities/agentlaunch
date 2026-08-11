@@ -1,6 +1,8 @@
 import { CliError } from "./errors.ts";
 import type { LaunchSpec } from "./harness.ts";
 import type { Narrator } from "./narrate.ts";
+import type { Environ } from "./paths.ts";
+import { whichInEnv } from "./subprocess.ts";
 
 /** Exit the way a shell reports a fatal signal, so scripts around the
  * wrapper cannot tell it from the harness itself. */
@@ -11,10 +13,14 @@ const SIGNAL_EXIT: Record<string, number> = {
   SIGTERM: 143,
 };
 
-export async function launch(spec: LaunchSpec, narrator: Narrator): Promise<number> {
+export async function launch(
+  spec: LaunchSpec,
+  narrator: Narrator,
+  env: Environ = process.env,
+): Promise<number> {
   const [bin, ...rest] = spec.command;
   if (bin === undefined) throw new CliError("empty_command", "launch spec has no command");
-  const resolved = Bun.which(bin);
+  const resolved = whichInEnv(bin, env);
   if (resolved === null) {
     throw new CliError(
       "harness_not_installed",
@@ -30,7 +36,7 @@ export async function launch(spec: LaunchSpec, narrator: Narrator): Promise<numb
     stderr: "inherit",
     // The sentinel marks every descendant as already-routed: PATH shims
     // exec the real harness instead of re-entering agentsurface (ADR 0004).
-    env: { ...process.env, AGENTSURFACE_LAUNCH: "1" },
+    env: { ...env, AGENTSURFACE_LAUNCH: "1" },
   });
   // The terminal delivers Ctrl-C to the whole foreground group; swallowing
   // our copy keeps the wrapper alive so the harness decides what an

@@ -13,6 +13,18 @@ import { CliError } from "./errors.ts";
 
 const MAX_STDERR_CHARS = 4000;
 
+/**
+ * Resolves an executable against the supplied env's own PATH (S14), not the
+ * parent process's — every spawn site here hands a child a caller-supplied
+ * env, so lookup must agree with what that child will actually see. Falls
+ * back to `Bun.which`'s default (parent PATH) only when the env carries no
+ * PATH at all, matching Bun.spawn's own fallback for an env without one.
+ */
+export function whichInEnv(name: string, env: Record<string, string | undefined>): string | null {
+  const path = env["PATH"];
+  return path === undefined ? Bun.which(name) : Bun.which(name, { PATH: path });
+}
+
 export interface BoundedSpawnOptions {
   cmd: string[];
   cwd?: string;

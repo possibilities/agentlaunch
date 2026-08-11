@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { CliError } from "../src/errors.ts";
-import { spawnBounded } from "../src/subprocess.ts";
+import { spawnBounded, whichInEnv } from "../src/subprocess.ts";
 
 describe("spawnBounded", () => {
   test("returns the child's code, stdout, and stderr on ordinary exit", async () => {
@@ -47,5 +50,25 @@ describe("spawnBounded", () => {
       label: "test large stderr",
     });
     expect(result.stderr.length).toBeLessThanOrEqual(4000);
+  });
+});
+
+describe("whichInEnv", () => {
+  test("resolves against the supplied env's PATH, not the parent process's", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentsurface-which-"));
+    const bin = join(dir, "only-in-this-env");
+    writeFileSync(bin, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    expect(whichInEnv("only-in-this-env", { PATH: dir })).toBe(bin);
+    // Not on the real parent PATH, so a bare Bun.which would miss it — the
+    // point of the helper is that the child sees this env, not ours.
+    expect(Bun.which("only-in-this-env")).toBeNull();
+  });
+
+  test("an env whose PATH omits the binary reports it missing, even if the parent PATH has it", () => {
+    expect(whichInEnv("bash", { PATH: "/nonexistent-agentsurface-test-dir" })).toBeNull();
+  });
+
+  test("an env with no PATH key falls back to the parent process's PATH", () => {
+    expect(whichInEnv("bash", {})).toBe(Bun.which("bash"));
   });
 });

@@ -53,6 +53,7 @@ import {
   stampClosedRuns,
   writeRunRecord,
 } from "./runs.ts";
+import { whichInEnv } from "./subprocess.ts";
 import type { Provenance, SurfaceBackend, WorkspaceIntent } from "./surface.ts";
 import { BACKENDS, DEFAULT_BACKEND, surfaceBackend } from "./surface.ts";
 
@@ -554,7 +555,7 @@ export async function doctorCommand(context: Context, parts: Partitioned): Promi
   const lines: string[] = [];
   for (const harness of HARNESS_NAMES) {
     const store = sessionStore(harness, context.env, context.home);
-    const bin = Bun.which(harness);
+    const bin = whichInEnv(harness, context.env);
     const exists = existsSync(store.root);
     const sessions = await countSessions(store);
     reports.push({
