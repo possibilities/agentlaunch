@@ -202,7 +202,7 @@ describe("model and effort spellings", () => {
     expect(effortDimensionToken("claude", ["--thinking", "high"])).toBeNull();
   });
 
-  test("effort-dimension detection covers every supported codex spelling", () => {
+  test("effort-dimension detection covers split, inline, and attached codex spellings", () => {
     // split form: `-c value` / `--config value`
     expect(effortDimensionToken("codex", ["-c", "model_reasoning_effort=high"])).toBe(
       "-c model_reasoning_effort=high",
@@ -217,9 +217,16 @@ describe("model and effort spellings", () => {
     expect(effortDimensionToken("codex", ["--config=model_reasoning_effort=high"])).toBe(
       "--config=model_reasoning_effort=high",
     );
-    // inline form with an unrelated key does not match
+    // attached short form: `-cvalue`, which codex's parser accepts with no
+    // separator at all — verified against `codex -cmodel_reasoning_effort=high
+    // features`, which parses exactly as `codex features` does.
+    expect(effortDimensionToken("codex", ["-cmodel_reasoning_effort=high"])).toBe(
+      "-cmodel_reasoning_effort=high",
+    );
+    // unrelated keys do not match in any of the three spellings
     expect(effortDimensionToken("codex", ["-c=other=1"])).toBeNull();
     expect(effortDimensionToken("codex", ["--config=other=1"])).toBeNull();
+    expect(effortDimensionToken("codex", ["-cother=1"])).toBeNull();
   });
 });
 

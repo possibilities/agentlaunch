@@ -196,6 +196,18 @@ export function effortDimensionToken(
       ) {
         return token;
       }
+      // The attached short form: codex's clap parser takes `-cKEY=VAL` with no
+      // separator at all, and it reaches the config exactly as the split form
+      // does — so a conflict spelled this way has to be seen here, or the
+      // refusal is bypassable by typing one fewer space.
+      if (
+        token.startsWith("-c") &&
+        token.length > 2 &&
+        token[2] !== "=" &&
+        token.slice(2).startsWith("model_reasoning_effort=")
+      ) {
+        return token;
+      }
     }
   }
   return null;
