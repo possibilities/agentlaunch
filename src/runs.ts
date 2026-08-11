@@ -295,6 +295,9 @@ export function resolvedWorkspacePath(path: string): string {
  */
 export function runServerListenUrl(env: Environ, home: string, runId: string): string {
   const directory = join(stateDirectory(env, home, "agentsurface"), "servers");
+  // The server binding this socket is codex-swap's, which treats the listen
+  // path as caller-owned — so the caller's directory has to exist.
+  mkdirSync(directory, { recursive: true });
   const full = join(directory, `${runId}.sock`);
   if (Buffer.byteLength(full) <= 100) return `unix://${full}`;
   const short = createHash("sha256").update(runId).digest("hex").slice(0, 12);
