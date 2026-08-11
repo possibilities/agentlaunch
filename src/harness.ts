@@ -155,15 +155,42 @@ export function nameDimensionToken(harness: HarnessName, tokens: readonly string
 }
 
 /** The first forwarded token that natively claims the model dimension —
- * `--model`, `--model=…`, codex's `-m` — or null. Read for conflict and
- * yield decisions; the tokens themselves are never edited. */
+ * `--model`, `--model=…`, codex's `-m` in its split, inline, and attached
+ * shapes, and codex's `model=` config spelling through `-c`/`--config` —
+ * or null. Read for conflict and yield decisions; the tokens themselves are
+ * never edited. */
 export function modelDimensionToken(
   harness: HarnessName,
   tokens: readonly string[],
 ): string | null {
-  for (const token of tokens) {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
     if (token === "--model" || token.startsWith("--model=")) return token;
-    if (harness === "codex" && (token === "-m" || token.startsWith("-m="))) return token;
+    if (harness !== "codex") continue;
+    if (token === "-m" || token.startsWith("-m=")) return token;
+    // The attached short form: clap takes `-mgpt-x` with no separator, and it
+    // reaches the model exactly as `-m gpt-x` does — the same one-fewer-space
+    // bypass the effort detection below already refuses.
+    if (token.startsWith("-m") && token.length > 2) return token;
+    // The config spelling: `model=` through -c/--config sets this dimension
+    // just as the -m flag does, in any of clap's three shapes.
+    if ((token === "-c" || token === "--config") && tokens[i + 1]?.startsWith("model=")) {
+      return `${token} ${tokens[i + 1]}`;
+    }
+    if (
+      (token.startsWith("-c=") || token.startsWith("--config=")) &&
+      token.slice(token.indexOf("=") + 1).startsWith("model=")
+    ) {
+      return token;
+    }
+    if (
+      token.startsWith("-c") &&
+      token.length > 2 &&
+      token[2] !== "=" &&
+      token.slice(2).startsWith("model=")
+    ) {
+      return token;
+    }
   }
   return null;
 }

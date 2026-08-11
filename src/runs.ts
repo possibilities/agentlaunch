@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   readdirSync,
   realpathSync,
@@ -49,9 +50,10 @@ export interface RunRecord {
    * hold a whole `--x-harness` union value here. Read, never written: a run
    * record outlives the workspace, so the old ones stay readable. */
   harness_value?: string | null;
-  /** The operator's own label for this run (`--x-name`), free text and never
-   * unique — a handle to read back, not an identity. Absent on records
-   * written before run names existed, which reads the same as unnamed. */
+  /** The operator's own label for this run (`--x-name`), free text — a
+   * handle to read back, not an identity — and unique among open runs
+   * (ADR 0019). Absent on records written before run names existed, which
+   * reads the same as unnamed. */
   name?: string | null;
   workspace: { name: string; path: string; id: string | null };
   /** Backend-issued terminal handle — an address for steering, not the
@@ -155,20 +157,59 @@ async function writeJsonAtomically(
   return path;
 }
 
+/** The identity a reaper judged, carried to the reap so it can refuse to
+ * touch anything newer than what it examined. */
+interface JudgedFile {
+  ino: number;
+  mtimeMs: number;
+}
+
+function statOrNull(path: string): JudgedFile | null {
+  try {
+    const stats = statSync(path);
+    return { ino: stats.ino, mtimeMs: stats.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Single-winner removal of a file two processes may both have judged dead.
  * Rename is atomic and consumes its source, so exactly one caller can move a
  * given file aside; every other caller's rename finds nothing and it learns it
- * did not win. The winner deletes the tomb it now exclusively owns. Unlinking
- * in place cannot do this: two callers can both unlink successfully (the
- * second removing a file the first already replaced) and both believe they
- * cleared the way.
+ * did not win. Unlinking in place cannot do this: two callers can both unlink
+ * successfully (the second removing a file the first already replaced) and
+ * both believe they cleared the way.
+ *
+ * The rename alone is not enough, though: it moves whatever occupies the path
+ * *now*, which is not necessarily the file that was judged dead — a winner's
+ * fresh claim can land in the gap between the judgment and this rename. So the
+ * tomb is checked against the judged identity, and a live file taken by
+ * mistake is put straight back; link cannot overwrite, so a third claimant
+ * that slipped in meanwhile keeps its win, and the displaced claim's owner is
+ * caught by the commit-time holder check instead.
  */
-function reapExclusively(path: string): boolean {
+function reapExclusively(path: string, judged: JudgedFile): boolean {
   const tomb = `${path}.${process.pid}.${writeSequence++}.reaped`;
   try {
     renameSync(path, tomb);
   } catch {
+    return false;
+  }
+  const entombed = statOrNull(tomb);
+  if (entombed === null) return false;
+  if (entombed.ino !== judged.ino || entombed.mtimeMs !== judged.mtimeMs) {
+    try {
+      linkSync(tomb, path);
+    } catch {
+      // The path is occupied again: a newer claimant already holds it, and
+      // the displaced claim's owner learns at commit rather than winning here.
+    }
+    try {
+      unlinkSync(tomb);
+    } catch {
+      // Litter, not a race: nothing else knows the tomb's name.
+    }
     return false;
   }
   try {
@@ -218,14 +259,6 @@ async function claimLockFile(path: string, token: string): Promise<boolean> {
   }
 }
 
-function olderThan(path: string, ms: number): boolean {
-  try {
-    return Date.now() - statSync(path).mtimeMs > ms;
-  } catch {
-    return true;
-  }
-}
-
 /**
  * Serialize every read-modify-write of one run's record, across processes.
  * Atomic writes made a torn read impossible; they cannot make a lost update
@@ -255,7 +288,10 @@ export async function withRunRecordLock<T>(
   const deadline = Date.now() + RUN_LOCK_TIMEOUT_MS;
   for (;;) {
     if (await claimLockFile(path, token)) break;
-    if (olderThan(path, RUN_LOCK_STALE_MS)) reapExclusively(path);
+    const judged = statOrNull(path);
+    if (judged !== null && Date.now() - judged.mtimeMs > RUN_LOCK_STALE_MS) {
+      reapExclusively(path, judged);
+    }
     if (Date.now() >= deadline) {
       throw new CliError(
         "run_record_locked",
@@ -421,12 +457,13 @@ export async function listRunRecords(env: Environ, home: string): Promise<RunRec
 }
 
 /**
- * Runs carrying a name, newest first. Nothing enforces uniqueness — a name
- * is a label, so two runs may share one — which is why this returns every
- * match and lets the caller refuse rather than guess. Closed runs are
- * reported apart: their workspace is gone, so a reference almost never means
- * them, but hiding them entirely would turn "already closed" into "never
- * existed".
+ * Runs carrying a name, newest first. A name is unique among *open* runs
+ * (ADR 0019), but closed runs keep theirs and records predate the
+ * reservation, so several matches remain possible — which is why this
+ * returns every match and lets the caller refuse rather than guess. Closed
+ * runs are reported apart: their workspace is gone, so a reference almost
+ * never means them, but hiding them entirely would turn "already closed"
+ * into "never existed".
  */
 export async function findRunsByName(
   env: Environ,
@@ -690,10 +727,6 @@ async function readReservation(path: string): Promise<NameReservation | null> {
   }
 }
 
-function olderThanReapBound(path: string): boolean {
-  return olderThan(path, RESERVATION_REAP_MS);
-}
-
 /** Exclusive create is the whole mechanism: the filesystem picks the winner. */
 async function claimReservation(path: string, body: string): Promise<boolean> {
   try {
@@ -715,30 +748,55 @@ async function claimReservation(path: string, body: string): Promise<boolean> {
   }
 }
 
-async function reservationHolds(
+type ReservationJudgment =
+  | { kind: "taken"; refusal: CliError }
+  | { kind: "reapable"; judged: JudgedFile }
+  | { kind: "vanished" };
+
+/**
+ * What the file at the path is: held, reapable, or gone. The judgment carries
+ * the identity of the very file it examined, so the reap that follows can
+ * refuse to touch anything newer — and a file that changes identity while
+ * being judged reads as taken, because only a fresh claim changes it.
+ */
+async function judgeReservation(
   env: Environ,
   home: string,
   path: string,
   name: string,
-): Promise<CliError | null> {
+): Promise<ReservationJudgment> {
+  const judged = statOrNull(path);
+  if (judged === null) return { kind: "vanished" };
+  const stale = Date.now() - judged.mtimeMs > RESERVATION_REAP_MS;
   const holder = await readReservation(path);
+  const after = statOrNull(path);
+  if (after === null) return { kind: "vanished" };
+  if (after.ino !== judged.ino || after.mtimeMs !== judged.mtimeMs) {
+    return { kind: "taken", refusal: nameTaken(name, `another Placement took "${name}" first`) };
+  }
   if (holder === null) {
     // A reservation created but not written: a crash inside the claim itself.
-    return olderThanReapBound(path)
-      ? null
-      : nameTaken(name, `a Placement in progress reserved "${name}"`);
+    return stale
+      ? { kind: "reapable", judged }
+      : { kind: "taken", refusal: nameTaken(name, `a Placement in progress reserved "${name}"`) };
   }
   const records = await listRunRecords(env, home);
   const record = records.find((candidate) => candidate.run_id === holder.run_id);
   if (record === undefined) {
-    return olderThanReapBound(path)
-      ? null
-      : nameTaken(name, `a Placement in progress reserved "${name}" (${holder.run_id})`);
+    return stale
+      ? { kind: "reapable", judged }
+      : {
+          kind: "taken",
+          refusal: nameTaken(name, `a Placement in progress reserved "${name}" (${holder.run_id})`),
+        };
   }
   // A closed run's name is free again (ADR 0019); the reservation outlived its
   // release, which is compensation this reap finishes.
-  if (record.closed_at != null) return null;
-  return nameTaken(name, `an open run already answers to "${name}" (${holder.run_id})`);
+  if (record.closed_at != null) return { kind: "reapable", judged };
+  return {
+    kind: "taken",
+    refusal: nameTaken(name, `an open run already answers to "${name}" (${holder.run_id})`),
+  };
 }
 
 /**
@@ -758,17 +816,43 @@ export async function reserveRunName(
   const path = reservationPath(env, home, name);
   mkdirSync(namesDirectory(env, home), { recursive: true });
   const body = `${JSON.stringify({ name, run_id: runId, created_at: new Date().toISOString() } satisfies NameReservation)}\n`;
-  if (await claimReservation(path, body)) return;
-  const refusal = await reservationHolds(env, home, path, name);
-  if (refusal !== null) throw refusal;
-  // Two Placements can both judge the same reservation stale. Only the one
-  // whose rename consumed it may go on to claim: unlinking in place would let
-  // both proceed, and the second could unlink the reservation the first had
-  // already re-created — two live runs, one name, which is the whole thing
-  // this reservation exists to prevent.
-  if (!reapExclusively(path)) throw nameTaken(name, `another Placement took "${name}" first`);
-  if (await claimReservation(path, body)) return;
+  // Bounded, not unbounded: each pass either wins the exclusive create, is
+  // refused, or watched the file vanish mid-judgment — and a name changing
+  // hands that fast is a refusal, not a reason to wait longer.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (await claimReservation(path, body)) return;
+    const judgment = await judgeReservation(env, home, path, name);
+    if (judgment.kind === "taken") throw judgment.refusal;
+    if (judgment.kind === "vanished") continue;
+    // Two Placements can both judge the same reservation stale. Only the one
+    // whose rename consumed the judged file may go on to claim: the reap
+    // verifies what it moved and restores anything fresher, so the loser
+    // learns it lost instead of overwriting the winner.
+    if (!reapExclusively(path, judgment.judged)) {
+      throw nameTaken(name, `another Placement took "${name}" first`);
+    }
+    if (await claimReservation(path, body)) return;
+    throw nameTaken(name, `another Placement took "${name}" first`);
+  }
   throw nameTaken(name, `another Placement took "${name}" first`);
+}
+
+/**
+ * The reservation is load-bearing until the record exists, and the reap path —
+ * however careful — acts on files, not intentions. So the commit re-reads the
+ * reservation and requires it to still name this run: whatever interleaving
+ * happened on the way here, at most one Placement can find its own run id in
+ * the file and go on to publish the open record.
+ */
+export async function assertReservationHeld(
+  env: Environ,
+  home: string,
+  name: string,
+  runId: string,
+): Promise<void> {
+  const holder = await readReservation(reservationPath(env, home, name));
+  if (holder !== null && holder.run_id === runId) return;
+  throw nameTaken(name, `another Placement took "${name}" while this one was placing`);
 }
 
 /** Compensation, called on a failed Placement and on close: only the run that
@@ -948,8 +1032,10 @@ function placementLeftSomething(journal: PlacementJournal): boolean {
  * released. This is the only automatic end a journal has other than its own
  * Placement committing: nothing else ever removes one, so every other
  * interrupted Placement stays listed until an operator finishes the
- * compensation and deletes the file `x-runs` names. The name reservation goes
- * with it — that is the one piece of compensation which is always safe.
+ * compensation and deletes the file `x-runs` names. A reaped journal's name
+ * reservation goes with it — safe for a Placement that is over, which is why
+ * one still in flight is left entirely alone: releasing a live Placement's
+ * name would hand its routing handle to the next taker mid-placement.
  */
 async function reapPlacementJournals(
   env: Environ,
@@ -971,6 +1057,14 @@ async function reapPlacementJournals(
     const journalled = journal?.workspace?.path;
     if (typeof journalled !== "string") continue;
     if (resolvedWorkspacePath(journalled) !== released) continue;
+    // Neither stamped failed nor past the bound means a Placement still in
+    // flight in another process. Its workspace just went away under it, so its
+    // own failure path will stamp and compensate it — journal and reservation
+    // both stay its property until then.
+    const inFlight =
+      journal.failed_at == null &&
+      Date.now() - Date.parse(journal.updated_at ?? journal.started_at) <= PLACEMENT_STALE_MS;
+    if (inFlight) continue;
     if (typeof journal.name === "string" && typeof journal.run_id === "string") {
       await releaseRunName(env, home, journal.name, journal.run_id);
     }

@@ -38,6 +38,7 @@ import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
 import type { PlacementJournal, RunRecord } from "./runs.ts";
 import {
+  assertReservationHeld,
   assertRunNameAvailable,
   interruptedPlacements,
   listRunRecords,
@@ -393,6 +394,9 @@ function modelFromArgs(args: string[]): string | undefined {
     const arg = args[i]!;
     if (arg === "--model" || arg === "-m") return args[i + 1];
     if (arg.startsWith("--model=")) return arg.slice("--model=".length);
+    if (arg.startsWith("-m=")) return arg.slice("-m=".length);
+    // codex's attached short form; no other harness forwards -m tokens.
+    if (arg.startsWith("-m") && arg.length > 2) return arg.slice(2);
   }
   return undefined;
 }
@@ -1244,6 +1248,13 @@ async function finishLaunch(
           server: composedServer === null ? null : { socket: composedServer },
           from: provenance.kind === "none" ? null : provenance,
         };
+        // The reservation must still name this run at the moment the record
+        // is published: the reap path acts on files, not intentions, so this
+        // is the check that makes "at most one open run per name" hold
+        // whatever interleaving happened while the backend was working.
+        if (surface.name !== null) {
+          await assertReservationHeld(context.env, context.home, surface.name, runId as string);
+        }
         const recordPath = await writeRunRecord(context.env, context.home, record);
         // The open record is the commit: it is published only once every
         // resource it describes exists, and it is what the journal becomes.

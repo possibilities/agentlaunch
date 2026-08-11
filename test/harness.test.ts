@@ -179,10 +179,21 @@ describe("model and effort spellings", () => {
     expect(effortArguments("pi", "max")).toEqual(["--thinking", "max"]);
   });
 
-  test("model-dimension detection sees --model, --model=, and codex -m", () => {
+  test("model-dimension detection sees --model, --model=, and every codex -m and config shape", () => {
     expect(modelDimensionToken("claude", ["-p", "hi", "--model", "opus"])).toBe("--model");
     expect(modelDimensionToken("claude", ["--model=opus"])).toBe("--model=opus");
     expect(modelDimensionToken("codex", ["-m", "gpt-x"])).toBe("-m");
+    expect(modelDimensionToken("codex", ["-m=gpt-x"])).toBe("-m=gpt-x");
+    // clap's attached short form: one fewer space must not bypass the refusal.
+    expect(modelDimensionToken("codex", ["-mgpt-x"])).toBe("-mgpt-x");
+    // The config spelling sets the same dimension, in all three clap shapes.
+    expect(modelDimensionToken("codex", ["-c", "model=gpt-x"])).toBe("-c model=gpt-x");
+    expect(modelDimensionToken("codex", ["--config", "model=gpt-x"])).toBe("--config model=gpt-x");
+    expect(modelDimensionToken("codex", ["-c=model=gpt-x"])).toBe("-c=model=gpt-x");
+    expect(modelDimensionToken("codex", ["-cmodel=gpt-x"])).toBe("-cmodel=gpt-x");
+    // Other config keys are not the model dimension.
+    expect(modelDimensionToken("codex", ["-c", "model_provider=oss"])).toBeNull();
+    expect(modelDimensionToken("codex", ["-cmodel_reasoning_effort=high"])).toBeNull();
     expect(modelDimensionToken("claude", ["-m", "gpt-x"])).toBeNull();
     expect(modelDimensionToken("pi", ["hello"])).toBeNull();
   });

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { CliError } from "../src/errors.ts";
 import type { RunRecord } from "../src/runs.ts";
 import {
+  assertReservationHeld,
   discoverSessionId,
   interruptedPlacements,
   listRunRecords,
@@ -273,28 +274,50 @@ describe("run name reservations", () => {
     await reserveRunName(ENV, home, "auth-flow", "run-2");
   });
 
-  test("two Placements reaping one stale reservation produce a single holder", async () => {
+  test("concurrent Placements reaping one stale reservation produce a single holder", async () => {
+    // The theft this guards against needs a precise interleaving — a loser's
+    // rename landing between the winner's reap and its fresh claim — so the
+    // race is run repeatedly, and once with three contenders: any round with
+    // two fulfilled claims (or none) is the bug.
+    for (let round = 0; round < 8; round++) {
+      const home = makeHome();
+      await reserveRunName(ENV, home, "auth-flow", "run-1");
+      backdate(home, 11 * 60_000);
+      const contenders = round < 4 ? ["run-2", "run-3"] : ["run-2", "run-3", "run-4"];
+      const outcomes = await Promise.allSettled(
+        contenders.map((runId) => reserveRunName(ENV, home, "auth-flow", runId)),
+      );
+      const won = outcomes.filter((outcome) => outcome.status === "fulfilled");
+      expect(won).toHaveLength(1);
+      for (const outcome of outcomes) {
+        if (outcome.status === "rejected") {
+          expect((outcome.reason as CliError).code).toBe("run_name_taken");
+        }
+      }
+      expect(namesEntries(home)).toHaveLength(1);
+      const holder = JSON.parse(
+        readFileSync(join(runsDirectory(ENV, home), ".names", namesEntries(home)[0]!), "utf8"),
+      ) as { run_id: string };
+      expect(contenders).toContain(holder.run_id);
+    }
+  });
+
+  test("the commit check refuses a run whose reservation changed hands", async () => {
     const home = makeHome();
     await reserveRunName(ENV, home, "auth-flow", "run-1");
-    backdate(home, 11 * 60_000);
-    // Both judge the same orphan stale; only the one whose rename consumed it
-    // may claim, so the other is refused rather than overwriting the winner.
-    const outcomes = await Promise.allSettled([
-      reserveRunName(ENV, home, "auth-flow", "run-2"),
-      reserveRunName(ENV, home, "auth-flow", "run-3"),
-    ]);
-    const won = outcomes.filter((outcome) => outcome.status === "fulfilled");
-    expect(won).toHaveLength(1);
-    for (const outcome of outcomes) {
-      if (outcome.status === "rejected") {
-        expect((outcome.reason as CliError).code).toBe("run_name_taken");
-      }
-    }
-    expect(namesEntries(home)).toHaveLength(1);
-    const holder = JSON.parse(
-      readFileSync(join(runsDirectory(ENV, home), ".names", namesEntries(home)[0]!), "utf8"),
-    ) as { run_id: string };
-    expect(["run-2", "run-3"]).toContain(holder.run_id);
+    await assertReservationHeld(ENV, home, "auth-flow", "run-1");
+    // The extreme interleaving the reap's restore cannot undo — a third
+    // claimant occupying the path — ends with the file naming someone else;
+    // the commit is where the displaced Placement finds out.
+    const path = join(runsDirectory(ENV, home), ".names", namesEntries(home)[0]!);
+    writeFileSync(
+      path,
+      `${JSON.stringify({ name: "auth-flow", run_id: "run-9", created_at: new Date().toISOString() })}\n`,
+    );
+    const failure = await assertReservationHeld(ENV, home, "auth-flow", "run-1").catch(
+      (error: unknown) => error as CliError,
+    );
+    expect((failure as CliError).code).toBe("run_name_taken");
   });
 
   /** Reservations age by mtime, so a bound is testable without waiting one. */
@@ -359,6 +382,24 @@ describe("placement journals", () => {
     expect(existsSync(placementJournalPath(ENV, home, "run-1"))).toBe(false);
     expect(namesEntries(home)).toHaveLength(0);
     expect(await interruptedPlacements(ENV, home)).toHaveLength(0);
+  });
+
+  test("landing under a Placement still in flight leaves its journal and name alone", async () => {
+    const home = makeHome();
+    await reserveRunName(ENV, home, "auth-flow", "run-1");
+    const journal = openPlacementJournal(ENV, home, {
+      run_id: "run-1",
+      backend: "orca",
+      harness: "claude",
+      name: "auth-flow",
+    });
+    await journal.record("workspace-created", { workspace: { path: WS.path, created: true } });
+    // No interrupt and no staleness: this Placement is live in another
+    // process. Releasing its name here would hand its handle to the next
+    // taker mid-placement; its own failure path does the compensating.
+    await stampClosedRuns(ENV, home, WS.path, "abandoned");
+    expect(existsSync(placementJournalPath(ENV, home, "run-1"))).toBe(true);
+    expect(namesEntries(home)).toHaveLength(1);
   });
 
   test("landing one workspace leaves another workspace's journal alone", async () => {

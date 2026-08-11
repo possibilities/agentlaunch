@@ -215,6 +215,29 @@ describe("surface", () => {
       "--x-dry-run",
     ]);
     expect(codex.code).toBe(2);
+    // The attached short forms reach codex exactly as the split ones do, so
+    // one fewer space must not slip past either dimension's refusal.
+    const attachedModel = run([
+      "--x-harness",
+      "codex",
+      "--x-level",
+      "gpt-5.5:high",
+      "-mgpt-5.4",
+      "--x-dry-run",
+    ]);
+    expect(attachedModel.code).toBe(2);
+    expect(attachedModel.stderr).toContain("set the model");
+    const configModel = run([
+      "--x-harness",
+      "codex",
+      "--x-level",
+      "gpt-5.5:high",
+      "-c",
+      "model=gpt-5.4",
+      "--x-dry-run",
+    ]);
+    expect(configModel.code).toBe(2);
+    expect(configModel.stderr).toContain("set the model");
   });
 
   test("utility invocations get no injection, and a level refuses them", () => {
