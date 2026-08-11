@@ -212,7 +212,8 @@ source of truth (`bun run generate:schemas`).
 ## Yolo mode
 
 Yolo is on by default (ADR 0009): every launch gets its harness's own
-permission-bypass flag — `--dangerously-skip-permissions` (claude),
+unattended permission setting — `--permission-mode auto` (claude, whose auto
+mode classifies each action rather than waving all of them through, ADR 0028),
 `--dangerously-bypass-approvals-and-sandbox` (codex), `--approve` (pi, whose
 tools never prompt, so this only auto-trusts project-local files).
 `~/.config/agentsurface/config.json` disables it with `{"yolo": false}` or a
@@ -222,8 +223,9 @@ scope (`--x-no-yolo codex`) that only bites when the launch matches.
 
 An explicit `--x-no-yolo` also *removes* a yolo spelling that was explicitly
 forwarded, and narrates the removal. A spelling the caller already forwarded is
-never duplicated (pi's `-a` alias included), pi's own `--no-approve` is never
-overridden, and utility invocations never get the flag. A malformed config
+never duplicated (pi's `-a` alias and claude's `--dangerously-skip-permissions`
+included), pi's own `--no-approve` and any other `--permission-mode` the caller
+chose are never overridden, and utility invocations never get the flag. A malformed config
 fails the launch loudly; `x-doctor` reports the config's path, validity, and
 per-harness state. `config.schema.json` describes the file for editors — name
 it in a `"$schema"` key, which the loader accepts and ignores — and is
@@ -274,15 +276,15 @@ before the harness takes the terminal:
 
     open    claude
     cwd     ~/code/agentsurface
-    yolo    on · --dangerously-skip-permissions
+    yolo    on · --permission-mode auto
     account claude-swap slot 1 · full-focus
-    launch  cswap run 1 --share-history -- claude --dangerously-skip-permissions
+    launch  cswap run 1 --share-history -- claude --permission-mode auto
 
 stdout stays the result, so `--x-dry-run` remains a runnable line and
 `--x-json` a parseable envelope — and `--x-json` silences the rows outright,
 since the envelope already carries every fact they would report (ADR 0007).
 When an x-flag edits the harness's own tokens, the edit is a row too: `yolo
-off · removed --dangerously-skip-permissions · explicitly forwarded ·
+off · removed --permission-mode auto · explicitly forwarded ·
 --x-no-yolo wins`. `--x-verbose` adds mechanism rows: the config consulted, the
 `agentusage` command shelled, the session file a resume matched, the resolved
 binary, and the sentinel.

@@ -249,16 +249,20 @@ export interface LaunchSpec {
 }
 
 /**
- * Every spelling each harness accepts for its own permission bypass; the
- * first is canonical and is what injection emits. Pi has no gates on tools
- * at all — `--approve` (and its `-a` short) only auto-trusts project-local
- * files. Verified against claude 2.1.x, codex-cli 0.147.0, pi 0.84.1;
- * re-check on harness upgrades.
+ * Every spelling each harness accepts for the unattended end of its own
+ * permission gates; the first is canonical and is what injection emits. A
+ * spelling is a token sequence because claude's is a flag with a value
+ * (ADR 0028): `--permission-mode auto` runs its classifier instead of
+ * dropping the gates outright, so the canonical injection is the softer
+ * setting and `--dangerously-skip-permissions` is only recognized, never
+ * emitted. Pi has no gates on tools at all — `--approve` (and its `-a`
+ * short) only auto-trusts project-local files. Verified against claude
+ * 2.1.227, codex-cli 0.147.0, pi 0.84.1; re-check on harness upgrades.
  */
-export const YOLO_SPELLINGS: Record<HarnessName, readonly string[]> = {
-  claude: ["--dangerously-skip-permissions"],
-  codex: ["--dangerously-bypass-approvals-and-sandbox"],
-  pi: ["--approve", "-a"],
+export const YOLO_SPELLINGS: Record<HarnessName, readonly (readonly string[])[]> = {
+  claude: [["--permission-mode", "auto"], ["--dangerously-skip-permissions"]],
+  codex: [["--dangerously-bypass-approvals-and-sandbox"]],
+  pi: [["--approve"], ["-a"]],
 };
 
 /** A harness's own negative spelling. A caller who typed it has decided, so
@@ -268,6 +272,55 @@ const NATIVE_NO_YOLO: Record<HarnessName, readonly string[]> = {
   codex: [],
   pi: ["--no-approve", "-na"],
 };
+
+/** A flag whose *value* settles the gates, so typing it at all is the
+ * caller's decision however it is set: any value but the canonical one is a
+ * negative. Only claude has one. */
+const GATE_FLAG: Record<HarnessName, string | null> = {
+  claude: "--permission-mode",
+  codex: null,
+  pi: null,
+};
+
+interface GateMatch {
+  /** Where it sits in the stream, and how many tokens it occupies. */
+  at: number;
+  span: number;
+  /** The spelling as the caller wrote it, for narration and redactions. */
+  display: string;
+  negative: boolean;
+}
+
+/** The first gate spelling in a forwarded stream, however it is written:
+ * a bare flag, a `--flag value` pair, or a `--flag=value` single token. */
+function findGate(harness: HarnessName, tokens: readonly string[]): GateMatch | null {
+  const spellings = YOLO_SPELLINGS[harness];
+  const negatives = NATIVE_NO_YOLO[harness];
+  const gateFlag = GATE_FLAG[harness];
+  for (let at = 0; at < tokens.length; at += 1) {
+    const token = tokens[at]!;
+    if (negatives.includes(token)) {
+      return { at, span: 1, display: token, negative: true };
+    }
+    const spelling = spellings.find((candidate) =>
+      candidate.every((word, offset) => tokens[at + offset] === word),
+    );
+    if (spelling !== undefined) {
+      return { at, span: spelling.length, display: spelling.join(" "), negative: false };
+    }
+    if (gateFlag === null) continue;
+    // The same flag set any other way: the caller has decided the gates.
+    if (token === gateFlag && at + 1 < tokens.length) {
+      return { at, span: 2, display: `${gateFlag} ${tokens[at + 1]}`, negative: true };
+    }
+    if (token.startsWith(`${gateFlag}=`)) {
+      const canonical = spellings[0]!;
+      const negative = token !== `${gateFlag}=${canonical[1] ?? ""}`;
+      return { at, span: 1, display: token, negative };
+    }
+  }
+  return null;
+}
 
 export interface YoloDecision {
   /** Resolved state: per-launch flags beat the config; no config means on
@@ -298,27 +351,35 @@ export function applyYolo(
   decision: YoloDecision,
   utility: boolean,
 ): YoloApplication {
-  const spellings = YOLO_SPELLINGS[harness];
-  const negatives = NATIVE_NO_YOLO[harness];
   const redacted: string[] = [];
-  let kept = tokens;
+  let kept = [...tokens];
   if (decision.explicitOff) {
-    kept = tokens.filter((token) => {
-      if (!spellings.includes(token)) return true;
-      redacted.push(token);
-      return false;
-    });
+    // Past a negative the caller typed, not through it: only yolo spellings
+    // are ever removed.
+    let cursor = 0;
+    for (;;) {
+      const found = findGate(harness, kept.slice(cursor));
+      if (found === null) break;
+      const at = cursor + found.at;
+      if (found.negative) {
+        cursor = at + found.span;
+        continue;
+      }
+      redacted.push(found.display);
+      kept = [...kept.slice(0, at), ...kept.slice(at + found.span)];
+      cursor = at;
+    }
   }
-  const present =
-    kept.find((token) => spellings.includes(token) || negatives.includes(token)) ?? null;
-  const presentNegative = present !== null && negatives.includes(present);
-  if (!decision.on || utility || present !== null) {
+  const match = findGate(harness, kept);
+  const present = match?.display ?? null;
+  const presentNegative = match?.negative ?? false;
+  if (!decision.on || utility || match !== null) {
     return { tokens: kept, injected: null, redacted, present, presentNegative };
   }
-  const canonical = spellings[0]!;
+  const canonical = YOLO_SPELLINGS[harness][0]!;
   return {
-    tokens: [canonical, ...kept],
-    injected: canonical,
+    tokens: [...canonical, ...kept],
+    injected: canonical.join(" "),
     redacted,
     present: null,
     presentNegative: false,

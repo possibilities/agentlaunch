@@ -151,7 +151,7 @@ Other x-flags (processed here, never forwarded):
   --x-help               This help
 
 Yolo is on by default (ADR 0009): the launch gets the harness's own
-permission-bypass flag — claude --dangerously-skip-permissions, codex
+unattended permission setting — claude --permission-mode auto, codex
 --dangerously-bypass-approvals-and-sandbox, pi --approve. Disable it in
 ~/.config/agentsurface/config.json ({"yolo": false} or a per-harness map)
 or per launch with --x-no-yolo.
@@ -380,8 +380,8 @@ Rules
     launch yields per dimension to a forwarded --model / --effort /
     --thinking / -c model_reasoning_effort=…. Utility invocations get no
     injection, and --x-level on one is a usage fault.
-  - Yolo is on by default (ADR 0009): claude
-    --dangerously-skip-permissions, codex
+  - Yolo is on by default (ADR 0009): claude --permission-mode auto
+    (its own auto mode, ADR 0028), codex
     --dangerously-bypass-approvals-and-sandbox, pi --approve —
     config-disabled ({"yolo": false} or per-harness), overridden per
     launch by --x-yolo/--x-no-yolo (repeatable, optional harness scope).

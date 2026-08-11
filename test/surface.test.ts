@@ -262,7 +262,8 @@ describe("surface", () => {
     const result = run(["--x-harness", "claude", "--x-dry-run", "--x-json"]);
     expect(envelope(result).data?.["command"]).toEqual([
       "claude",
-      "--dangerously-skip-permissions",
+      "--permission-mode",
+      "auto",
       "--model",
       "opus[1m]",
       "--effort",

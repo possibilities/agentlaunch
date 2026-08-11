@@ -80,7 +80,7 @@ expect_out '"catalog"'
 # the resolved model and effort in the harness's own spelling. Yolo is on by
 # default (ADR 0009).
 expect_exit 0 run --x-harness claude --x-dry-run
-expect_out "claude --dangerously-skip-permissions --model 'opus\[1m\]' --effort medium"
+expect_out "claude --permission-mode auto --model 'opus\[1m\]' --effort medium"
 expect_exit 0 run --x-harness codex --x-no-yolo --x-dry-run
 # Codex alone is anchored to the directory it was typed in (ADR 0024); the
 # path varies, so the assertion spans it.
@@ -126,16 +126,21 @@ grep -q "removed --dangerously-skip-permissions" "$WORK/err" || {
   exit 1
 }
 
+# Claude's gate flag set to anything else is the caller's decision (ADR 0028).
+expect_exit 0 run --x-harness claude --permission-mode plan --x-dry-run
+expect_out "claude --model 'opus\[1m\]' --effort medium --permission-mode plan"
+expect_err "the caller's spelling wins"
+
 # The config file disables yolo; --x-yolo forces it back per launch.
 mkdir -p "$WORK/home/.config/agentsurface"
 printf '{"yolo":false}\n' >"$WORK/home/.config/agentsurface/config.json"
 expect_exit 0 run --x-harness claude --x-dry-run
-if grep -q -- "--dangerously" "$WORK/out"; then
+if grep -q -- "--permission-mode" "$WORK/out"; then
   echo "FAIL: a disabling config still injected the flag" >&2
   exit 1
 fi
 expect_exit 0 run --x-harness claude --x-yolo --x-dry-run
-expect_out "claude --dangerously-skip-permissions"
+expect_out "claude --permission-mode auto"
 expect_exit 2 run --x-harness pi --x-yolo --x-no-yolo --x-dry-run
 rm "$WORK/home/.config/agentsurface/config.json"
 
@@ -171,7 +176,7 @@ printf '{}\n' >"$WORK/claude/projects/-somewhere/$SESSION_ID.jsonl"
 expect_exit 0 run x-resume "$SESSION_ID" --x-no-yolo --x-dry-run
 expect_out "claude --resume $SESSION_ID"
 expect_exit 0 run x-resume "$SESSION_ID" --x-dry-run
-expect_out "claude --resume $SESSION_ID --dangerously-skip-permissions"
+expect_out "claude --resume $SESSION_ID --permission-mode auto"
 expect_exit 0 run x-resume "$SESSION_ID" --x-harness pi --x-no-yolo --x-dry-run
 expect_out "pi --session $SESSION_ID"
 expect_exit 2 run x-resume "$SESSION_ID" --x-level opus:high --x-dry-run

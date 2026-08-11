@@ -110,7 +110,8 @@ describe("utilityInvocation", () => {
 describe("applyYolo", () => {
   test("on injects the canonical spelling at the head of the stream", () => {
     expect(applyYolo("claude", ["--model", "fable"], ON, false).tokens).toEqual([
-      "--dangerously-skip-permissions",
+      "--permission-mode",
+      "auto",
       "--model",
       "fable",
     ]);
@@ -128,6 +129,27 @@ describe("applyYolo", () => {
     const short = applyYolo("pi", ["-a"], ON, false);
     expect(short.tokens).toEqual(["-a"]);
     expect(short.injected).toBeNull();
+    const auto = applyYolo("claude", ["--permission-mode", "auto"], ON, false);
+    expect(auto.tokens).toEqual(["--permission-mode", "auto"]);
+    expect(auto.injected).toBeNull();
+    expect(auto.present).toBe("--permission-mode auto");
+    const attached = applyYolo("claude", ["--permission-mode=auto"], ON, false);
+    expect(attached.injected).toBeNull();
+    expect(attached.presentNegative).toBe(false);
+  });
+
+  test("claude's gate flag set any other way is the caller's decision", () => {
+    const plan = applyYolo("claude", ["--permission-mode", "plan"], ON, false);
+    expect(plan.tokens).toEqual(["--permission-mode", "plan"]);
+    expect(plan.injected).toBeNull();
+    expect(plan.present).toBe("--permission-mode plan");
+    expect(plan.presentNegative).toBe(true);
+    const attached = applyYolo("claude", ["--permission-mode=plan"], ON, false);
+    expect(attached.injected).toBeNull();
+    expect(attached.presentNegative).toBe(true);
+    // A value the caller never chose the mode for is not a mode.
+    const dangling = applyYolo("claude", ["--permission-mode"], ON, false);
+    expect(dangling.injected).toBe("--permission-mode auto");
   });
 
   test("pi's own negative wins over injection", () => {
@@ -162,6 +184,19 @@ describe("applyYolo", () => {
     const alias = applyYolo("pi", ["-a", "hello"], EXPLICIT_OFF, false);
     expect(alias.tokens).toEqual(["hello"]);
     expect(alias.redacted).toEqual(["-a"]);
+    // A valued spelling leaves with its value.
+    const pair = applyYolo(
+      "claude",
+      ["--permission-mode", "auto", "--model", "fable"],
+      EXPLICIT_OFF,
+      false,
+    );
+    expect(pair.tokens).toEqual(["--model", "fable"]);
+    expect(pair.redacted).toEqual(["--permission-mode auto"]);
+    // Another mode is the caller's own, not ours to remove.
+    const other = applyYolo("claude", ["--permission-mode", "plan"], EXPLICIT_OFF, false);
+    expect(other.tokens).toEqual(["--permission-mode", "plan"]);
+    expect(other.redacted).toEqual([]);
   });
 });
 
