@@ -16,12 +16,21 @@ import { CliError } from "../src/errors.ts";
 import type { RunRecord } from "../src/runs.ts";
 import {
   discoverSessionId,
+  interruptedPlacements,
   listRunRecords,
+  openPlacementJournal,
+  placementJournalPath,
+  readRunRecord,
   releaseRunName,
   reserveRunName,
   resolveCallingRun,
+  resolveRunReference,
   runServerListenUrl,
   runsDirectory,
+  scanRunRecords,
+  stampClosedRuns,
+  updateRunRecord,
+  warnCorruptRunRecords,
   writeRunRecord,
 } from "../src/runs.ts";
 
@@ -92,25 +101,114 @@ describe("run record writes", () => {
     expect(existsSync(join(directory, "run-2.json"))).toBe(false);
   });
 
-  test("a malformed record is registry corruption, not a run that vanished", async () => {
+  test("a malformed record is corruption an enumeration walks past, loudly", async () => {
     const home = makeHome();
     await writeRunRecord(ENV, home, record("run-1"));
     const stray = join(runsDirectory(ENV, home), "run-2.json");
     writeFileSync(stray, "{ this is not json");
-    const failure = await listRunRecords(ENV, home).catch((error: unknown) => error as CliError);
-    expect(failure).toBeInstanceOf(CliError);
-    expect((failure as CliError).code).toBe("run_registry_corrupt");
-    expect((failure as CliError).message).toContain(stray);
-    expect((failure as CliError).recovery).toContain("mv ");
+    const { records, corrupt } = await scanRunRecords(ENV, home);
+    // One bad file is one run missing, not the whole registry refused.
+    expect(records.map((entry) => entry.run_id)).toEqual(["run-1"]);
+    expect(corrupt.map((entry) => entry.path)).toEqual([stray]);
+    const said: string[] = [];
+    warnCorruptRunRecords(corrupt, (line) => said.push(line));
+    expect(said.join("\n")).toContain(stray);
+    expect(said.join("\n")).toContain("mv ");
+    expect(said.every((line) => line.startsWith("WARNING"))).toBe(true);
   });
 
   test("a JSON file that is not a record is corruption too", async () => {
     const home = makeHome();
     mkdirSync(runsDirectory(ENV, home), { recursive: true });
     writeFileSync(join(runsDirectory(ENV, home), "run-3.json"), '{"run_id": "run-3"}');
-    const failure = await listRunRecords(ENV, home).catch((error: unknown) => error as CliError);
-    expect((failure as CliError).code).toBe("run_registry_corrupt");
+    const { records, corrupt } = await scanRunRecords(ENV, home);
+    expect(records).toHaveLength(0);
+    expect(corrupt).toHaveLength(1);
+    expect(await listRunRecords(ENV, home)).toHaveLength(0);
   });
+
+  test("addressing the corrupt record itself still refuses", async () => {
+    const home = makeHome();
+    mkdirSync(runsDirectory(ENV, home), { recursive: true });
+    const stray = join(runsDirectory(ENV, home), "run-4.json");
+    writeFileSync(stray, "{ this is not json");
+    for (const attempt of [
+      () => readRunRecord(ENV, home, "run-4"),
+      () => resolveRunReference(ENV, home, "run-4"),
+    ]) {
+      const failure = await attempt().catch((error: unknown) => error as CliError);
+      expect(failure).toBeInstanceOf(CliError);
+      expect((failure as CliError).code).toBe("run_registry_corrupt");
+      expect((failure as CliError).recovery).toContain("mv ");
+    }
+  });
+});
+
+describe("run record serialization", () => {
+  const WS = { name: "ws", path: "/tmp/ws-serialized", id: null };
+
+  /** The verifier's probe, in one process: a session-id backfill that read the
+   * record before a close stamp landed must not write its own read back over
+   * it. The lock is not enough on its own — the read has to happen inside it. */
+  test("a backfill that read a stale record does not drop a close stamp", async () => {
+    const home = makeHome();
+    await writeRunRecord(ENV, home, record("run-1", { workspace: WS }));
+    // read A: what a discovery started from, before anything else touched it
+    const readA = await readRunRecord(ENV, home, "run-1");
+    expect(readA.closed_at ?? null).toBeNull();
+    // read B + write B: the close stamp lands while the discovery is running
+    await stampClosedRuns(ENV, home, WS.path, "landed");
+    // write A: the discovery's own write, which re-reads under the run's lock
+    await updateRunRecord(ENV, home, "run-1", (current) => ({
+      ...current,
+      session_id: "sess-A",
+    }));
+    const final = await readRunRecord(ENV, home, "run-1");
+    expect(final.session_id).toBe("sess-A");
+    expect(final.closed_at).not.toBeNull();
+    expect(final.closed_as).toBe("landed");
+  });
+
+  /** The contending writers are separate agentsurface processes — a worker's
+   * x-run backfilling beside an operator's x-land — so the serialization has
+   * to be a file, not a promise. Each child holds the lock across a read, a
+   * pause, and a write: without cross-process exclusion the second child reads
+   * before the first writes and one field is silently lost. */
+  test("two processes read-modify-writing one record both survive", async () => {
+    const home = makeHome();
+    await writeRunRecord(ENV, home, record("run-1", { workspace: WS }));
+    const children = [
+      probe(home, "run-1", "session_id", "sess-A"),
+      probe(home, "run-1", "closed_at", "2026-08-10T00:00:00.000Z"),
+    ];
+    for (const child of await Promise.all(children)) expect(child).toBe(0);
+    const final = await readRunRecord(ENV, home, "run-1");
+    expect(final.session_id).toBe("sess-A");
+    expect(final.closed_at).toBe("2026-08-10T00:00:00.000Z");
+  });
+
+  /** One separate agentsurface process doing one read-modify-write, slowly
+   * enough that an unserialized pair would overlap. */
+  async function probe(home: string, runId: string, field: string, value: string): Promise<number> {
+    const script = join(home, `probe-${field}.ts`);
+    const source = join(import.meta.dir, "..", "src", "runs.ts");
+    writeFileSync(
+      script,
+      [
+        `import { readRunRecord, withRunRecordLock, writeRunRecord } from ${JSON.stringify(source)};`,
+        "const ENV = {};",
+        `const home = ${JSON.stringify(home)};`,
+        `const runId = ${JSON.stringify(runId)};`,
+        "await withRunRecordLock(ENV, home, runId, async () => {",
+        "  const current = await readRunRecord(ENV, home, runId);",
+        "  await Bun.sleep(400);",
+        `  await writeRunRecord(ENV, home, { ...current, ${field}: ${JSON.stringify(value)} });`,
+        "});",
+      ].join("\n"),
+    );
+    const child = Bun.spawn(["bun", "run", script], { stdout: "ignore", stderr: "inherit" });
+    return await child.exited;
+  }
 });
 
 describe("run name reservations", () => {
@@ -175,12 +273,109 @@ describe("run name reservations", () => {
     await reserveRunName(ENV, home, "auth-flow", "run-2");
   });
 
+  test("two Placements reaping one stale reservation produce a single holder", async () => {
+    const home = makeHome();
+    await reserveRunName(ENV, home, "auth-flow", "run-1");
+    backdate(home, 11 * 60_000);
+    // Both judge the same orphan stale; only the one whose rename consumed it
+    // may claim, so the other is refused rather than overwriting the winner.
+    const outcomes = await Promise.allSettled([
+      reserveRunName(ENV, home, "auth-flow", "run-2"),
+      reserveRunName(ENV, home, "auth-flow", "run-3"),
+    ]);
+    const won = outcomes.filter((outcome) => outcome.status === "fulfilled");
+    expect(won).toHaveLength(1);
+    for (const outcome of outcomes) {
+      if (outcome.status === "rejected") {
+        expect((outcome.reason as CliError).code).toBe("run_name_taken");
+      }
+    }
+    expect(namesEntries(home)).toHaveLength(1);
+    const holder = JSON.parse(
+      readFileSync(join(runsDirectory(ENV, home), ".names", namesEntries(home)[0]!), "utf8"),
+    ) as { run_id: string };
+    expect(["run-2", "run-3"]).toContain(holder.run_id);
+  });
+
   /** Reservations age by mtime, so a bound is testable without waiting one. */
   function backdate(home: string, byMs: number): void {
     const directory = join(runsDirectory(ENV, home), ".names");
     const when = new Date(Date.now() - byMs);
     for (const entry of readdirSync(directory)) utimesSync(join(directory, entry), when, when);
   }
+});
+
+describe("placement journals", () => {
+  const WS = { name: "ws", path: "/tmp/ws-journalled", id: null };
+
+  test("a Placement that only claimed an account still leaves a journal", async () => {
+    const home = makeHome();
+    const journal = openPlacementJournal(ENV, home, {
+      run_id: "run-1",
+      backend: "orca",
+      harness: "codex",
+      name: "auth-flow",
+    });
+    await journal.record("reserved", {});
+    // Balancing claims an account and its lease before a Workspace exists: a
+    // Placement killed here has created nothing, and is spending something.
+    await journal.record("account-claimed", {
+      account: { key: "anthropic-2", lease: "lease-7" },
+    });
+    await journal.interrupt(new Error("orca refused the workspace name"));
+    const interrupted = await interruptedPlacements(ENV, home);
+    expect(interrupted.map((entry) => entry.run_id)).toEqual(["run-1"]);
+    expect(interrupted[0]?.account).toEqual({ key: "anthropic-2", lease: "lease-7" });
+  });
+
+  test("a Placement that created and claimed nothing leaves nothing to explain", async () => {
+    const home = makeHome();
+    const journal = openPlacementJournal(ENV, home, {
+      run_id: "run-1",
+      backend: "orca",
+      harness: "claude",
+      name: null,
+    });
+    await journal.record("reserved", {});
+    await journal.interrupt(new Error("refused before anything existed"));
+    expect(await interruptedPlacements(ENV, home)).toHaveLength(0);
+  });
+
+  test("landing the workspace a journal named clears it, and its name", async () => {
+    const home = makeHome();
+    await reserveRunName(ENV, home, "auth-flow", "run-1");
+    const journal = openPlacementJournal(ENV, home, {
+      run_id: "run-1",
+      backend: "orca",
+      harness: "claude",
+      name: "auth-flow",
+    });
+    await journal.record("workspace-created", { workspace: { path: WS.path, created: true } });
+    await journal.interrupt(new Error("terminal create failed"));
+    expect(existsSync(placementJournalPath(ENV, home, "run-1"))).toBe(true);
+    // x-land releasing that workspace is the decision the journal was waiting
+    // for — nothing else ever clears one.
+    await stampClosedRuns(ENV, home, WS.path, "abandoned");
+    expect(existsSync(placementJournalPath(ENV, home, "run-1"))).toBe(false);
+    expect(namesEntries(home)).toHaveLength(0);
+    expect(await interruptedPlacements(ENV, home)).toHaveLength(0);
+  });
+
+  test("landing one workspace leaves another workspace's journal alone", async () => {
+    const home = makeHome();
+    const journal = openPlacementJournal(ENV, home, {
+      run_id: "run-2",
+      backend: "orca",
+      harness: "claude",
+      name: null,
+    });
+    await journal.record("workspace-created", {
+      workspace: { path: "/tmp/ws-elsewhere", created: true },
+    });
+    await journal.interrupt(new Error("terminal create failed"));
+    await stampClosedRuns(ENV, home, WS.path, "landed");
+    expect(existsSync(placementJournalPath(ENV, home, "run-2"))).toBe(true);
+  });
 });
 
 describe("run server socket paths", () => {

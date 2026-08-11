@@ -226,6 +226,15 @@ missing. The catalog: which file is active (built-in or the custom
 ~/.config/agentsurface/catalog.json), its validity, harness order, model
 counts, and resolved defaults. And the surface backends: each one's
 reachability and version, plus how many runs are recorded.
+
+Two registry health items appear only when there is something to say: run
+records that will not parse, each named with the move-it-aside recovery
+(every listing skips them and says so, rather than failing), and interrupted
+Placements with the account and lease each one is still holding. Neither is
+cleaned up for you: move a corrupt record aside yourself, and delete an
+interrupted Placement's journal once you have finished its compensation —
+x-runs names the file. Landing the workspace a Placement created is the one
+path that clears a journal for you.
 `,
   "x-runs": `agentsurface x-runs [--x-json]
 
@@ -237,9 +246,26 @@ surface Placement (ADR 0014/0022).
 
 A Placement interrupted between its resources has no record yet, and is
 listed after them as "interrupted <run-id>": the phase it stopped after,
-the workspace it created and never attached, and the journal file naming
-them (ADR 0027). Nothing is released for you — a workspace may hold work,
-so releasing one is x-land's operation and your decision.
+the workspace it created and never attached, the account and lease it is
+still holding, and the journal file naming them (ADR 0027).
+
+When it is listed depends on how it died. One whose own process could stamp
+the failure appears immediately; one killed outright (SIGKILL, power loss)
+is invisible until nothing has touched its journal for 10 minutes — the
+longest a Placement can plausibly still be in flight — and the name it
+reserved stays held for that whole window, because a Placement genuinely
+running in another process must not be reported as interrupted.
+
+Nothing is released for you — a workspace may hold work, so releasing one is
+x-land's operation and your decision. Landing the workspace an interrupted
+Placement created clears its journal and its name reservation; every other
+journal stays listed until you finish the compensation and delete the file
+named in its listing.
+
+A record that will not parse is not a run that vanished: every listing warns
+about it on stderr, names it, and answers about the rest. Move it aside
+(mv <file> <file>.corrupt) to clear the warning; addressing that run
+directly — x-run <id>, run:<id> — still refuses outright.
 `,
   "x-whoami": `agentsurface x-whoami [--x-json]
 

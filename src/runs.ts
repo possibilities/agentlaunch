@@ -155,6 +155,149 @@ async function writeJsonAtomically(
   return path;
 }
 
+/**
+ * Single-winner removal of a file two processes may both have judged dead.
+ * Rename is atomic and consumes its source, so exactly one caller can move a
+ * given file aside; every other caller's rename finds nothing and it learns it
+ * did not win. The winner deletes the tomb it now exclusively owns. Unlinking
+ * in place cannot do this: two callers can both unlink successfully (the
+ * second removing a file the first already replaced) and both believe they
+ * cleared the way.
+ */
+function reapExclusively(path: string): boolean {
+  const tomb = `${path}.${process.pid}.${writeSequence++}.reaped`;
+  try {
+    renameSync(path, tomb);
+  } catch {
+    return false;
+  }
+  try {
+    unlinkSync(tomb);
+  } catch {
+    // Nothing else knows this name; a failure here is litter, not a race.
+  }
+  return true;
+}
+
+/** How long a lock file may sit untouched before it belongs to a process that
+ * died holding it. Generous next to the work it guards — a record read, an
+ * object spread, and an atomic write are milliseconds — because reaping a lock
+ * a live process still holds is the one failure this bound must not cause. */
+const RUN_LOCK_STALE_MS = 60_000;
+/** How long a caller waits for the holder before refusing. Longer than any
+ * honest holder needs, so the timeout means "something is wrong", not "busy". */
+const RUN_LOCK_TIMEOUT_MS = 15_000;
+const RUN_LOCK_POLL_MS = 20;
+
+/** Locks sit beside the records they guard, in a directory the record listing
+ * already ignores (it reads `*.json` at the top level only). */
+function locksDirectory(env: Environ, home: string): string {
+  return join(runsDirectory(env, home), ".locks");
+}
+
+/** Exclusive create picks the winner, exactly as the name reservations do; the
+ * token is what lets a holder release only its own lock, so a lock reaped as
+ * dead and retaken is never dropped by the process that lost it. */
+async function claimLockFile(path: string, token: string): Promise<boolean> {
+  try {
+    const handle = await open(path, "wx");
+    try {
+      await handle.writeFile(token);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw new CliError(
+      "run_record_unwritable",
+      `run record lock ${path} could not be written: ${(error as Error).message}`,
+      `check that ${join(path, "..")} is writable, then retry`,
+    );
+  }
+}
+
+function olderThan(path: string, ms: number): boolean {
+  try {
+    return Date.now() - statSync(path).mtimeMs > ms;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Serialize every read-modify-write of one run's record, across processes.
+ * Atomic writes made a torn read impossible; they cannot make a lost update
+ * impossible, because the two writers that matter here read the same record
+ * and each writes back a whole one: a session-id backfill and a close stamp
+ * interleaved as read, read, write, write end with whichever wrote second
+ * silently discarding the other's field. So the read and the write happen
+ * inside one lock, and the read happens *after* it is held.
+ *
+ * The mechanism is the reservations': an exclusive-create lock file in our own
+ * state directory, since the contending writers are separate agentsurface
+ * processes and an in-process mutex cannot see them. A holder that dies leaves
+ * a lock nobody will ever release, so a stale one is reaped — single-winner,
+ * so two waiters cannot both reap it and both claim.
+ */
+export async function withRunRecordLock<T>(
+  env: Environ,
+  home: string,
+  runId: string,
+  body: () => Promise<T>,
+): Promise<T> {
+  assertRunId(runId);
+  const directory = locksDirectory(env, home);
+  mkdirSync(directory, { recursive: true });
+  const path = join(directory, `${runId}.lock`);
+  const token = `${process.pid}.${writeSequence++}.${Math.random().toString(36).slice(2)}\n`;
+  const deadline = Date.now() + RUN_LOCK_TIMEOUT_MS;
+  for (;;) {
+    if (await claimLockFile(path, token)) break;
+    if (olderThan(path, RUN_LOCK_STALE_MS)) reapExclusively(path);
+    if (Date.now() >= deadline) {
+      throw new CliError(
+        "run_record_locked",
+        `run ${runId} is locked by another agentsurface process (${path})`,
+        `wait for it to finish, or remove the lock if nothing holds it: rm ${path}`,
+      );
+    }
+    await Bun.sleep(RUN_LOCK_POLL_MS);
+  }
+  try {
+    return await body();
+  } finally {
+    try {
+      if ((await Bun.file(path).text()) === token) unlinkSync(path);
+    } catch {
+      // Reaped as stale by someone else, or already gone: the lock is not ours
+      // to remove either way.
+    }
+  }
+}
+
+/**
+ * The one way a record is changed: read it under the run's lock, decide, and
+ * write it back before the lock goes. Returning null from the mutation means
+ * the record already says what the caller wanted — nothing is written, so a
+ * re-run never rewrites history.
+ */
+export async function updateRunRecord(
+  env: Environ,
+  home: string,
+  runId: string,
+  mutate: (record: RunRecord) => RunRecord | null,
+): Promise<RunRecord | null> {
+  return await withRunRecordLock(env, home, runId, async () => {
+    const current = await readRunRecord(env, home, runId);
+    const next = mutate(current);
+    if (next === null) return null;
+    await writeRunRecord(env, home, next);
+    return next;
+  });
+}
+
 /** A file we own that does not parse as a record is corruption, not a foreign
  * file: writes are atomic, so nothing else can produce one. */
 function corruptRecord(path: string, detail: string): CliError {
@@ -204,16 +347,76 @@ export async function readRunRecord(env: Environ, home: string, runId: string): 
   return await loadRunRecord(path);
 }
 
-/** Newest first — records are tiny and the directory is flat. */
-export async function listRunRecords(env: Environ, home: string): Promise<RunRecord[]> {
+export interface CorruptRunRecord {
+  path: string;
+  detail: string;
+  recovery: string;
+}
+
+/**
+ * Every record in the registry, newest first, plus the files that are not
+ * records. Corruption is reported rather than thrown here because the blast
+ * radius of the two answers is different: the file that will not parse is one
+ * run, and refusing to enumerate makes it every run — one mangled file would
+ * otherwise take out x-runs, x-doctor, x-whoami, x-land, and every new named
+ * Placement at once. A caller addressing *that* record still refuses (readRunRecord
+ * does); a caller enumerating around it says so loudly and answers about the
+ * rest.
+ */
+export async function scanRunRecords(
+  env: Environ,
+  home: string,
+): Promise<{ records: RunRecord[]; corrupt: CorruptRunRecord[] }> {
   const directory = runsDirectory(env, home);
-  if (!existsSync(directory)) return [];
   const records: RunRecord[] = [];
+  const corrupt: CorruptRunRecord[] = [];
+  if (!existsSync(directory)) return { records, corrupt };
   for (const entry of readdirSync(directory)) {
     if (!entry.endsWith(".json")) continue;
-    records.push(await loadRunRecord(join(directory, entry)));
+    const path = join(directory, entry);
+    try {
+      records.push(await loadRunRecord(path));
+    } catch (error) {
+      if (!(error instanceof CliError) || error.code !== "run_registry_corrupt") throw error;
+      corrupt.push({
+        path,
+        detail: error.message,
+        recovery: error.recovery ?? `move it aside and retry: mv ${path} ${path}.corrupt`,
+      });
+    }
   }
   records.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return { records, corrupt };
+}
+
+/** Said once per file per process, however many times a command enumerates. */
+const warnedCorrupt = new Set<string>();
+
+/**
+ * Corruption an enumeration walked past, on stderr where the narrative lives —
+ * loud, because the answer the caller is about to read is missing a run and
+ * nothing else would say so. Never stdout: a machine consumer's envelope is
+ * there.
+ */
+export function warnCorruptRunRecords(
+  corrupt: readonly CorruptRunRecord[],
+  write: (line: string) => void = (line) => {
+    process.stderr.write(`${line}\n`);
+  },
+): void {
+  for (const entry of corrupt) {
+    if (warnedCorrupt.has(entry.path)) continue;
+    warnedCorrupt.add(entry.path);
+    write(`WARNING   ${entry.detail} — skipped, so this answer is incomplete`);
+    write(`WARNING   ${entry.recovery}`);
+  }
+}
+
+/** Newest first — records are tiny and the directory is flat. Corrupt files
+ * are warned about and walked past; see `scanRunRecords`. */
+export async function listRunRecords(env: Environ, home: string): Promise<RunRecord[]> {
+  const { records, corrupt } = await scanRunRecords(env, home);
+  warnCorruptRunRecords(corrupt);
   return records;
 }
 
@@ -241,8 +444,9 @@ export async function findRunsByName(
  * A run reference, resolved in tiers: an exact run id first, then a run
  * name. One word covers both because a name is what an operator remembers
  * and an id is what a machine kept — and the id tier is exact, so a name
- * shaped like an id never shadows the record it names. Names are not unique,
- * so several matches is a refusal naming the candidates rather than a guess;
+ * shaped like an id never shadows the record it names. A name is unique among
+ * *open* runs (ADR 0019) and closed runs keep theirs, so several matches is
+ * still possible and is a refusal naming the candidates rather than a guess;
  * open runs are preferred, since a closed one's workspace is already gone.
  */
 export async function resolveRunReference(
@@ -288,12 +492,18 @@ export async function stampClosedRuns(
   for (const record of await listRunRecords(env, home)) {
     if (record.workspace.path !== workspacePath) continue;
     if (record.closed_at != null) continue;
-    await writeRunRecord(env, home, { ...record, closed_at: closedAt, closed_as: closedAs });
+    // Re-read under the run's own lock: the listing above is a snapshot, and a
+    // session-id backfill running beside this one must not lose its field to
+    // this stamp — or this stamp to it.
+    const closed = await updateRunRecord(env, home, record.run_id, (current) =>
+      current.closed_at != null ? null : { ...current, closed_at: closedAt, closed_as: closedAs },
+    );
+    if (closed === null) continue;
     // The record is stamped first: a closed record frees the name on its own
     // (ADR 0019), so a release that never happens is stale litter, while a
     // release before the stamp would free a name the run still holds.
-    if (typeof record.name === "string") {
-      await releaseRunName(env, home, record.name, record.run_id);
+    if (typeof closed.name === "string") {
+      await releaseRunName(env, home, closed.name, closed.run_id);
     }
     // The run's server dies with its terminal, but a hard kill can skip the
     // unlink; a closed run's socket file is inert either way, so it goes.
@@ -309,8 +519,14 @@ export async function stampClosedRuns(
         }
       }
     }
-    stamped.push(record.run_id);
+    stamped.push(closed.run_id);
   }
+  // Releasing the Workspace is also what finishes the compensation an
+  // interrupted Placement into it was waiting for: the journal named that
+  // Workspace as the thing an operator had to decide about, and this is the
+  // decision. A Placement still in flight into a Workspace being released is
+  // losing that Workspace either way.
+  await reapPlacementJournals(env, home, workspacePath);
   return stamped;
 }
 
@@ -391,9 +607,17 @@ export async function resolveRun(
   if (record.session_id !== null) return { record, discovered: false };
   const sessionId = await discoverSessionId(record, env, home);
   if (sessionId === null) return { record, discovered: false };
-  const updated = { ...record, session_id: sessionId };
-  await writeRunRecord(env, home, updated);
-  return { record: updated, discovered: true };
+  // Discovery is slow (a store scan, or a round trip to the Run server), so
+  // the record read above is stale by now — a close stamp may have landed in
+  // between. Re-read under the run's lock and write back the whole current
+  // record with the session id added, never the one this call started from.
+  const updated = await updateRunRecord(env, home, record.run_id, (current) =>
+    current.session_id !== null ? null : { ...current, session_id: sessionId },
+  );
+  if (updated !== null) return { record: updated, discovered: true };
+  // Another process backfilled the same id first; what is on disk is the
+  // answer, not the record this call read before discovery started.
+  return { record: await readRunRecord(env, home, record.run_id), discovered: false };
 }
 
 /**
@@ -467,11 +691,7 @@ async function readReservation(path: string): Promise<NameReservation | null> {
 }
 
 function olderThanReapBound(path: string): boolean {
-  try {
-    return Date.now() - statSync(path).mtimeMs > RESERVATION_REAP_MS;
-  } catch {
-    return true;
-  }
+  return olderThan(path, RESERVATION_REAP_MS);
 }
 
 /** Exclusive create is the whole mechanism: the filesystem picks the winner. */
@@ -541,11 +761,12 @@ export async function reserveRunName(
   if (await claimReservation(path, body)) return;
   const refusal = await reservationHolds(env, home, path, name);
   if (refusal !== null) throw refusal;
-  try {
-    unlinkSync(path);
-  } catch {
-    // Another caller reaped the same stale reservation; the retry decides.
-  }
+  // Two Placements can both judge the same reservation stale. Only the one
+  // whose rename consumed it may go on to claim: unlinking in place would let
+  // both proceed, and the second could unlink the reservation the first had
+  // already re-created — two live runs, one name, which is the whole thing
+  // this reservation exists to prevent.
+  if (!reapExclusively(path)) throw nameTaken(name, `another Placement took "${name}" first`);
   if (await claimReservation(path, body)) return;
   throw nameTaken(name, `another Placement took "${name}" first`);
 }
@@ -701,11 +922,65 @@ export function openPlacementJournal(
   };
 }
 
-/** Whether an interrupted Placement left anything behind that outlives it. A
+/**
+ * Whether an interrupted Placement left anything behind that outlives it. A
  * Workspace it created or a terminal it started has no run to belong to; one
- * it merely found belongs to whatever it belonged to before. */
+ * it merely found belongs to whatever it belonged to before.
+ *
+ * A claimed account counts too, and is the phase that most often stands alone:
+ * balancing claims an account and takes a lease on it before a Workspace
+ * exists, so a Placement killed between the claim and Prepare is still
+ * *spending* something (ADR 0027) with nothing else to show for it. Dropping
+ * that journal would leave the operator no way to learn which account and
+ * lease an interrupted Placement is holding.
+ */
 function placementLeftSomething(journal: PlacementJournal): boolean {
-  return journal.workspace?.created === true || journal.terminal != null;
+  return (
+    journal.workspace?.created === true ||
+    journal.terminal != null ||
+    journal.account?.key != null ||
+    journal.account?.lease != null
+  );
+}
+
+/**
+ * Clear the journals of Placements into a Workspace that has just been
+ * released. This is the only automatic end a journal has other than its own
+ * Placement committing: nothing else ever removes one, so every other
+ * interrupted Placement stays listed until an operator finishes the
+ * compensation and deletes the file `x-runs` names. The name reservation goes
+ * with it — that is the one piece of compensation which is always safe.
+ */
+async function reapPlacementJournals(
+  env: Environ,
+  home: string,
+  workspacePath: string,
+): Promise<void> {
+  const directory = placingDirectory(env, home);
+  if (!existsSync(directory)) return;
+  const released = resolvedWorkspacePath(workspacePath);
+  for (const entry of readdirSync(directory)) {
+    if (!entry.endsWith(".json")) continue;
+    const path = join(directory, entry);
+    let journal: PlacementJournal;
+    try {
+      journal = (await Bun.file(path).json()) as PlacementJournal;
+    } catch {
+      continue;
+    }
+    const journalled = journal?.workspace?.path;
+    if (typeof journalled !== "string") continue;
+    if (resolvedWorkspacePath(journalled) !== released) continue;
+    if (typeof journal.name === "string" && typeof journal.run_id === "string") {
+      await releaseRunName(env, home, journal.name, journal.run_id);
+    }
+    try {
+      unlinkSync(path);
+    } catch {
+      // Cleared by the operator, or by a concurrent land of the same
+      // workspace; either way there is nothing left to reap.
+    }
+  }
 }
 
 /**

@@ -50,7 +50,9 @@ import {
   resolveRunReference,
   runServerListenUrl,
   runsDirectory,
+  scanRunRecords,
   stampClosedRuns,
+  warnCorruptRunRecords,
   writeRunRecord,
 } from "./runs.ts";
 import { whichInEnv } from "./subprocess.ts";
@@ -606,14 +608,29 @@ export async function doctorCommand(context: Context, parts: Partitioned): Promi
       `  ${backend.name.padEnd(6)} ${health.reachable ? "reachable" : "unreachable"} · ${health.detail}`,
     );
   }
-  const runs = await listRunRecords(context.env, context.home);
+  // Doctor reads the registry the tolerant way and reports what would not
+  // parse as a health item of its own: a corrupt record is one run missing
+  // from every answer, which is exactly the kind of thing this command exists
+  // to name rather than to die on.
+  const { records: runs, corrupt } = await scanRunRecords(context.env, context.home);
+  warnCorruptRunRecords(corrupt);
   lines.push(
     `  runs   ${runs.length} recorded · ${tildePath(runsDirectory(context.env, context.home), context.home)}`,
   );
+  if (corrupt.length > 0) {
+    lines.push(
+      `  corrupt ${corrupt.length} unreadable record(s) · every listing skips them`,
+      ...corrupt.map((entry) => `    ${tildePath(entry.path, context.home)} · ${entry.recovery}`),
+    );
+  }
   const interrupted = await interruptedPlacements(context.env, context.home);
   if (interrupted.length > 0) {
     lines.push(
-      `  placing ${interrupted.length} interrupted · agentsurface x-runs names what they left`,
+      `  placing ${interrupted.length} interrupted · ${facts(
+        ...interrupted.map(
+          (journal) => holdingAccount(journal) ?? `${journal.run_id} holds nothing`,
+        ),
+      )} · agentsurface x-runs names what they left`,
     );
   }
   return {
@@ -622,7 +639,12 @@ export async function doctorCommand(context: Context, parts: Partitioned): Promi
       harnesses: reports,
       config,
       catalog,
-      surface: { backends, runs: runs.length, interrupted: interrupted.length },
+      surface: {
+        backends,
+        runs: runs.length,
+        corrupt,
+        interrupted: interrupted.length,
+      },
     },
     human: lines.join("\n"),
   };
@@ -711,10 +733,23 @@ function describeInterrupted(context: Context, journal: PlacementJournal): strin
       ? `workspace ${tildePath(journal.workspace.path, context.home)} created and never attached`
       : undefined,
     journal.terminal == null ? undefined : `terminal ${journal.terminal}`,
-    journal.account?.lease == null ? undefined : `lease ${journal.account.lease}`,
+    // What it is still spending: a Placement killed after balancing holds an
+    // account and its lease even when it never reached a Workspace (ADR 0027).
+    holdingAccount(journal),
     journal.failure ?? undefined,
     tildePath(placementJournalPath(context.env, context.home, journal.run_id), context.home),
   );
+}
+
+/** The account claim an interrupted Placement is still holding, named as the
+ * operator would have to name it to release it, or undefined when it never
+ * claimed one (balancing off, or killed before it ran). */
+function holdingAccount(journal: PlacementJournal): string | undefined {
+  const key = journal.account?.key ?? null;
+  const lease = journal.account?.lease ?? null;
+  if (key === null && lease === null) return undefined;
+  const held = key === null ? "an account" : `account ${key}`;
+  return lease === null ? `holding ${held}` : `holding ${held} · lease ${lease}`;
 }
 
 export async function runCommand(context: Context, parts: Partitioned): Promise<Outcome> {

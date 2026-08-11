@@ -22,11 +22,22 @@ Workspace the Placement *created* is named as an orphan; one it merely found
 belonged to somebody else before this Placement and still does.
 
 **Surfaced, not hidden.** `x-runs` lists an interrupted Placement beside the
-records, and `x-doctor` counts them. A journal is interrupted when its own
-process stamped the failure, or when nothing has touched it for longer than a
-Placement can plausibly still be in flight — the same bound the name
-reservations use. A Placement genuinely running in another process is neither,
-and reporting it as interrupted would be a lie.
+records — with the account and lease it is still spending, which is the phase
+that most often stands alone, because balancing claims an account before a
+Workspace exists — and `x-doctor` counts them. A journal is interrupted when
+its own process stamped the failure, or when nothing has touched it for longer
+than a Placement can plausibly still be in flight — the same bound the name
+reservations use, ten minutes. A Placement genuinely running in another process
+is neither, and reporting it as interrupted would be a lie; the cost of that
+honesty is that a Placement killed outright is invisible, with its name still
+reserved, until the bound passes.
+
+**Cleared by a commit, by a Land, or by hand.** Writing the run record clears
+the journal. Landing the Workspace a journal named clears it too, along with
+the name it reserved: releasing that Workspace is exactly the decision the
+journal was waiting for. Nothing else ever removes one — an interrupted
+Placement that created nothing but an account claim stays listed until the
+operator who released the claim deletes the file `x-runs` names.
 
 **Ours, not the backend's.** The journal is agentsurface's own bookkeeping,
 like the records it sits beside; nothing about it crosses the surface API
