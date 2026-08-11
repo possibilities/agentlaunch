@@ -1,5 +1,9 @@
 # 0017 — A run name is a label, not an identity
 
+> Revised by ADR 0019: a name is still a label rather than an identity, but it
+> is now unique among *open* runs. The "not unique" paragraph below is the
+> position 0019 replaced; everything else here stands.
+
 `--x-name <name>` gives a run the handle a human reads back. It is free
 text — it names nothing on disk, so it needs none of the run id's
 glob-literal alphabet — and it is **not unique**: nothing enforces

@@ -98,8 +98,10 @@ harness where one has a launch-time name (claude and pi `--name`; codex has
 none, so a runner launch narrates the drop rather than failing), and on a
 surface it titles the terminal, labels a workspace the Placement created, and
 is written to the run record — so codex loses nothing there. **A name is a
-label, not an identity** (ADR 0017): free text, never unique, never invented.
-It reads back wherever a run id does — `x-run auth-flow`, `--x-from
+label, not an identity** (ADR 0017): free text, never invented, and unique
+among open runs (ADR 0019) — a name a closed run holds is free to reuse, one
+an open run holds is a `run_name_taken` refusal rather than a generated
+variant. It reads back wherever a run id does — `x-run auth-flow`, `--x-from
 run:auth-flow`, `x-land run:auth-flow` — with the id tier matched first and
 several runs sharing a name refused by name rather than guessed between.
 
