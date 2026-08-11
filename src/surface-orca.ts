@@ -3,6 +3,7 @@ import { CliError } from "./errors.ts";
 import type { Narrator } from "./narrate.ts";
 import { shellLine } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
+import { spawnBounded } from "./subprocess.ts";
 import type {
   Attachment,
   BackendHealth,
@@ -455,13 +456,17 @@ async function listRepos(request: OrcaCall): Promise<OrcaRepo[]> {
   return out;
 }
 
+/** Generous enough that a slow `rev-parse` on a large repo never
+ * false-trips (S10); a git process still alive past this is stuck. */
+const GIT_TIMEOUT_MS = 60_000;
+
 async function gitToplevel(path: string): Promise<string> {
-  const child = Bun.spawn(["git", "-C", path, "rev-parse", "--show-toplevel"], {
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
+  const { stdout, code } = await spawnBounded({
+    cmd: ["git", "-C", path, "rev-parse", "--show-toplevel"],
+    env: process.env,
+    timeoutMs: GIT_TIMEOUT_MS,
+    label: `git -C ${path} rev-parse --show-toplevel`,
   });
-  const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
   const toplevel = stdout.trim();
   if (code !== 0 || toplevel === "") {
     throw new CliError(
@@ -501,19 +506,45 @@ async function orcaJson(
   );
 }
 
-/** A lookup that may legitimately miss: null instead of a domain error. */
+/**
+ * A lookup that may legitimately miss (S11): null only for Orca's own typed
+ * not-found codes (`selector_not_found`, `repo_not_found` — verified against
+ * live orca 1.4.177), never for a daemon fault, permission error, or
+ * malformed response, which would otherwise read as "not found" and send
+ * control flow down a create path. Everything else propagates as the same
+ * domain error `orcaJson` raises.
+ */
 async function orcaTry(
   env: Environ,
   narrator: Narrator | null,
   args: string[],
 ): Promise<Record<string, unknown> | null> {
   const outcome = await runOrca(env, narrator, args);
-  return outcome.ok ? outcome.result : null;
+  if (outcome.ok) return outcome.result;
+  if (outcome.notFound) return null;
+  throw new CliError(
+    outcome.reachableFault ? "surface_unreachable" : "surface_backend",
+    `orca ${args.join(" ")} failed: ${outcome.detail}`,
+    outcome.reachableFault ? START_RECOVERY : "rerun with --x-verbose to see each orca call",
+  );
+}
+
+/** Generous enough that a slow orca call never false-trips (S10); a call
+ * still running past this is treated as stuck rather than merely slow. */
+const ORCA_TIMEOUT_MS = 30_000;
+
+/** Orca's own vocabulary for "the selector matched nothing" — confirmed
+ * live: `orca worktree show --worktree name:<missing>` answers
+ * `selector_not_found`, `orca repo show --repo id:<missing>` answers
+ * `repo_not_found`. Matched by suffix so either code (and any sibling Orca
+ * adds later in the same family) is recognized without enumerating them. */
+function isNotFoundCode(code: string | null): boolean {
+  return code?.endsWith("_not_found") ?? false;
 }
 
 type OrcaOutcome =
   | { ok: true; result: Record<string, unknown> }
-  | { ok: false; detail: string; reachableFault: boolean };
+  | { ok: false; detail: string; reachableFault: boolean; notFound: boolean };
 
 async function runOrca(
   env: Environ,
@@ -530,17 +561,12 @@ async function runOrca(
   }
   const argv = [...args, "--json"];
   narrator?.detail("orca", shellLine(["orca", ...argv]));
-  const child = Bun.spawn([bin, ...argv], {
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: env as Record<string, string>,
+  const { stdout, stderr, code } = await spawnBounded({
+    cmd: [bin, ...argv],
+    env,
+    timeoutMs: ORCA_TIMEOUT_MS,
+    label: `orca ${args.join(" ")}`,
   });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
   let body: Record<string, unknown> | null = null;
   try {
     const parsed: unknown = JSON.parse(stdout);
@@ -555,12 +581,18 @@ async function runOrca(
   const error = body?.["error"];
   const errorRecord =
     typeof error === "object" && error !== null ? (error as Record<string, unknown>) : null;
+  const errorCode = stringField(errorRecord, "code");
   const detail =
     stringField(errorRecord, "message") ??
     (typeof error === "string" ? error : null) ??
     firstLine(stderr) ??
     `exit ${code}`;
-  return { ok: false, detail, reachableFault: /runtime|reachable|connect/i.test(detail) };
+  return {
+    ok: false,
+    detail,
+    reachableFault: /runtime|reachable|connect/i.test(detail),
+    notFound: isNotFoundCode(errorCode),
+  };
 }
 
 function objectField(

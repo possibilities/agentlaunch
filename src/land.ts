@@ -2,6 +2,7 @@ import { CliError } from "./errors.ts";
 import type { Narrator } from "./narrate.ts";
 import { shellLine } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
+import { spawnBounded } from "./subprocess.ts";
 import type { SurfaceBackend, Survey } from "./surface.ts";
 
 /**
@@ -459,20 +460,19 @@ interface GitOutcome {
   stderr: string;
 }
 
+/** Generous enough that a slow merge or a large repo's status never
+ * false-trips (S10); a git process that is still alive past this is
+ * treated as stuck, not merely slow. */
+const GIT_TIMEOUT_MS = 60_000;
+
 async function git(context: LandContext, cwd: string, args: string[]): Promise<GitOutcome> {
   context.narrator.detail("git", shellLine(["git", "-C", cwd, ...args]));
-  const child = Bun.spawn(["git", "-C", cwd, ...args], {
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-    env: context.env as Record<string, string>,
+  return await spawnBounded({
+    cmd: ["git", "-C", cwd, ...args],
+    env: context.env,
+    timeoutMs: GIT_TIMEOUT_MS,
+    label: `git ${args.join(" ")}`,
   });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  return { code, stdout, stderr };
 }
 
 function firstLine(text: string): string | null {

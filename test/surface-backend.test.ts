@@ -350,12 +350,37 @@ describe("surface placements", () => {
 
   test("an unmatched workspace is a domain error naming both ways out", () => {
     const world = makeWorld();
-    answerFile(world, "worktree-show", { ok: false }, 1);
+    // Orca's own typed not-found shape (verified against live orca
+    // 1.4.177: `orca worktree show --worktree name:<missing>`), which is the
+    // only shape a lookup may read as "not found" (S11).
+    answerFile(
+      world,
+      "worktree-show",
+      { ok: false, error: { code: "selector_not_found", message: "selector_not_found" } },
+      1,
+    );
     const result = run(world, ["--x-harness", "claude", "--x-surface", "--x-json"], world.root);
     expect(result.code).toBe(1);
     const envelope = JSON.parse(result.stdout) as AnyEnvelope;
     expect(envelope.error?.code).toBe("workspace_not_found");
     expect(envelope.error?.recovery).toContain("--x-new-workspace");
+  });
+
+  test("a non-not-found orca lookup failure propagates instead of reading as absent", () => {
+    const world = makeWorld();
+    // A daemon fault or malformed response is not a typed not-found (S11):
+    // it must not fall through to workspace_not_found and a create path.
+    answerFile(
+      world,
+      "worktree-show",
+      { ok: false, error: { code: "internal_error", message: "worktree index is corrupt" } },
+      1,
+    );
+    const result = run(world, ["--x-harness", "claude", "--x-surface", "--x-json"], world.root);
+    expect(result.code).toBe(1);
+    const envelope = JSON.parse(result.stdout) as AnyEnvelope;
+    expect(envelope.error?.code).toBe("surface_backend");
+    expect(envelope.error?.message).toContain("worktree index is corrupt");
   });
 
   test("an unreachable runtime refuses loudly, never places in this terminal", () => {
