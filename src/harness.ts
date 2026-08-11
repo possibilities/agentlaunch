@@ -190,6 +190,12 @@ export function effortDimensionToken(
       ) {
         return `${token} ${tokens[i + 1]}`;
       }
+      if (
+        (token.startsWith("-c=") || token.startsWith("--config=")) &&
+        token.slice(token.indexOf("=") + 1).startsWith("model_reasoning_effort=")
+      ) {
+        return token;
+      }
     }
   }
   return null;

@@ -201,6 +201,26 @@ describe("model and effort spellings", () => {
     expect(effortDimensionToken("codex", ["--effort", "max"])).toBeNull();
     expect(effortDimensionToken("claude", ["--thinking", "high"])).toBeNull();
   });
+
+  test("effort-dimension detection covers every supported codex spelling", () => {
+    // split form: `-c value` / `--config value`
+    expect(effortDimensionToken("codex", ["-c", "model_reasoning_effort=high"])).toBe(
+      "-c model_reasoning_effort=high",
+    );
+    expect(effortDimensionToken("codex", ["--config", "model_reasoning_effort=high"])).toBe(
+      "--config model_reasoning_effort=high",
+    );
+    // inline form: `-c=value` / `--config=value`
+    expect(effortDimensionToken("codex", ["-c=model_reasoning_effort=high"])).toBe(
+      "-c=model_reasoning_effort=high",
+    );
+    expect(effortDimensionToken("codex", ["--config=model_reasoning_effort=high"])).toBe(
+      "--config=model_reasoning_effort=high",
+    );
+    // inline form with an unrelated key does not match
+    expect(effortDimensionToken("codex", ["-c=other=1"])).toBeNull();
+    expect(effortDimensionToken("codex", ["--config=other=1"])).toBeNull();
+  });
 });
 
 describe("run-name spellings", () => {
