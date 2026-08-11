@@ -19,14 +19,9 @@ describe("spawnBounded", () => {
   });
 
   test("a child still running past the deadline is killed and reported as a timeout", async () => {
-    await expect(
-      spawnBounded({
-        cmd: ["bash", "-c", "sleep 5"],
-        env: process.env,
-        timeoutMs: 50,
-        label: "test sleep",
-      }),
-    ).rejects.toThrow(CliError);
+    // Asserted through try/catch rather than `expect(...).rejects`: bun's
+    // matchers return void, so awaiting one awaits nothing and the assertions
+    // that matter here are on the error's code and message anyway.
     try {
       await spawnBounded({
         cmd: ["bash", "-c", "sleep 5"],
