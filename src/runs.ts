@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { CliError, UsageError } from "./errors.ts";
@@ -72,12 +81,87 @@ function recordPath(env: Environ, home: string, runId: string): string {
   return join(runsDirectory(env, home), `${runId}.json`);
 }
 
-export function writeRunRecord(env: Environ, home: string, record: RunRecord): string {
+/** Distinguishes the temp files of writers racing on one record; the exclusive
+ * create is what makes a collision an error rather than a lost write. */
+let writeSequence = 0;
+
+/**
+ * One record write, awaited and atomic. Awaited because a caller that returns
+ * — or exits — before the bytes land hands back a run id whose record never
+ * existed. Atomic because a record is rewritten in place (session backfill,
+ * close stamping), and a reader has to see either the whole previous record or
+ * the whole next one: the temp file is completed and flushed in the same
+ * directory, then renamed over the target, since rename is only atomic within
+ * one filesystem. Temp files are named out of the `*.json` space, so a write
+ * killed mid-flight leaves litter rather than a half-run.
+ */
+export async function writeRunRecord(
+  env: Environ,
+  home: string,
+  record: RunRecord,
+): Promise<string> {
   const directory = runsDirectory(env, home);
-  mkdirSync(directory, { recursive: true });
   const path = join(directory, `${record.run_id}.json`);
-  Bun.write(path, `${JSON.stringify(record, null, 2)}\n`);
+  const temp = join(directory, `.${record.run_id}.${process.pid}.${writeSequence++}.tmp`);
+  try {
+    mkdirSync(directory, { recursive: true });
+    const handle = await open(temp, "wx");
+    try {
+      await handle.writeFile(`${JSON.stringify(record, null, 2)}\n`);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    renameSync(temp, path);
+  } catch (error) {
+    try {
+      unlinkSync(temp);
+    } catch {
+      // Never created, or already renamed into place.
+    }
+    throw new CliError(
+      "run_record_unwritable",
+      `run record ${path} could not be written: ${(error as Error).message}`,
+      `check that ${directory} is writable, then retry`,
+    );
+  }
   return path;
+}
+
+/** A file we own that does not parse as a record is corruption, not a foreign
+ * file: writes are atomic, so nothing else can produce one. */
+function corruptRecord(path: string, detail: string): CliError {
+  return new CliError(
+    "run_registry_corrupt",
+    `${path} ${detail} — the run registry is corrupt`,
+    `move it aside and retry: mv ${path} ${path}.corrupt`,
+  );
+}
+
+/** The fields the registry itself joins on. Everything else is optional by
+ * design: a record outlives the version that wrote it. */
+function assertRunRecord(path: string, value: unknown): RunRecord {
+  const record = value as RunRecord | null;
+  if (
+    typeof record !== "object" ||
+    record === null ||
+    typeof record.run_id !== "string" ||
+    typeof record.created_at !== "string" ||
+    typeof record.workspace?.path !== "string"
+  ) {
+    throw corruptRecord(path, "is not a run record");
+  }
+  return record;
+}
+
+async function loadRunRecord(path: string): Promise<RunRecord> {
+  let parsed: unknown;
+  try {
+    parsed = await Bun.file(path).json();
+  } catch (error) {
+    throw corruptRecord(path, `is not readable JSON (${(error as Error).message})`);
+  }
+  return assertRunRecord(path, parsed);
 }
 
 export async function readRunRecord(env: Environ, home: string, runId: string): Promise<RunRecord> {
@@ -90,7 +174,7 @@ export async function readRunRecord(env: Environ, home: string, runId: string): 
       "agentsurface x-runs lists the recorded runs",
     );
   }
-  return (await Bun.file(path).json()) as RunRecord;
+  return await loadRunRecord(path);
 }
 
 /** Newest first — records are tiny and the directory is flat. */
@@ -100,11 +184,7 @@ export async function listRunRecords(env: Environ, home: string): Promise<RunRec
   const records: RunRecord[] = [];
   for (const entry of readdirSync(directory)) {
     if (!entry.endsWith(".json")) continue;
-    try {
-      records.push((await Bun.file(join(directory, entry)).json()) as RunRecord);
-    } catch {
-      // A half-written or foreign file is not a run; listing skips it.
-    }
+    records.push(await loadRunRecord(join(directory, entry)));
   }
   records.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   return records;
@@ -181,7 +261,13 @@ export async function stampClosedRuns(
   for (const record of await listRunRecords(env, home)) {
     if (record.workspace.path !== workspacePath) continue;
     if (record.closed_at != null) continue;
-    writeRunRecord(env, home, { ...record, closed_at: closedAt, closed_as: closedAs });
+    await writeRunRecord(env, home, { ...record, closed_at: closedAt, closed_as: closedAs });
+    // The record is stamped first: a closed record frees the name on its own
+    // (ADR 0019), so a release that never happens is stale litter, while a
+    // release before the stamp would free a name the run still holds.
+    if (typeof record.name === "string") {
+      await releaseRunName(env, home, record.name, record.run_id);
+    }
     // The run's server dies with its terminal, but a hard kill can skip the
     // unlink; a closed run's socket file is inert either way, so it goes.
     // Only ever a path under our own servers directory.
@@ -266,7 +352,7 @@ export async function resolveRun(
   const sessionId = await discoverSessionId(record, env, home);
   if (sessionId === null) return { record, discovered: false };
   const updated = { ...record, session_id: sessionId };
-  writeRunRecord(env, home, updated);
+  await writeRunRecord(env, home, updated);
   return { record: updated, discovered: true };
 }
 
@@ -282,13 +368,165 @@ export async function assertRunNameAvailable(
   home: string,
   name: string,
 ): Promise<void> {
-  const { open } = await findRunsByName(env, home, name);
-  if (open.length === 0) return;
-  throw new CliError(
-    "run_name_taken",
-    `an open run already answers to "${name}" (${open.map((record) => record.run_id).join(", ")})`,
-    "pick another --x-name, or land that run first: agentsurface x-land run:<run-id>",
+  const { open: openRuns } = await findRunsByName(env, home, name);
+  if (openRuns.length === 0) return;
+  throw nameTaken(
+    name,
+    `an open run already answers to "${name}" (${openRuns.map((record) => record.run_id).join(", ")})`,
   );
+}
+
+function nameTaken(name: string, message: string): CliError {
+  return new CliError(
+    "run_name_taken",
+    message,
+    [
+      `pick another --x-name than "${name}",`,
+      "or land the run holding it: agentsurface x-land run:<run-id>",
+    ].join(" "),
+  );
+}
+
+/**
+ * A reservation whose Placement neither committed a record nor released it —
+ * a crash between the two — stops being a claim after this. The bound is the
+ * longest a Placement can plausibly be in flight: registering a project,
+ * creating a workspace, and creating a terminal are backend round trips, and
+ * a slow one is seconds, not minutes. Only an orphan is reaped: a reservation
+ * whose run has a record is judged by that record, however old it is.
+ */
+const RESERVATION_REAP_MS = 10 * 60_000;
+
+interface NameReservation {
+  name: string;
+  run_id: string;
+  created_at: string;
+}
+
+/** Reservations sit beside the records they become, in one directory the
+ * record listing already ignores (it reads `*.json` at the top level only). */
+function namesDirectory(env: Environ, home: string): string {
+  return join(runsDirectory(env, home), ".names");
+}
+
+/** Keyed by digest because a run name is free text (ADR 0017) and a file name
+ * is not: the key has to be injective and path-literal, and the name itself is
+ * inside the file for anyone reading the directory. */
+function reservationPath(env: Environ, home: string, name: string): string {
+  const key = createHash("sha256").update(name).digest("hex").slice(0, 32);
+  return join(namesDirectory(env, home), `${key}.json`);
+}
+
+async function readReservation(path: string): Promise<NameReservation | null> {
+  try {
+    const value = (await Bun.file(path).json()) as NameReservation;
+    return typeof value?.run_id === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function olderThanReapBound(path: string): boolean {
+  try {
+    return Date.now() - statSync(path).mtimeMs > RESERVATION_REAP_MS;
+  } catch {
+    return true;
+  }
+}
+
+/** Exclusive create is the whole mechanism: the filesystem picks the winner. */
+async function claimReservation(path: string, body: string): Promise<boolean> {
+  try {
+    const handle = await open(path, "wx");
+    try {
+      await handle.writeFile(body);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw new CliError(
+      "run_name_unreservable",
+      `run name reservation ${path} could not be written: ${(error as Error).message}`,
+      `check that ${join(path, "..")} is writable, then retry`,
+    );
+  }
+}
+
+async function reservationHolds(
+  env: Environ,
+  home: string,
+  path: string,
+  name: string,
+): Promise<CliError | null> {
+  const holder = await readReservation(path);
+  if (holder === null) {
+    // A reservation created but not written: a crash inside the claim itself.
+    return olderThanReapBound(path)
+      ? null
+      : nameTaken(name, `a Placement in progress reserved "${name}"`);
+  }
+  const records = await listRunRecords(env, home);
+  const record = records.find((candidate) => candidate.run_id === holder.run_id);
+  if (record === undefined) {
+    return olderThanReapBound(path)
+      ? null
+      : nameTaken(name, `a Placement in progress reserved "${name}" (${holder.run_id})`);
+  }
+  // A closed run's name is free again (ADR 0019); the reservation outlived its
+  // release, which is compensation this reap finishes.
+  if (record.closed_at != null) return null;
+  return nameTaken(name, `an open run already answers to "${name}" (${holder.run_id})`);
+}
+
+/**
+ * Take the name before the backend is asked for anything (ADR 0019). The open
+ * records remain the truth about names committed runs hold — this covers only
+ * the window between that check and the record, where two parallel Placements
+ * would otherwise both pass it and both go live with one name, which is also
+ * one agentbus routing handle. Tied to the minted run id so the claim can be
+ * released by exactly the run that made it.
+ */
+export async function reserveRunName(
+  env: Environ,
+  home: string,
+  name: string,
+  runId: string,
+): Promise<void> {
+  const path = reservationPath(env, home, name);
+  mkdirSync(namesDirectory(env, home), { recursive: true });
+  const body = `${JSON.stringify({ name, run_id: runId, created_at: new Date().toISOString() } satisfies NameReservation)}\n`;
+  if (await claimReservation(path, body)) return;
+  const refusal = await reservationHolds(env, home, path, name);
+  if (refusal !== null) throw refusal;
+  try {
+    unlinkSync(path);
+  } catch {
+    // Another caller reaped the same stale reservation; the retry decides.
+  }
+  if (await claimReservation(path, body)) return;
+  throw nameTaken(name, `another Placement took "${name}" first`);
+}
+
+/** Compensation, called on a failed Placement and on close: only the run that
+ * holds the reservation may drop it, so a reused name's new owner survives a
+ * late release from the old one. */
+export async function releaseRunName(
+  env: Environ,
+  home: string,
+  name: string,
+  runId: string,
+): Promise<void> {
+  const path = reservationPath(env, home, name);
+  const holder = await readReservation(path);
+  if (holder === null || holder.run_id !== runId) return;
+  try {
+    unlinkSync(path);
+  } catch {
+    // Already gone: released twice, or reaped as stale.
+  }
 }
 
 /** Both sides of every workspace comparison are resolved: a path crosses into

@@ -40,6 +40,8 @@ import type { RunRecord } from "./runs.ts";
 import {
   assertRunNameAvailable,
   listRunRecords,
+  releaseRunName,
+  reserveRunName,
   resolveCallingRun,
   resolveRun,
   resolveRunReference,
@@ -332,6 +334,22 @@ function runName(parts: Partitioned): string | null {
   if (name === undefined) return null;
   if (name.trim() === "") throw new UsageError("--x-name needs a name");
   return name;
+}
+
+/** Undo for a step already taken, run when a later one fails: a Placement that
+ * never commits must leave nothing claimed behind it. The compensation's own
+ * failure is swallowed — the original refusal is the answer, and a reservation
+ * nobody released is reaped as stale. */
+async function compensating<T>(
+  undo: (() => Promise<void>) | null,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (undo !== null) await undo().catch(() => {});
+    throw error;
+  }
 }
 
 /** The provenance flags as typed, before the run registry is consulted:
@@ -1027,40 +1045,51 @@ async function finishLaunch(
 
   if (surface !== null) {
     const provenance = await resolveProvenance(context, surface.from, surface.backend.name);
+    // Reserved before the backend is asked for anything, because the record
+    // that claims the name is only written once the Placement commits: the
+    // check answers for committed runs, the reservation covers the window
+    // (ADR 0019). Every exit from here that is not that commit releases it.
+    let releaseName: (() => Promise<void>) | null = null;
     if (!dryRun && surface.name !== null) {
-      await assertRunNameAvailable(context.env, context.home, surface.name);
+      const name = surface.name;
+      const runId = mintedRunId as string;
+      await assertRunNameAvailable(context.env, context.home, name);
+      await reserveRunName(context.env, context.home, name, runId);
+      releaseName = () => releaseRunName(context.env, context.home, name, runId);
     }
     // Captured back out of the backend's call so the record can hold the
     // command the harness actually received — the composed spec plus what
     // Prepare appended (ADR 0023's anchoring).
     let appended: string[] = [];
-    const placement = await surface.backend.place({
-      spec: launchSpec,
-      intent: surface.intent,
-      title: surface.title,
-      name: surface.name,
-      provenance,
-      dryRun,
-      prepare: (workspacePath) => {
-        const trust = ensureWorkspaceTrusted(
-          spec.harness,
-          context.env,
-          context.home,
-          workspacePath,
-        );
-        if (trust !== "not applicable") {
-          context.narrator.row("trust", facts(spec.harness, `workspace ${trust}`));
-        }
-        const anchored = workspaceArguments(spec.harness, workspacePath);
-        if (anchored.length > 0) {
-          context.narrator.row("anchor", facts(tildePath(workspacePath, context.home), "--cd"));
-        }
-        appended = anchored;
-        return anchored;
-      },
-      narrator: context.narrator,
-      env: context.env,
-    });
+    const placement = await compensating(releaseName, () =>
+      surface.backend.place({
+        spec: launchSpec,
+        intent: surface.intent,
+        title: surface.title,
+        name: surface.name,
+        provenance,
+        dryRun,
+        prepare: (workspacePath) => {
+          const trust = ensureWorkspaceTrusted(
+            spec.harness,
+            context.env,
+            context.home,
+            workspacePath,
+          );
+          if (trust !== "not applicable") {
+            context.narrator.row("trust", facts(spec.harness, `workspace ${trust}`));
+          }
+          const anchored = workspaceArguments(spec.harness, workspacePath);
+          if (anchored.length > 0) {
+            context.narrator.row("anchor", facts(tildePath(workspacePath, context.home), "--cd"));
+          }
+          appended = anchored;
+          return anchored;
+        },
+        narrator: context.narrator,
+        env: context.env,
+      }),
+    );
     context.narrator.row("surface", surface.backend.name);
     if (placement.project !== null) {
       context.narrator.row(
@@ -1122,7 +1151,9 @@ async function finishLaunch(
         server: composedServer === null ? null : { socket: composedServer },
         from: provenance.kind === "none" ? null : provenance,
       };
-      const recordPath = writeRunRecord(context.env, context.home, record);
+      const recordPath = await compensating(releaseName, () =>
+        writeRunRecord(context.env, context.home, record),
+      );
       context.narrator.detail("record", tildePath(recordPath, context.home));
       context.narrator.row("run", runId as string);
       context.narrator.row("launch", facts(shellLine(finalCommand), `on ${surface.backend.name}`));

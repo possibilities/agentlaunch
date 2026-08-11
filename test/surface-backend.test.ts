@@ -125,24 +125,52 @@ interface RunResult {
   stderr: string;
 }
 
+function environment(world: World, balanced: boolean): Record<string, string> {
+  return {
+    PATH: `${world.binDir}:${process.env["PATH"] ?? ""}`,
+    HOME: world.home,
+    CLAUDE_CONFIG_DIR: join(world.root, "claude"),
+    CODEX_HOME: join(world.root, "codex"),
+    PI_CODING_AGENT_DIR: join(world.root, "pi"),
+    ...(balanced ? {} : { AGENTSURFACE_NO_BALANCE: "1" }),
+  };
+}
+
 function run(world: World, args: string[], cwd?: string): RunResult {
   const result = Bun.spawnSync({
     cmd: ["bun", MAIN, ...args],
     cwd: cwd ?? world.workspace,
-    env: {
-      PATH: `${world.binDir}:${process.env["PATH"] ?? ""}`,
-      HOME: world.home,
-      CLAUDE_CONFIG_DIR: join(world.root, "claude"),
-      CODEX_HOME: join(world.root, "codex"),
-      PI_CODING_AGENT_DIR: join(world.root, "pi"),
-      AGENTSURFACE_NO_BALANCE: "1",
-    },
+    env: environment(world, false),
   });
   return {
     code: result.exitCode,
     stdout: result.stdout.toString(),
     stderr: result.stderr.toString(),
   };
+}
+
+/** The same invocation as `run`, started rather than waited on: two of these
+ * in flight is what a parallel Placement actually looks like. */
+async function runConcurrently(world: World, invocations: string[][]): Promise<RunResult[]> {
+  const children = invocations.map((args) =>
+    Bun.spawn({
+      cmd: ["bun", MAIN, ...args],
+      cwd: world.workspace,
+      env: environment(world, false),
+      stdout: "pipe",
+      stderr: "pipe",
+    }),
+  );
+  return await Promise.all(
+    children.map(async (child) => {
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      return { code, stdout, stderr };
+    }),
+  );
 }
 
 function orcaCalls(world: World): string[] {
@@ -733,6 +761,48 @@ describe("run names", () => {
     expect(run(world, ["x-run", "auth-flow", "--x-json"]).code).toBe(0);
   });
 
+  test("two Placements racing for one name: exactly one gets it", async () => {
+    const world = makeWorld();
+    const invocation = [
+      "--x-harness",
+      "claude",
+      "--x-surface",
+      "--x-name",
+      "auth-flow",
+      "--x-no-yolo",
+      "--x-json",
+    ];
+    const results = await runConcurrently(world, [invocation, invocation]);
+    // The availability check both would pass answers only for committed
+    // runs; the reservation is what decides between them (ADR 0019).
+    const placed = results.filter((result) => result.code === 0);
+    const refused = results.filter((result) => result.code !== 0);
+    expect(placed).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+    expect((JSON.parse(refused[0]!.stdout) as AnyEnvelope).error?.code).toBe("run_name_taken");
+    // And the winner is a whole run: one record, holding the name.
+    const runId = surfaceData(placed[0]!).run_id!;
+    expect(readRecord(world, runId).name).toBe("auth-flow");
+    const listed = run(world, ["x-run", "auth-flow", "--x-json"]);
+    expect(listed.code).toBe(0);
+    expect(((JSON.parse(listed.stdout) as AnyEnvelope).data as unknown as RunRecord).run_id).toBe(
+      runId,
+    );
+  }, 20_000);
+
+  test("landing a run frees its name for the next Placement", () => {
+    const world = makeWorld();
+    const runId = placeNamed(world, "auth-flow");
+    // Stamped closed the way x-land does, which is where the name is released.
+    const record = readRecord(world, runId);
+    writeFileSync(
+      join(runsDir(world), `${runId}.json`),
+      JSON.stringify({ ...record, closed_at: new Date().toISOString(), closed_as: "landed" }),
+    );
+    const reused = placeNamed(world, "auth-flow");
+    expect(reused).not.toBe(runId);
+  });
+
   /** A balanced Placement composes through codex-swap, which is where the Run
    * server lives; the fake agentusage supplies the account half. */
   function installFakeBalance(world: World): void {
@@ -771,13 +841,7 @@ describe("run names", () => {
         "--x-json",
       ],
       cwd: world.workspace,
-      env: {
-        PATH: `${world.binDir}:${process.env["PATH"] ?? ""}`,
-        HOME: world.home,
-        CLAUDE_CONFIG_DIR: join(world.root, "claude"),
-        CODEX_HOME: join(world.root, "codex"),
-        PI_CODING_AGENT_DIR: join(world.root, "pi"),
-      },
+      env: environment(world, true),
     });
     expect(result.exitCode).toBe(0);
     return surfaceData({

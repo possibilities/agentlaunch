@@ -66,7 +66,12 @@ the harnesses actually write, not from their documentation.
   JSON file per run under `~/.local/state/agentsurface/runs/`, ids
   validated like session ids, discovery by the run's own server socket
   first (codex placements, ADR 0026), then workspace-cwd and birth-time
-  match against the stores.
+  match against the stores. Every record write is awaited and atomic
+  (complete temp file, then rename), so a `*.json` there that does not
+  parse as a record is registry corruption and says so rather than
+  disappearing; a run name is claimed by exclusive create under
+  `runs/.names/` before the backend is asked for anything, and released
+  when a Placement fails or its run closes.
 - `balance.ts` composes the account-balancing prefix around a spec
   (ADR 0003): shells `agentusage balance --json`, wraps with cswap /
   codex-swap [pi] run, never edits the harness argv after the wrapper's
