@@ -1,7 +1,7 @@
 # 0004 — PATH shims route bare harness calls; the sentinel breaks recursion
 
 Bare `claude`, `codex`, and `pi` on this machine are shims (installed by
-funk, ahead of the real binaries on PATH) that exec
+AgentStart, ahead of the real binaries on PATH) that exec
 `agentsurface open <harness> -- "$@"` — every launch balances, however it
 was typed. The recursion this invites (agentsurface → swap tool → harness
 from PATH → shim → agentsurface …) is broken by one env sentinel:

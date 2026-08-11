@@ -13,6 +13,6 @@ duplicates a forwarded spelling (aliases included: pi `-a`), and never
 overrides pi's own `--no-approve`. A malformed config still fails the
 launch — silently misreading a config meant to disable would launch with
 the gates down against the operator's wishes. Rejected: default-off with
-an enabling config, which made every integration (funk's stowed config,
+an enabling config, which made every integration (the stowed shell config,
 Orca's per-agent args) carry state to get the behavior this operator
 always wants.
