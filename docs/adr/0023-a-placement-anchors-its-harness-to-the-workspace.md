@@ -34,6 +34,11 @@ harness whether or not the launch was wrapped. That keeps the rule
 backend-generic and wrapper-generic, while `harness.ts` keeps owning that
 `--cd` is codex's spelling and that the other two need nothing.
 
+**Superseded framing — see ADR 0025.** This was written as a workaround for
+someone else's regression. It is not: in remote mode `--cd` is codex's only
+input for a thread's directory, by design, so the anchoring is permanent.
+The paragraph below is kept as written, and is wrong about being temporary.
+
 **This is a workaround for someone else's regression, and should not outlive
 it.** The honest fix is for a codex session to know its own directory —
 whether from the TUI forwarding it on remote attach or from codex-swap's

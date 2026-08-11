@@ -27,7 +27,9 @@ That fallback carries the ambiguity a workspace always has — two open runs of
 one harness there resolve to neither, the refusal the Placement lease
 (ADR 0020) exists to make rare.
 
-**A runner launch anchors itself**, which this ADR also settles: ADR 0023
+**A runner launch anchors itself**, which this ADR also settles (and which
+ADR 0025 later corrects on one point: the anchoring is the supported path, not
+a temporary patch): ADR 0023
 rejected anchoring runner-mode launches on the reasoning that they "run in the
 terminal's directory already". That was wrong. They reach the same shared
 app-server through the same wrapper and record the same `/`, so a runner-mode
