@@ -234,6 +234,12 @@ gave one), backend, harness, workspace, session id (or "not yet
 discovered"), and Placement time. Records live one file per run under
 ~/.local/state/agentsurface/runs/ and are written by every non-dry
 surface Placement (ADR 0014/0022).
+
+A Placement interrupted between its resources has no record yet, and is
+listed after them as "interrupted <run-id>": the phase it stopped after,
+the workspace it created and never attached, and the journal file naming
+them (ADR 0027). Nothing is released for you — a workspace may hold work,
+so releasing one is x-land's operation and your decision.
 `,
   "x-whoami": `agentsurface x-whoami [--x-json]
 

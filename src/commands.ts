@@ -36,10 +36,13 @@ import { facts, shellLine, tildePath } from "./narrate.ts";
 import type { Partitioned } from "./partition.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
-import type { RunRecord } from "./runs.ts";
+import type { PlacementJournal, RunRecord } from "./runs.ts";
 import {
   assertRunNameAvailable,
+  interruptedPlacements,
   listRunRecords,
+  openPlacementJournal,
+  placementJournalPath,
   releaseRunName,
   reserveRunName,
   resolveCallingRun,
@@ -336,22 +339,6 @@ function runName(parts: Partitioned): string | null {
   return name;
 }
 
-/** Undo for a step already taken, run when a later one fails: a Placement that
- * never commits must leave nothing claimed behind it. The compensation's own
- * failure is swallowed — the original refusal is the answer, and a reservation
- * nobody released is reaped as stale. */
-async function compensating<T>(
-  undo: (() => Promise<void>) | null,
-  operation: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await operation();
-  } catch (error) {
-    if (undo !== null) await undo().catch(() => {});
-    throw error;
-  }
-}
-
 /** The provenance flags as typed, before the run registry is consulted:
  * resolving a `run:` reference is a read, so it waits for the launch build. */
 type FromRequest = { kind: "none" } | { kind: "ref"; ref: string };
@@ -622,9 +609,20 @@ export async function doctorCommand(context: Context, parts: Partitioned): Promi
   lines.push(
     `  runs   ${runs.length} recorded · ${tildePath(runsDirectory(context.env, context.home), context.home)}`,
   );
+  const interrupted = await interruptedPlacements(context.env, context.home);
+  if (interrupted.length > 0) {
+    lines.push(
+      `  placing ${interrupted.length} interrupted · agentsurface x-runs names what they left`,
+    );
+  }
   return {
     kind: "result",
-    data: { harnesses: reports, config, catalog, surface: { backends, runs: runs.length } },
+    data: {
+      harnesses: reports,
+      config,
+      catalog,
+      surface: { backends, runs: runs.length, interrupted: interrupted.length },
+    },
     human: lines.join("\n"),
   };
 }
@@ -692,11 +690,30 @@ export async function runsCommand(context: Context, parts: Partitioned): Promise
       record.created_at,
     ),
   );
+  // A Placement that never committed has no record to list, and hiding it
+  // would leave whatever it created unaccounted for (ADR 0027).
+  const interrupted = await interruptedPlacements(context.env, context.home);
+  lines.push(...interrupted.map((journal) => describeInterrupted(context, journal)));
   return {
     kind: "result",
-    data: { runs: records },
+    data: { runs: records, interrupted },
     human: lines.length > 0 ? lines.join("\n") : "no recorded runs",
   };
+}
+
+function describeInterrupted(context: Context, journal: PlacementJournal): string {
+  return facts(
+    `interrupted ${journal.run_id}`,
+    journal.name ?? undefined,
+    `stopped after ${journal.phase}`,
+    journal.workspace?.created === true
+      ? `workspace ${tildePath(journal.workspace.path, context.home)} created and never attached`
+      : undefined,
+    journal.terminal == null ? undefined : `terminal ${journal.terminal}`,
+    journal.account?.lease == null ? undefined : `lease ${journal.account.lease}`,
+    journal.failure ?? undefined,
+    tildePath(placementJournalPath(context.env, context.home, journal.run_id), context.home),
+  );
 }
 
 export async function runCommand(context: Context, parts: Partitioned): Promise<Outcome> {
@@ -990,89 +1007,118 @@ async function finishLaunch(
   // be in the composed command.
   const mintedRunId = surface !== null && !utility ? crypto.randomUUID() : null;
 
-  let launchSpec = spec;
-  let decision: BalanceDecision | null = null;
-  let composedServer: string | null = null;
-  if (utility) {
-    context.narrator.row("account", `skipped · ${spec.command[1]} is a utility invocation`);
-  } else if (balanceDisabled(context.env, noBalance)) {
-    context.narrator.row(
-      "account",
-      `skipped · balancing off ${noBalance ? "for this launch" : "(AGENTSURFACE_NO_BALANCE)"}`,
-    );
-  } else {
-    if (account !== undefined) context.narrator.detail("pin", `${account} · still gated`);
-    // Derived here rather than with the run id: only a balanced codex
-    // Placement composes a Run server (ADR 0026), and deriving it is what
-    // refuses a state directory with no room for the socket.
-    const serverRequest =
-      mintedRunId !== null && spec.harness === "codex"
-        ? runServerListenUrl(context.env, context.home, mintedRunId)
-        : undefined;
-    const balanced = await balanceSpec(context.env, spec, {
-      account,
-      model: routingModel,
-      dryRun,
-      server: serverRequest,
-      narrator: context.narrator,
-    });
-    launchSpec = balanced.spec;
-    decision = balanced.decision;
-    context.narrator.row("account", describeAccount(balanced.decision));
-    if (serverRequest !== undefined) {
-      composedServer = serverRequest;
+  // A Placement claims an account, creates a Workspace, and starts a terminal
+  // in it before the run record that describes all three can be written, so
+  // every phase is journaled as it completes: a failure after that leaves a
+  // durable trace naming what exists, instead of an orphan nobody recorded.
+  // A dry run creates nothing, so it journals nothing.
+  const journal =
+    mintedRunId !== null && surface !== null && !dryRun
+      ? openPlacementJournal(context.env, context.home, {
+          run_id: mintedRunId,
+          backend: surface.backend.name,
+          harness: spec.harness,
+          name: surface.name,
+        })
+      : null;
+  // Reserved before the backend is asked for anything, because the record
+  // that claims the name is only written once the Placement commits: the
+  // check answers for committed runs, the reservation covers the window
+  // (ADR 0019). Every exit that is not that commit releases it.
+  let releaseName: (() => Promise<void>) | null = null;
+
+  try {
+    await journal?.record("reserved", {});
+
+    let launchSpec = spec;
+    let decision: BalanceDecision | null = null;
+    let composedServer: string | null = null;
+    if (utility) {
+      context.narrator.row("account", `skipped · ${spec.command[1]} is a utility invocation`);
+    } else if (balanceDisabled(context.env, noBalance)) {
       context.narrator.row(
-        "server",
-        facts("dedicated", tildePath(serverRequest.slice("unix://".length), context.home)),
+        "account",
+        `skipped · balancing off ${noBalance ? "for this launch" : "(AGENTSURFACE_NO_BALANCE)"}`,
       );
+    } else {
+      if (account !== undefined) context.narrator.detail("pin", `${account} · still gated`);
+      // Derived here rather than with the run id: only a balanced codex
+      // Placement composes a Run server (ADR 0026), and deriving it is what
+      // refuses a state directory with no room for the socket.
+      const serverRequest =
+        mintedRunId !== null && spec.harness === "codex"
+          ? runServerListenUrl(context.env, context.home, mintedRunId)
+          : undefined;
+      const balanced = await balanceSpec(context.env, spec, {
+        account,
+        model: routingModel,
+        dryRun,
+        server: serverRequest,
+        narrator: context.narrator,
+      });
+      launchSpec = balanced.spec;
+      decision = balanced.decision;
+      context.narrator.row("account", describeAccount(balanced.decision));
+      if (serverRequest !== undefined) {
+        composedServer = serverRequest;
+        context.narrator.row(
+          "server",
+          facts("dedicated", tildePath(serverRequest.slice("unix://".length), context.home)),
+        );
+      }
+      await journal?.record("account-claimed", {
+        account: { key: decision.accountKey, lease: decision.leaseId },
+        server: composedServer,
+      });
     }
-  }
 
-  const data = {
-    harness: spec.harness,
-    // What was asked for, whether or not the harness had a spelling for it:
-    // on codex a runner launch drops it, and the narrative says so.
-    name: runName(parts),
-    session_id: spec.sessionId,
-    cwd: context.cwd,
-    command: launchSpec.command,
-    balance: decision,
-    utility,
-    yolo: yolo.on,
-    redactions: applied.redacted,
-    model: model.value,
-    model_source: model.source,
-    effort: effort.value,
-    effort_source: effort.source,
-  };
+    const data = {
+      harness: spec.harness,
+      // What was asked for, whether or not the harness had a spelling for it:
+      // on codex a runner launch drops it, and the narrative says so.
+      name: runName(parts),
+      session_id: spec.sessionId,
+      cwd: context.cwd,
+      command: launchSpec.command,
+      balance: decision,
+      utility,
+      yolo: yolo.on,
+      redactions: applied.redacted,
+      model: model.value,
+      model_source: model.source,
+      effort: effort.value,
+      effort_source: effort.source,
+    };
 
-  if (surface !== null) {
-    const provenance = await resolveProvenance(context, surface.from, surface.backend.name);
-    // Reserved before the backend is asked for anything, because the record
-    // that claims the name is only written once the Placement commits: the
-    // check answers for committed runs, the reservation covers the window
-    // (ADR 0019). Every exit from here that is not that commit releases it.
-    let releaseName: (() => Promise<void>) | null = null;
-    if (!dryRun && surface.name !== null) {
-      const name = surface.name;
-      const runId = mintedRunId as string;
-      await assertRunNameAvailable(context.env, context.home, name);
-      await reserveRunName(context.env, context.home, name, runId);
-      releaseName = () => releaseRunName(context.env, context.home, name, runId);
-    }
-    // Captured back out of the backend's call so the record can hold the
-    // command the harness actually received — the composed spec plus what
-    // Prepare appended (ADR 0023's anchoring).
-    let appended: string[] = [];
-    const placement = await compensating(releaseName, () =>
-      surface.backend.place({
+    if (surface !== null) {
+      const provenance = await resolveProvenance(context, surface.from, surface.backend.name);
+      if (!dryRun && surface.name !== null) {
+        const name = surface.name;
+        const runId = mintedRunId as string;
+        await assertRunNameAvailable(context.env, context.home, name);
+        await reserveRunName(context.env, context.home, name, runId);
+        releaseName = () => releaseRunName(context.env, context.home, name, runId);
+      }
+      // Captured back out of the backend's call so the record can hold the
+      // command the harness actually received — the composed spec plus what
+      // Prepare appended (ADR 0023's anchoring).
+      let appended: string[] = [];
+      const placement = await surface.backend.place({
         spec: launchSpec,
         intent: surface.intent,
         title: surface.title,
         name: surface.name,
         provenance,
         dryRun,
-        prepare: (workspacePath) => {
+        prepare: async (workspacePath) => {
+          // Prepare is where the Workspace first exists and nothing has
+          // started in it yet, which makes it the one moment the caller can
+          // journal a Workspace a later failure would orphan. Only a
+          // Placement that asked for a new one created it; an existing one
+          // was somebody else's before this Placement and stays theirs.
+          await journal?.record("workspace-created", {
+            workspace: { path: workspacePath, created: surface.intent.kind === "new" },
+          });
           const trust = ensureWorkspaceTrusted(
             spec.harness,
             context.env,
@@ -1091,108 +1137,123 @@ async function finishLaunch(
         },
         narrator: context.narrator,
         env: context.env,
-      }),
-    );
-    context.narrator.row("surface", surface.backend.name);
-    if (placement.project !== null) {
+      });
+      if (placement.terminal !== null) {
+        await journal?.record("terminal-created", { terminal: placement.terminal });
+      }
+      context.narrator.row("surface", surface.backend.name);
+      if (placement.project !== null) {
+        context.narrator.row(
+          "project",
+          facts(
+            placement.project.name,
+            placement.project.created ? (dryRun ? "would register" : "registered") : "existing",
+          ),
+        );
+      }
       context.narrator.row(
-        "project",
+        "workspace",
         facts(
-          placement.project.name,
-          placement.project.created ? (dryRun ? "would register" : "registered") : "existing",
+          placement.workspace.name,
+          placement.workspace.created
+            ? "created"
+            : dryRun && surface.intent.kind === "new"
+              ? "would create"
+              : "existing",
+          placement.workspace.path === null
+            ? undefined
+            : tildePath(placement.workspace.path, context.home),
         ),
       );
-    }
-    context.narrator.row(
-      "workspace",
-      facts(
-        placement.workspace.name,
-        placement.workspace.created
-          ? "created"
-          : dryRun && surface.intent.kind === "new"
-            ? "would create"
-            : "existing",
-        placement.workspace.path === null
-          ? undefined
-          : tildePath(placement.workspace.path, context.home),
-      ),
-    );
-    // Provenance is decided only where a workspace is created; an existing
-    // one keeps what it had, so there is no decision to report.
-    if (surface.intent.kind === "new") {
-      // A dry run records nothing by definition, so the note is reserved for
-      // a backend that could not express what was asked.
-      const unrecorded = !placement.provenance.recorded && !dryRun;
-      context.narrator.row(
-        "from",
-        facts(placement.provenance.detail, unrecorded ? "not recorded" : undefined),
-      );
-    }
-    // The command as the harness received it: the composed spec plus what
-    // Prepare appended. Dry runs never prepare, so theirs is the spec alone.
-    const finalCommand = [...launchSpec.command, ...appended];
-    let runId: string | null = null;
-    if (!dryRun) {
-      runId = mintedRunId;
-      const record: RunRecord = {
-        run_id: runId as string,
-        created_at: new Date().toISOString(),
-        kind: surface.kind,
-        backend: surface.backend.name,
-        harness: spec.harness,
-        level: surface.level,
-        name: surface.name,
-        workspace: {
-          name: placement.workspace.name,
-          // Outside a dry run a placed Workspace always has its path.
-          path: placement.workspace.path ?? context.cwd,
-          id: placement.workspace.id,
-        },
-        terminal: placement.terminal,
+      // Provenance is decided only where a workspace is created; an existing
+      // one keeps what it had, so there is no decision to report.
+      if (surface.intent.kind === "new") {
+        // A dry run records nothing by definition, so the note is reserved for
+        // a backend that could not express what was asked.
+        const unrecorded = !placement.provenance.recorded && !dryRun;
+        context.narrator.row(
+          "from",
+          facts(placement.provenance.detail, unrecorded ? "not recorded" : undefined),
+        );
+      }
+      // The command as the harness received it: the composed spec plus what
+      // Prepare appended. Dry runs never prepare, so theirs is the spec alone.
+      const finalCommand = [...launchSpec.command, ...appended];
+      let runId: string | null = null;
+      if (!dryRun) {
+        runId = mintedRunId;
+        const record: RunRecord = {
+          run_id: runId as string,
+          created_at: new Date().toISOString(),
+          kind: surface.kind,
+          backend: surface.backend.name,
+          harness: spec.harness,
+          level: surface.level,
+          name: surface.name,
+          workspace: {
+            name: placement.workspace.name,
+            // Outside a dry run a placed Workspace always has its path.
+            path: placement.workspace.path ?? context.cwd,
+            id: placement.workspace.id,
+          },
+          terminal: placement.terminal,
+          command: finalCommand,
+          session_id: spec.sessionId,
+          server: composedServer === null ? null : { socket: composedServer },
+          from: provenance.kind === "none" ? null : provenance,
+        };
+        const recordPath = await writeRunRecord(context.env, context.home, record);
+        // The open record is the commit: it is published only once every
+        // resource it describes exists, and it is what the journal becomes.
+        await journal?.commit();
+        context.narrator.detail("record", tildePath(recordPath, context.home));
+        context.narrator.row("run", runId as string);
+        context.narrator.row(
+          "launch",
+          facts(shellLine(finalCommand), `on ${surface.backend.name}`),
+        );
+      } else {
+        context.narrator.row("dry run", "nothing placed · command on stdout");
+      }
+      const surfaceData = {
+        ...data,
         command: finalCommand,
-        session_id: spec.sessionId,
-        server: composedServer === null ? null : { socket: composedServer },
-        from: provenance.kind === "none" ? null : provenance,
-      };
-      const recordPath = await compensating(releaseName, () =>
-        writeRunRecord(context.env, context.home, record),
-      );
-      context.narrator.detail("record", tildePath(recordPath, context.home));
-      context.narrator.row("run", runId as string);
-      context.narrator.row("launch", facts(shellLine(finalCommand), `on ${surface.backend.name}`));
-    } else {
-      context.narrator.row("dry run", "nothing placed · command on stdout");
-    }
-    const surfaceData = {
-      ...data,
-      command: finalCommand,
-      run_id: runId,
-      surface: {
-        backend: surface.backend.name,
-        project: placement.project,
-        workspace: placement.workspace,
-        terminal: placement.terminal,
-        server: composedServer,
-        provenance: {
-          requested: provenance,
-          recorded: placement.provenance.recorded,
-          detail: placement.provenance.detail,
+        run_id: runId,
+        surface: {
+          backend: surface.backend.name,
+          project: placement.project,
+          workspace: placement.workspace,
+          terminal: placement.terminal,
+          server: composedServer,
+          provenance: {
+            requested: provenance,
+            recorded: placement.provenance.recorded,
+            detail: placement.provenance.detail,
+          },
         },
-      },
-    };
-    return {
-      kind: "result",
-      data: surfaceData,
-      human: runId ?? shellLine(finalCommand),
-    };
-  }
+      };
+      return {
+        kind: "result",
+        data: surfaceData,
+        human: runId ?? shellLine(finalCommand),
+      };
+    }
 
-  if (!dryRun) {
-    context.narrator.row("launch", shellLine(launchSpec.command));
-    return { kind: "launch", spec: launchSpec };
+    if (!dryRun) {
+      context.narrator.row("launch", shellLine(launchSpec.command));
+      return { kind: "launch", spec: launchSpec };
+    }
+    context.narrator.row("dry run", "nothing launched · command on stdout");
+    return { kind: "result", data, human: shellLine(launchSpec.command) };
+  } catch (error) {
+    // Compensation is only ever what is safe to undo without a decision: the
+    // name goes back, and what the Placement created is written down for the
+    // operator. Releasing a Workspace is x-land's job, because it can discard
+    // work — an interrupted Placement is named, never cleaned up behind.
+    if (releaseName !== null) await releaseName().catch(() => {});
+    await journal?.interrupt(error).catch(() => {});
+    throw error;
   }
-  context.narrator.row("dry run", "nothing launched · command on stdout");
-  return { kind: "result", data, human: shellLine(launchSpec.command) };
 }
 
 /** Yolo changes what the harness will let the model do, and --x-no-yolo can

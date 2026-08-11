@@ -71,7 +71,11 @@ the harnesses actually write, not from their documentation.
   parse as a record is registry corruption and says so rather than
   disappearing; a run name is claimed by exclusive create under
   `runs/.names/` before the backend is asked for anything, and released
-  when a Placement fails or its run closes.
+  when a Placement fails or its run closes. A Placement in flight journals
+  each phase it completes under `runs/.placing/` (ADR 0027), and writing the
+  record is the commit that clears it — so a Placement interrupted between
+  resources names what it created instead of vanishing, and x-runs and
+  x-doctor say so.
 - `balance.ts` composes the account-balancing prefix around a spec
   (ADR 0003): shells `agentusage balance --json`, wraps with cswap /
   codex-swap [pi] run, never edits the harness argv after the wrapper's

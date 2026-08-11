@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -11,7 +12,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Envelope } from "../src/envelope.ts";
-import type { RunRecord } from "../src/runs.ts";
+import type { PlacementJournal, RunRecord } from "../src/runs.ts";
 import type { Provenance } from "../src/surface.ts";
 
 type AnyEnvelope = Envelope<Record<string, unknown>>;
@@ -888,6 +889,85 @@ describe("run names", () => {
     const config = readFileSync(join(world.root, "codex", "config.toml"), "utf8");
     expect(config).toContain(`[projects.${JSON.stringify(realpathSync(world.workspace))}]`);
     expect(config).toContain('trust_level = "trusted"');
+  });
+
+  function placingDir(world: World): string {
+    return join(runsDir(world), ".placing");
+  }
+
+  function journals(world: World): PlacementJournal[] {
+    if (!existsSync(placingDir(world))) return [];
+    return readdirSync(placingDir(world))
+      .filter((entry) => entry.endsWith(".json"))
+      .map(
+        (entry) =>
+          JSON.parse(readFileSync(join(placingDir(world), entry), "utf8")) as PlacementJournal,
+      );
+  }
+
+  test("a committed Placement leaves the journal clean and the record open", () => {
+    const world = makeWorld();
+    const runId = placeNamed(world, "clean-run");
+    expect(journals(world)).toEqual([]);
+    const record = readRecord(world, runId);
+    expect(record.closed_at ?? null).toBeNull();
+    expect(record.terminal).toBe("term_test-1");
+  });
+
+  test("a Placement interrupted after the workspace exists journals the orphan", () => {
+    const world = makeWorld();
+    Bun.spawnSync({ cmd: ["git", "init", "-q", world.workspace] });
+    const created = join(world.root, "worktrees", "auth");
+    answerFile(world, "worktree-create", {
+      ok: true,
+      result: { worktree: { id: `repo1::${created}`, path: created, displayName: "auth" } },
+    });
+    // The failure lands between the two resources: the workspace exists, the
+    // terminal never does.
+    answerFile(world, "terminal-create", { ok: false, error: { message: "no runtime" } }, 1);
+    const result = run(world, [
+      "--x-harness",
+      "codex",
+      "--x-surface",
+      "--x-new-workspace",
+      "auth",
+      "--x-name",
+      "auth-flow",
+      "--x-no-yolo",
+      "--x-json",
+    ]);
+    expect(result.code).toBe(1);
+    expect((JSON.parse(result.stdout) as AnyEnvelope).error?.code).toBe("surface_backend");
+    // Nothing committed, so there is no run record — the journal is the whole
+    // durable trace.
+    expect(readdirSync(runsDir(world)).filter((entry) => entry.endsWith(".json"))).toEqual([]);
+    const [journal] = journals(world);
+    expect(journal?.phase).toBe("workspace-created");
+    expect(journal?.name).toBe("auth-flow");
+    expect(journal?.workspace).toEqual({ path: created, created: true });
+    expect(journal?.terminal ?? null).toBeNull();
+    expect(journal?.failed_at).toBeTruthy();
+    expect(journal?.failure).toContain("terminal create");
+
+    const listed = run(world, ["x-runs"]);
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain(`interrupted ${journal?.run_id}`);
+    expect(listed.stdout).toContain("stopped after workspace-created");
+    expect(listed.stdout).toContain("created and never attached");
+    const doctor = run(world, ["x-doctor"]);
+    expect(doctor.stdout).toContain("1 interrupted");
+    // The name the interrupted Placement reserved goes back: compensation is
+    // what can be undone without a decision (ADR 0027).
+    answerFile(
+      world,
+      "terminal-create",
+      {
+        ok: true,
+        result: { terminal: { handle: "term_test-2", worktreeId: `repo1::${world.workspace}` } },
+      },
+      0,
+    );
+    expect(placeNamed(world, "auth-flow")).toBeTruthy();
   });
 
   test("--x-from resolves a run by name", () => {

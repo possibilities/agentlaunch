@@ -35,7 +35,7 @@ export const orcaBackend: SurfaceBackend = {
     const resolved = await resolveWorkspace(request);
     let anchored: string[] = [];
     if (!request.dryRun && resolved.workspace.path !== null) {
-      anchored = request.prepare?.(resolved.workspace.path) ?? [];
+      anchored = (await request.prepare?.(resolved.workspace.path)) ?? [];
     }
     const terminal = request.dryRun
       ? null

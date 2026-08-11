@@ -101,13 +101,33 @@ export async function writeRunRecord(
   record: RunRecord,
 ): Promise<string> {
   const directory = runsDirectory(env, home);
-  const path = join(directory, `${record.run_id}.json`);
-  const temp = join(directory, `.${record.run_id}.${process.pid}.${writeSequence++}.tmp`);
+  try {
+    return await writeJsonAtomically(directory, `${record.run_id}.json`, record);
+  } catch (error) {
+    throw new CliError(
+      "run_record_unwritable",
+      `run record ${join(directory, `${record.run_id}.json`)} could not be written: ${(error as Error).message}`,
+      `check that ${directory} is writable, then retry`,
+    );
+  }
+}
+
+/** The registry's one write primitive: a complete temp file in the target's
+ * own directory, flushed, then renamed over it. Every caller wraps the failure
+ * in its own code, because what could not be written is what a caller can act
+ * on. */
+async function writeJsonAtomically(
+  directory: string,
+  name: string,
+  value: unknown,
+): Promise<string> {
+  const path = join(directory, name);
+  const temp = join(directory, `.${name}.${process.pid}.${writeSequence++}.tmp`);
   try {
     mkdirSync(directory, { recursive: true });
     const handle = await open(temp, "wx");
     try {
-      await handle.writeFile(`${JSON.stringify(record, null, 2)}\n`);
+      await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`);
       await handle.sync();
     } finally {
       await handle.close();
@@ -119,11 +139,7 @@ export async function writeRunRecord(
     } catch {
       // Never created, or already renamed into place.
     }
-    throw new CliError(
-      "run_record_unwritable",
-      `run record ${path} could not be written: ${(error as Error).message}`,
-      `check that ${directory} is writable, then retry`,
-    );
+    throw error;
   }
   return path;
 }
@@ -527,6 +543,189 @@ export async function releaseRunName(
   } catch {
     // Already gone: released twice, or reaped as stale.
   }
+}
+
+/**
+ * The Placement journal: what a Placement has already done, written down
+ * before it can finish. A Placement is one arrival made of several
+ * resources — an account claim, a Workspace the backend created, a terminal
+ * started in it — and the run record is only written once they all exist, so
+ * until this journal there was no durable trace of a Placement that failed
+ * halfway. Every completed phase is journaled, and the fifth state — open —
+ * is the run record itself, which is why committing the record is what
+ * clears the journal (ADR 0027).
+ *
+ * Journal state is agentsurface's own bookkeeping, like the records it sits
+ * beside: nothing here crosses the surface API, and a backend is never asked
+ * about it.
+ */
+export type PlacementPhase =
+  | "reserved"
+  | "account-claimed"
+  | "workspace-created"
+  | "terminal-created";
+
+export interface PlacementJournal {
+  run_id: string;
+  phase: PlacementPhase;
+  started_at: string;
+  updated_at: string;
+  backend: string;
+  harness: HarnessName;
+  name: string | null;
+  /** The account the Placement claimed and the lease that claim holds — what
+   * an interrupted Placement is still spending. */
+  account?: { key: string | null; lease: string | null } | null;
+  /** Where the Placement is being made, and whether it created it: a
+   * Workspace it created and never attached is the orphan an operator has to
+   * decide about, and one it merely found is not. */
+  workspace?: { path: string; created: boolean } | null;
+  terminal?: string | null;
+  server?: string | null;
+  /** Stamped where the failing process could still say so; a killed one
+   * leaves the phase alone and the staleness bound speaks for it. */
+  failed_at?: string | null;
+  failure?: string | null;
+}
+
+/** Journals sit beside the records they become, in a directory the record
+ * listing already ignores (it reads `*.json` at the top level only). */
+function placingDirectory(env: Environ, home: string): string {
+  return join(runsDirectory(env, home), ".placing");
+}
+
+/** The same bound the name reservations use: the longest a Placement can
+ * plausibly still be in flight. Past it, a journal nobody stamped belongs to a
+ * process that was killed rather than one still working. */
+const PLACEMENT_STALE_MS = RESERVATION_REAP_MS;
+
+export interface PlacementJournalWriter {
+  /** Persist a phase that has completed, with what it produced. */
+  record(phase: PlacementPhase, facts: Partial<PlacementJournal>): Promise<void>;
+  /** The Placement failed where we can still say so. The journal is kept when
+   * it names something that now exists without a run, and dropped when it
+   * names nothing — there is no compensation to describe. */
+  interrupt(error: unknown): Promise<void>;
+  /** The run record is written: the Placement is open, and the journal has
+   * nothing left to say. */
+  commit(): Promise<void>;
+}
+
+/**
+ * Nothing is written until the first phase completes, so a Placement refused
+ * before it starts leaves no trace to explain.
+ */
+export function openPlacementJournal(
+  env: Environ,
+  home: string,
+  seed: Pick<PlacementJournal, "run_id" | "backend" | "harness" | "name">,
+): PlacementJournalWriter {
+  const directory = placingDirectory(env, home);
+  const file = `${seed.run_id}.json`;
+  const startedAt = new Date().toISOString();
+  let journal: PlacementJournal = {
+    ...seed,
+    phase: "reserved",
+    started_at: startedAt,
+    updated_at: startedAt,
+  };
+  let written = false;
+  const flush = async (): Promise<void> => {
+    try {
+      await writeJsonAtomically(directory, file, journal);
+      written = true;
+    } catch (error) {
+      throw new CliError(
+        "placement_journal_unwritable",
+        `placement journal ${join(directory, file)} could not be written: ${(error as Error).message}`,
+        `check that ${directory} is writable, then retry`,
+      );
+    }
+  };
+  const drop = (): void => {
+    try {
+      unlinkSync(join(directory, file));
+    } catch {
+      // Never written, or already cleared.
+    }
+  };
+  return {
+    async record(phase, facts) {
+      journal = { ...journal, ...facts, phase, updated_at: new Date().toISOString() };
+      await flush();
+    },
+    async interrupt(error) {
+      if (!written) return;
+      if (!placementLeftSomething(journal)) {
+        drop();
+        return;
+      }
+      journal = {
+        ...journal,
+        updated_at: new Date().toISOString(),
+        failed_at: new Date().toISOString(),
+        failure: error instanceof Error ? error.message : String(error),
+      };
+      await flush().catch(() => {
+        // The journal we already wrote still names the phase and the
+        // resources; losing the stamp only costs the reason.
+      });
+    },
+    async commit() {
+      drop();
+    },
+  };
+}
+
+/** Whether an interrupted Placement left anything behind that outlives it. A
+ * Workspace it created or a terminal it started has no run to belong to; one
+ * it merely found belongs to whatever it belonged to before. */
+function placementLeftSomething(journal: PlacementJournal): boolean {
+  return journal.workspace?.created === true || journal.terminal != null;
+}
+
+/**
+ * Placements that were interrupted between resources: stamped by their own
+ * failing process, or left behind by one that was killed and is now past the
+ * bound. A Placement still in flight in another process is neither, and
+ * reporting it as interrupted would be a lie.
+ *
+ * Nothing is compensated automatically. Releasing a Workspace can discard
+ * work — that is the operator's decision (and x-land's job), not a reader's —
+ * so this names what exists and stops there.
+ */
+export async function interruptedPlacements(
+  env: Environ,
+  home: string,
+): Promise<PlacementJournal[]> {
+  const directory = placingDirectory(env, home);
+  if (!existsSync(directory)) return [];
+  const journals: PlacementJournal[] = [];
+  for (const entry of readdirSync(directory)) {
+    if (!entry.endsWith(".json")) continue;
+    const path = join(directory, entry);
+    let journal: PlacementJournal;
+    try {
+      journal = (await Bun.file(path).json()) as PlacementJournal;
+    } catch {
+      // A journal is written atomically like a record, so an unreadable one
+      // is debris rather than a Placement; the records are the registry.
+      continue;
+    }
+    if (typeof journal?.run_id !== "string" || typeof journal.phase !== "string") continue;
+    const stale =
+      Date.now() - Date.parse(journal.updated_at ?? journal.started_at) > PLACEMENT_STALE_MS;
+    if (journal.failed_at == null && !stale) continue;
+    journals.push(journal);
+  }
+  journals.sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
+  return journals;
+}
+
+/** Where an interrupted Placement's journal lives, so the operator who
+ * finishes the compensation can clear it. */
+export function placementJournalPath(env: Environ, home: string, runId: string): string {
+  return join(placingDirectory(env, home), `${runId}.json`);
 }
 
 /** Both sides of every workspace comparison are resolved: a path crosses into

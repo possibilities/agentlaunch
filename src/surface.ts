@@ -72,8 +72,11 @@ export interface PlaceRequest {
    * harness's own argv — a balancing wrapper contributes a head and a `--`,
    * never a tail — so appending reaches the harness whether or not the launch
    * was wrapped, which is what makes this backend- and wrapper-generic.
+   *
+   * A backend awaits what it returns: the caller writes down here that the
+   * workspace exists, and a durable write is not synchronous.
    */
-  prepare?: (workspacePath: string) => string[] | void;
+  prepare?: (workspacePath: string) => Promise<string[] | undefined> | string[] | undefined;
   narrator: Narrator;
   env: Environ;
 }
