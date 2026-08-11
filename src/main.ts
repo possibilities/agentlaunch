@@ -7,6 +7,7 @@ import {
   resumeCommand,
   runCommand,
   runsCommand,
+  whoamiCommand,
 } from "./commands.ts";
 import { failure, success } from "./envelope.ts";
 import { CliError, UsageError } from "./errors.ts";
@@ -153,6 +154,11 @@ async function main(argv: string[]): Promise<number> {
     spec = specFor({ bool: ["--x-verbose"] });
     own = argv.slice(1);
     run = runCommand;
+  } else if (first === "x-whoami") {
+    helpTopic = "x-whoami";
+    spec = specFor({});
+    own = argv.slice(1);
+    run = whoamiCommand;
   } else {
     helpTopic = "launch";
     spec = specFor(LAUNCH_FLAGS);

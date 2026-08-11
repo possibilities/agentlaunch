@@ -15,6 +15,7 @@ import {
   applyYolo,
   buildOpen,
   buildResume,
+  callerSession,
   effortArguments,
   effortDimensionToken,
   ensureWorkspaceTrusted,
@@ -27,6 +28,7 @@ import {
   sessionStore,
   utilityInvocation,
   workspaceArguments,
+  workspaceDimensionToken,
 } from "./harness.ts";
 import { landWorkspace } from "./land.ts";
 import type { Narrator } from "./narrate.ts";
@@ -39,6 +41,7 @@ import {
   acquirePlacementLease,
   assertRunNameAvailable,
   listRunRecords,
+  resolveCallingRun,
   resolveRun,
   resolveRunReference,
   runsDirectory,
@@ -184,6 +187,18 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
     ];
     context.narrator.row("model", facts(model.value ?? undefined, model.source ?? undefined));
     context.narrator.row("effort", facts(effort.value ?? undefined, effort.source ?? undefined));
+  }
+
+  // A runner launch anchors itself: it already knows the directory, and a
+  // codex session cannot see its own (ADR 0024). A placement anchors later
+  // instead, at `prepare`, because its workspace may not exist yet.
+  if (!utility && surface === null) {
+    const anchorToken = workspaceDimensionToken(harness, tokens);
+    const anchored = anchorToken === null ? workspaceArguments(harness, context.cwd) : [];
+    if (anchored.length > 0) {
+      stream = [...anchored, ...stream];
+      context.narrator.row("anchor", facts(tildePath(context.cwd, context.home), "--cd"));
+    }
   }
 
   const yolo = resolveYolo(context, parts, harness);
@@ -695,6 +710,47 @@ export async function runCommand(context: Context, parts: Partitioned): Promise<
     label("command", shellLine(record.command)),
   ];
   return { kind: "result", data: record, human: lines.join("\n") };
+}
+
+/**
+ * x-whoami (ADR 0024): the run the caller is, answered from inside it. This is
+ * how a worker learns it is on a surface at all — the question a role skill
+ * has to answer before it can say anything else — and it needs nothing stamped
+ * for it, because the harness names its own session and the registry holds the
+ * rest. Not being on a surface is a refusal rather than an empty answer, so
+ * the command doubles as the gate.
+ */
+export async function whoamiCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  if (parts.harness.length > 0) throw new UsageError("x-whoami takes no arguments");
+  const caller = callerSession(context.env);
+  const { record, matched } = await resolveCallingRun(
+    context.env,
+    context.home,
+    context.cwd,
+    caller,
+  );
+  context.narrator.detail(
+    "matched",
+    matched === "session" ? `${record.harness} session id` : "workspace path",
+  );
+  const label = (name: string, value: string): string => `${name.padEnd(10)}${value}`;
+  const data = { ...record, matched };
+  return {
+    kind: "result",
+    data,
+    human: [
+      label("run", record.run_id),
+      label("name", record.name ?? "unnamed"),
+      label("harness", record.harness),
+      label(
+        "workspace",
+        facts(record.workspace.name, tildePath(record.workspace.path, context.home)),
+      ),
+      label("from", describeProvenance(record.from ?? null)),
+      label("session", record.session_id ?? "not yet discovered"),
+      label("matched", matched === "session" ? "session id" : "workspace path"),
+    ].join("\n"),
+  };
 }
 
 /**

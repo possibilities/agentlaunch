@@ -108,8 +108,12 @@ describe("surface", () => {
 
   test("every harness injects its own spellings", () => {
     const codex = run(["--x-harness", "codex", "--x-dry-run", "--x-json", "--x-no-yolo"]);
-    expect(envelope(codex).data?.["command"]).toEqual([
-      "codex",
+    const codexCommand = envelope(codex).data?.["command"] as string[];
+    // Codex alone is anchored to the directory it was typed in (ADR 0024);
+    // the path is this run's own temp cwd, so only its shape is asserted.
+    expect(codexCommand.slice(0, 2)).toEqual(["codex", "--cd"]);
+    expect(codexCommand[2]).toMatch(/^\//);
+    expect(codexCommand.slice(3)).toEqual([
       "--model",
       "gpt-5.6-sol",
       "-c",

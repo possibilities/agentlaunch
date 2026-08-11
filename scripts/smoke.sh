@@ -82,13 +82,15 @@ expect_out '"catalog"'
 expect_exit 0 run --x-harness claude --x-dry-run
 expect_out "claude --dangerously-skip-permissions --model 'opus\[1m\]' --effort medium"
 expect_exit 0 run --x-harness codex --x-no-yolo --x-dry-run
-expect_out "codex --model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"'"
+# Codex alone is anchored to the directory it was typed in (ADR 0024); the
+# path varies, so the assertion spans it.
+expect_out "codex --cd .* --model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"'"
 expect_exit 0 run --x-harness pi --x-no-yolo --x-dry-run
 expect_out "pi --model openai-codex/gpt-5.6-sol --thinking high"
 
 # A level alone walks catalog order; with --x-harness it pins (ADR 0018).
 expect_exit 0 run --x-level gpt-5.6-sol:ultra --x-no-yolo --x-dry-run
-expect_out "codex --model gpt-5.6-sol -c 'model_reasoning_effort=\"ultra\"'"
+expect_out "codex --cd .* --model gpt-5.6-sol -c 'model_reasoning_effort=\"ultra\"'"
 expect_exit 0 run --x-level sonnet:high --x-no-yolo --x-dry-run
 expect_out "claude --model sonnet --effort high"
 expect_exit 0 run --x-harness pi --x-level gpt-5.6-luna:max --x-no-yolo --x-dry-run
@@ -143,6 +145,13 @@ expect_out "codex login"
 expect_exit 0 run --x-harness claude --x-dry-run --version
 expect_out "claude --version"
 expect_exit 2 run --x-harness codex --x-level gpt-5.5:high login --x-dry-run
+
+# x-whoami is the worker's gate: outside a placed workspace it refuses,
+# so a caller can branch on the exit code alone (ADR 0024).
+expect_exit 1 run x-whoami
+expect_exit 1 run x-whoami --x-json
+expect_out '"code":"not_placed"'
+expect_exit 2 run x-whoami extra-argument
 
 # Usage faults exit 2 before anything runs
 expect_exit 2 run --x-bogus

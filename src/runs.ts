@@ -369,3 +369,47 @@ export function acquirePlacementLease(
     "retry the same command in a few seconds",
   );
 }
+
+/**
+ * Which run the caller is, asked from inside it (ADR 0024). Nothing is stamped
+ * for this: a worker already carries the two facts that identify it, and the
+ * registry already holds both sides of the join.
+ *
+ * The session id is exact and is tried first — a harness that names its own
+ * session leaves no room for doubt. The workspace is the fallback, for pi and
+ * for any session placed before its id was discovered, and it carries the
+ * ambiguity a workspace always has: two open runs of one harness there resolve
+ * to neither, the same refusal a Placement lease exists to make rare.
+ */
+export async function resolveCallingRun(
+  env: Environ,
+  home: string,
+  cwd: string,
+  caller: { harness: HarnessName; sessionId: string } | null,
+): Promise<{ record: RunRecord; matched: "session" | "workspace" }> {
+  const records = await listRunRecords(env, home);
+  if (caller !== null) {
+    const bySession = records.find((record) => record.session_id === caller.sessionId);
+    if (bySession !== undefined) return { record: bySession, matched: "session" };
+  }
+  const here = resolvedWorkspacePath(cwd);
+  const open = records.filter(
+    (record) =>
+      record.closed_at == null &&
+      resolvedWorkspacePath(record.workspace.path) === here &&
+      (caller === null || record.harness === caller.harness),
+  );
+  if (open.length === 1) return { record: open[0]!, matched: "workspace" };
+  if (open.length > 1) {
+    throw new CliError(
+      "ambiguous_run",
+      `${open.length} open runs share this workspace: ${open.map((record) => record.run_id).join(", ")}`,
+      "name one by its run id: agentsurface x-run <run-id>",
+    );
+  }
+  throw new CliError(
+    "not_placed",
+    "this session is not a run placed on a surface",
+    "agentsurface x-runs lists the placed runs",
+  );
+}

@@ -7,6 +7,7 @@ Usage:
   agentsurface x-resume <session-id> [tokens…]  Reopen a stored session by id
   agentsurface x-runs                           List recorded surface runs
   agentsurface x-run <run-id|name>              Show one run; discover its session id
+  agentsurface x-whoami                         Report the run you are, from inside it
   agentsurface x-land <workspace-ref>           Merge a workspace back and release it
   agentsurface x-doctor                         Report binaries, stores, config, catalog, surface
 
@@ -234,6 +235,22 @@ discovered"), and Placement time. Records live one file per run under
 ~/.local/state/agentsurface/runs/ and are written by every non-dry
 surface Placement (ADR 0014/0022).
 `,
+  "x-whoami": `agentsurface x-whoami [--x-json]
+
+Report the run you are: for an agent running inside a session that was
+placed on a surface, the record for that Placement (ADR 0024). Nothing has
+to be stamped for this — the harness names its own session, and the run
+registry holds the rest.
+
+Matching is exact where it can be: the session id the enclosing harness
+exports (claude and codex do; pi does not), falling back to the workspace
+you are working in. Two open runs of one harness in one workspace resolve
+to neither, which is an ambiguous_run refusal naming both.
+
+Not being on a surface is a refusal (not_placed) rather than an empty
+answer, so this doubles as the gate for guidance that only applies to a
+placed worker.
+`,
   "x-run": `agentsurface x-run <run-id | run-name> [--x-json]
 
 Show one recorded run, named by its id or by the name --x-name gave it —
@@ -290,7 +307,7 @@ the workspace it was born in.
 };
 
 export const AGENT_TEASER =
-  "Launch agent harnesses (claude, codex, pi) in place or on a surface: agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…] resolves against the catalog and injects the model/effort in the harness's own spelling; --x-surface places the launch in a managed workspace (Orca) and returns a run id; x-resume <session-id> reopens a session with cross-store detection; x-runs/x-run inspect surface runs; x-land merges a finished workspace back to the main line and releases it; x-doctor reports install health.";
+  "Launch agent harnesses (claude, codex, pi) in place or on a surface: agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…] resolves against the catalog and injects the model/effort in the harness's own spelling; --x-surface places the launch in a managed workspace (Orca) and returns a run id; x-resume <session-id> reopens a session with cross-store detection; x-runs/x-run inspect surface runs and x-whoami answers which run the caller is; x-land merges a finished workspace back to the main line and releases it; x-doctor reports install health.";
 
 export const AGENT_HELP = `agentsurface agent runbook
 
@@ -306,6 +323,7 @@ Commands
   agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…]  [--x-surface [backend]]
   agentsurface x-resume <session-id> [tokens…]  [--x-harness claude|codex|pi] [--x-surface]
   agentsurface x-runs [--x-json]
+  agentsurface x-whoami [--x-json]
   agentsurface x-run <run-id | run-name> [--x-json]
   agentsurface x-land <run:<run-id-or-name> | selector> [--x-into <branch>] [--x-force] [--x-abandon] [--x-dry-run] [--x-json]
   agentsurface x-doctor [--x-json]

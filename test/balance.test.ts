@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { composeCodexFamily, normalizePiModel } from "../src/balance.ts";
@@ -189,6 +197,10 @@ describe("balanced launch", () => {
       "--account",
       "account:org-test",
       "--",
+      // A runner launch anchors codex to the directory it was typed in
+      // (ADR 0024) — codex cannot see its own through a shared app-server.
+      "--cd",
+      realpathSync(world.root),
       "--model",
       "gpt-5.6-sol",
       "-c",
@@ -211,7 +223,7 @@ describe("balanced launch", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe(
-      `codex-swap run --account account:org-test -- -c 'model_reasoning_effort="high"' -m gpt-x`,
+      `codex-swap run --account account:org-test -- --cd ${realpathSync(world.root)} -c 'model_reasoning_effort="high"' -m gpt-x`,
     );
     expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-x"]);
   });

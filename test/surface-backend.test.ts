@@ -686,6 +686,30 @@ describe("run names", () => {
     expect(list.stdout).toContain("auth-flow");
   });
 
+  test("x-whoami answers which run the caller is, from the workspace it is in", () => {
+    const world = makeWorld();
+    const runId = placeNamed(world, "the worker");
+    const result = run(world, ["x-whoami", "--x-json"]);
+    expect(result.code).toBe(0);
+    const data = (JSON.parse(result.stdout) as AnyEnvelope).data as unknown as RunRecord & {
+      matched: string;
+    };
+    expect(data.run_id).toBe(runId);
+    expect(data.name).toBe("the worker");
+    // No harness exported a session id here, so the workspace is what matched.
+    expect(data.matched).toBe("workspace");
+  });
+
+  test("x-whoami refuses outside a placed workspace, so it doubles as the gate", () => {
+    const world = makeWorld();
+    const elsewhere = join(world.root, "not-a-workspace");
+    mkdirSync(elsewhere, { recursive: true });
+    const result = run(world, ["x-whoami", "--x-json"], elsewhere);
+    expect(result.code).toBe(1);
+    const envelope = JSON.parse(result.stdout) as AnyEnvelope;
+    expect(envelope.error?.code).toBe("not_placed");
+  });
+
   test("a name an open run already answers to is refused at the source", () => {
     const world = makeWorld();
     const first = placeNamed(world, "auth-flow");

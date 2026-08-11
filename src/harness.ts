@@ -73,6 +73,43 @@ export function nameArguments(harness: HarnessName, name: string): string[] | nu
 }
 
 /**
+ * Who the enclosing harness says its own tools are running as, read from the
+ * environment a harness gives the commands its agent runs. This is how a
+ * worker answers "which run am I?" without anything having to be stamped for
+ * it — the harness already knows, and says so.
+ *
+ * Only two of the three say it. Claude pairs its session id with a marker so a
+ * stale variable inherited by an unrelated process cannot pass for one. Codex
+ * exports the thread id that *is* its session id — and note it comes from the
+ * app-server rather than the session's own process, which is exactly why an
+ * environment variable stamped on the launch could never be trusted here
+ * (ADR 0024). Pi exports nothing usable, so it falls back to the workspace.
+ */
+export function callerSession(env: Environ): { harness: HarnessName; sessionId: string } | null {
+  const claude = env["CLAUDE_CODE_SESSION_ID"];
+  if (claude !== undefined && claude !== "" && env["CLAUDECODE"] === "1") {
+    return { harness: "claude", sessionId: claude };
+  }
+  const codex = env["CODEX_THREAD_ID"];
+  if (codex !== undefined && codex !== "") return { harness: "codex", sessionId: codex };
+  return null;
+}
+
+/** The first forwarded token that natively claims the working-directory
+ * dimension — codex's `--cd` or its `-C` short. Only codex has one. */
+export function workspaceDimensionToken(
+  harness: HarnessName,
+  tokens: readonly string[],
+): string | null {
+  if (harness !== "codex") return null;
+  for (const token of tokens) {
+    if (token === "--cd" || token.startsWith("--cd=")) return token;
+    if (token === "-C" || token.startsWith("-C=")) return token;
+  }
+  return null;
+}
+
+/**
  * How a harness is told which directory it is working in, when the workspace
  * is only known after it has been created (ADR 0023). Only codex needs it, and
  * only because of how it reaches its model: a session attached to a shared
