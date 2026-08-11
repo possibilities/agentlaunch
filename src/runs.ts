@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { Glob } from "bun";
 import { CliError, UsageError } from "./errors.ts";
@@ -177,10 +177,25 @@ export async function stampClosedRuns(
 ): Promise<string[]> {
   const closedAt = new Date().toISOString();
   const stamped: string[] = [];
+  const serversDirectory = join(stateDirectory(env, home, "agentsurface"), "servers");
   for (const record of await listRunRecords(env, home)) {
     if (record.workspace.path !== workspacePath) continue;
     if (record.closed_at != null) continue;
     writeRunRecord(env, home, { ...record, closed_at: closedAt, closed_as: closedAs });
+    // The run's server dies with its terminal, but a hard kill can skip the
+    // unlink; a closed run's socket file is inert either way, so it goes.
+    // Only ever a path under our own servers directory.
+    const socket = record.server?.socket;
+    if (typeof socket === "string" && socket.startsWith("unix://")) {
+      const path = socket.slice("unix://".length);
+      if (path.startsWith(`${serversDirectory}/`)) {
+        try {
+          unlinkSync(path);
+        } catch {
+          // Already gone — the clean-shutdown path unlinked it.
+        }
+      }
+    }
     stamped.push(record.run_id);
   }
   return stamped;
