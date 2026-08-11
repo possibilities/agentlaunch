@@ -1,17 +1,6 @@
 import { createHash } from "node:crypto";
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { Glob } from "bun";
 import { CliError, UsageError } from "./errors.ts";
 import type { HarnessName } from "./harness.ts";
@@ -50,6 +39,11 @@ export interface RunRecord {
   terminal: string | null;
   command: string[];
   session_id: string | null;
+  /** The run's own app-server (codex placements, ADR 0026): the dedicated
+   * socket its session attaches through, which is the run's identity channel
+   * — the one thread on it can only be this run's session. Absent on other
+   * harnesses and on records written before run servers existed. */
+  server?: { socket: string } | null;
   /** What the caller said this run descends from (ADR 0015) — our own
    * bookkeeping, kept whether or not the backend could record it, and
    * absent on records written before provenance existed. */
@@ -204,6 +198,14 @@ export async function discoverSessionId(
   env: Environ,
   home: string,
 ): Promise<string | null> {
+  // A run with its own app-server needs no store scan: the one thread on its
+  // socket IS the session, visible from the moment the TUI attaches — before
+  // any turn writes anything to disk. A dead or empty socket (run ended, TUI
+  // not yet attached) falls through to the store scan below.
+  if (record.server?.socket !== undefined && record.server.socket !== null) {
+    const fromServer = await sessionIdFromRunServer(env, record.server.socket);
+    if (fromServer !== null) return fromServer;
+  }
   const store = sessionStore(record.harness, env, home);
   if (!existsSync(store.root)) return null;
   const placedAt = Date.parse(record.created_at);
@@ -274,22 +276,6 @@ export async function assertRunNameAvailable(
   );
 }
 
-/**
- * Serialized Placements for a workspace (ADR 0020/0022). A codex session is
- * invisible outside its app-server until its first turn — no rollout file, no
- * state row, nothing on disk — so the only fact tying one to a run before it
- * speaks is the workspace it sits in. That is enough exactly while a workspace
- * holds at most one *uncorrelated* session of a harness, which is what this
- * lease buys: a second Placement into the same workspace is refused until the
- * first has had time to appear. Naming is sticky once made, so only the
- * uncorrelated window needs protecting, never the workspace's whole life.
- */
-export const PLACEMENT_LEASE_MS = 60_000;
-
-export interface PlacementLease {
-  release(): void;
-}
-
 /** Both sides of every workspace comparison are resolved: a path crosses into
  * the harness as typed and comes back canonicalized. */
 export function resolvedWorkspacePath(path: string): string {
@@ -300,74 +286,52 @@ export function resolvedWorkspacePath(path: string): string {
   }
 }
 
-function leasePath(env: Environ, home: string, workspacePath: string): string {
-  const key = createHash("sha256")
-    .update(resolvedWorkspacePath(workspacePath))
-    .digest("hex")
-    .slice(0, 32);
-  return join(stateDirectory(env, home, "agentsurface"), "leases", `${key}.json`);
+/**
+ * The Run server's socket (ADR 0026): one per codex Placement, named by the
+ * run id so record and socket point at each other. `sockaddr_un` allows about
+ * 100 bytes; a state directory deep enough to blow that budget (temp HOMEs in
+ * tests do) hashes the id instead — the record's `server.socket` is the
+ * authoritative spelling either way.
+ */
+export function runServerListenUrl(env: Environ, home: string, runId: string): string {
+  const directory = join(stateDirectory(env, home, "agentsurface"), "servers");
+  const full = join(directory, `${runId}.sock`);
+  if (Buffer.byteLength(full) <= 100) return `unix://${full}`;
+  const short = createHash("sha256").update(runId).digest("hex").slice(0, 12);
+  return `unix://${join(directory, `${short}.sock`)}`;
 }
 
-export function acquirePlacementLease(
-  env: Environ,
-  home: string,
-  workspacePath: string,
-  now: number = Date.now(),
-  ttlMs: number = PLACEMENT_LEASE_MS,
-): PlacementLease {
-  const path = leasePath(env, home, workspacePath);
-  mkdirSync(dirname(path), { recursive: true });
-  // Two passes at most: the first can lose to an expired lease left by a
-  // Placement that never came back, which is cleared and retried once.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const handle = openSync(path, "wx");
-      writeFileSync(
-        handle,
-        `${JSON.stringify({
-          workspace: resolvedWorkspacePath(workspacePath),
-          acquired_at: new Date(now).toISOString(),
-          expires_at: new Date(now + ttlMs).toISOString(),
-        })}\n`,
-      );
-      closeSync(handle);
-      return {
-        release() {
-          try {
-            unlinkSync(path);
-          } catch {
-            // Already gone (expired and taken over): nothing to release.
-          }
-        },
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      let expiresAt = 0;
-      try {
-        const held = JSON.parse(readFileSync(path, "utf8")) as { expires_at?: string };
-        expiresAt = Date.parse(held.expires_at ?? "");
-      } catch {
-        // Unreadable lease: treat as expired rather than blocking forever.
-      }
-      if (Number.isFinite(expiresAt) && expiresAt > now) {
-        throw new CliError(
-          "placement_in_flight",
-          `another Placement into ${workspacePath} is still starting; only one at a time can be told apart`,
-          "retry the same command in a few seconds",
-        );
-      }
-      try {
-        unlinkSync(path);
-      } catch {
-        // Someone else cleared it first; the next pass takes it.
-      }
-    }
+/**
+ * Asks a run's own app-server which thread it holds. Exactly one answer is an
+ * identity — the server is exclusive to this run — and anything else is null:
+ * zero threads means the TUI has not attached yet, an unreachable socket
+ * means the run ended, and two threads means the server is not the exclusive
+ * one the record claims, which is a reason to refuse, never to guess.
+ */
+async function sessionIdFromRunServer(env: Environ, listenUrl: string): Promise<string | null> {
+  const swap = Bun.which("codex-swap");
+  if (swap === null) return null;
+  try {
+    const child = Bun.spawn([swap, "app-server", "threads", "--listen", listenUrl, "--json"], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "ignore",
+      env: env as Record<string, string>,
+    });
+    const timeout = setTimeout(() => child.kill(), 15_000);
+    const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    clearTimeout(timeout);
+    if (code !== 0) return null;
+    const body = JSON.parse(stdout) as {
+      data?: { threads?: Array<{ id?: unknown }> };
+    };
+    const threads = body.data?.threads ?? [];
+    if (threads.length !== 1) return null;
+    const id = threads[0]?.id;
+    return typeof id === "string" && id.length > 0 ? id : null;
+  } catch {
+    return null;
   }
-  throw new CliError(
-    "placement_in_flight",
-    `could not claim a Placement slot for ${workspacePath}`,
-    "retry the same command in a few seconds",
-  );
 }
 
 /**

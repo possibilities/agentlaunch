@@ -106,12 +106,21 @@ several runs sharing a name refused by name rather than guessed between.
 Every Placement writes a **run record** (ADR 0014/0022): one JSON file under
 `~/.local/state/agentsurface/runs/`, whose run id is printed. Under `--x-json`,
 legal here without `--x-dry-run`, the envelope carries `run_id` and
-`surface {backend, project, workspace, terminal, provenance}`.
+`surface {backend, project, workspace, terminal, server, provenance}`.
 
-The session id is *discovered*, never assigned. Codex mints its id only at
-startup, so `x-run <run-id>` matches the store entry born in the run's
-workspace and backfills the record; `x-runs` lists every surface run. The
-record's terminal handle is the backend's address for the future steer verb.
+A balanced codex Placement additionally gets a **Run server** (ADR 0026): a
+dedicated, exclusive, account-pinned app-server on a socket derived from the
+run id, started and torn down by codex-swap with the session. The one thread
+on that socket can only be the run's session, so thread↔run is identity
+rather than inference — two codex runs in one workspace are simply two
+sockets, and the old per-workspace Placement lease (ADR 0020) is retired.
+
+The session id is *discovered*, never assigned. A codex run's own server
+answers from the moment its TUI attaches (`codex-swap app-server threads`),
+before any turn; otherwise `x-run <run-id>` matches the store entry born in
+the run's workspace and backfills the record; `x-runs` lists every surface
+run. The record's terminal handle is the backend's address for the future
+steer verb.
 
 A surface dry run resolves read-only. A refused surface (runtime unreachable,
 workspace missing) fails the launch loudly, never falling back to this
@@ -228,9 +237,11 @@ command, and the launcher decides.
 Every launch and resume is balanced by default (ADR 0003). `agentusage balance`
 picks the account from live quota observations, and the command is wrapped in
 the swap tool's public contract: `cswap run <slot> --share-history -- …`
-(claude), `codex-swap run|resume --claim <lease> -- …` (codex), or `codex-swap
-pi run --claim <lease> -- …` (pi, riding the codex account pool). The harness
-argv after the wrapper's `--` is byte-identical to the unbalanced command.
+(claude), `codex-swap run|resume --claim <lease> -- …` (codex, with
+`--server unix://<socket>` ahead of the claim on a Placement — the Run
+server, ADR 0026), or `codex-swap pi run --claim <lease> -- …` (pi, riding
+the codex account pool). The harness argv after the wrapper's `--` is
+byte-identical to the unbalanced command.
 Routing reads the native `--model` (or codex's `-m`) from the forwarded tokens;
 a claude resume routes on the session's last-used model.
 

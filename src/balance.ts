@@ -29,6 +29,12 @@ export interface BalanceRequest {
   model: string | undefined;
   /** Dry runs must not reserve or claim anything. */
   dryRun: boolean;
+  /** The Run server's listen URL (codex placements, ADR 0026): codex-swap
+   * starts a dedicated exclusive app-server there, pinned to the account it
+   * chose, and attaches the session to it. Codex only — pi has no app-server
+   * and claude no equivalent — and fail-hard on codex-swap's side: a
+   * placement whose server cannot start is refused, never quietly shared. */
+  server: string | undefined;
   narrator: Narrator;
 }
 
@@ -110,7 +116,10 @@ async function balanceCodexFamily(
   // gate judges the forced account, mirroring its fail-hard contract.
   if (request.account !== undefined) {
     return {
-      spec: { ...spec, command: composeCodexFamily(spec, ["--account", request.account]) },
+      spec: {
+        ...spec,
+        command: composeCodexFamily(spec, ["--account", request.account], request.server),
+      },
       decision: {
         provider: "codex",
         route: null,
@@ -152,7 +161,7 @@ async function balanceCodexFamily(
   // spelling — a real command a human can copy-run through the same gate.
   const pin = leaseId !== null ? ["--claim", leaseId] : ["--account", accountKey];
   return {
-    spec: { ...spec, command: composeCodexFamily(spec, pin) },
+    spec: { ...spec, command: composeCodexFamily(spec, pin, request.server) },
     decision: {
       provider: "codex",
       route: null,
@@ -167,17 +176,31 @@ async function balanceCodexFamily(
  * codex opens wrap as `codex-swap run`, codex resumes as
  * `codex-swap resume <id>` (the session id moves into the wrapper's
  * grammar), pi always as `codex-swap pi run` — pi's own `--session` flag
- * rides the forwarded args untouched.
+ * rides the forwarded args untouched. A Run server rides the wrapper's own
+ * grammar (`--server <url>`), never the harness argv after the `--`.
  */
-export function composeCodexFamily(spec: LaunchSpec, pin: string[]): string[] {
+export function composeCodexFamily(
+  spec: LaunchSpec,
+  pin: string[],
+  server?: string | undefined,
+): string[] {
   if (spec.harness === "pi") {
     return ["codex-swap", "pi", "run", ...pin, "--", ...spec.command.slice(1)];
   }
+  const dedicated = server !== undefined ? ["--server", server] : [];
   if (spec.sessionId !== null) {
     // buildResume shaped: ["codex", "resume", <id>, ...passthrough]
-    return ["codex-swap", "resume", spec.sessionId, ...pin, "--", ...spec.command.slice(3)];
+    return [
+      "codex-swap",
+      "resume",
+      spec.sessionId,
+      ...dedicated,
+      ...pin,
+      "--",
+      ...spec.command.slice(3),
+    ];
   }
-  return ["codex-swap", "run", ...pin, "--", ...spec.command.slice(1)];
+  return ["codex-swap", "run", ...dedicated, ...pin, "--", ...spec.command.slice(1)];
 }
 
 /** Pi model ids may carry the provider prefix; lanes match on the bare id. */

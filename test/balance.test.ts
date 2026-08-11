@@ -503,6 +503,46 @@ describe("compose units", () => {
     ).toEqual(["codex-swap", "pi", "run", "--claim", "lease-1", "--", "--session", SESSION_ID]);
   });
 
+  test("a Run server rides the wrapper's grammar, and only for codex", () => {
+    const socket = "unix:///tmp/servers/run-1.sock";
+    expect(
+      composeCodexFamily(
+        { harness: "codex", command: ["codex", "-p", "x"], sessionId: null },
+        ["--claim", "lease-1"],
+        socket,
+      ),
+    ).toEqual(["codex-swap", "run", "--server", socket, "--claim", "lease-1", "--", "-p", "x"]);
+    expect(
+      composeCodexFamily(
+        {
+          harness: "codex",
+          command: ["codex", "resume", SESSION_ID, "--search"],
+          sessionId: SESSION_ID,
+        },
+        ["--claim", "lease-1"],
+        socket,
+      ),
+    ).toEqual([
+      "codex-swap",
+      "resume",
+      SESSION_ID,
+      "--server",
+      socket,
+      "--claim",
+      "lease-1",
+      "--",
+      "--search",
+    ]);
+    // Pi has no app-server; a requested server must never reach its wrapper.
+    expect(
+      composeCodexFamily(
+        { harness: "pi", command: ["pi", "-p", "x"], sessionId: null },
+        ["--claim", "lease-1"],
+        socket,
+      ),
+    ).toEqual(["codex-swap", "pi", "run", "--claim", "lease-1", "--", "-p", "x"]);
+  });
+
   test("pi model normalization strips only the provider prefix", () => {
     expect(normalizePiModel("pi", "openai-codex/gpt-5.4")).toBe("gpt-5.4");
     expect(normalizePiModel("pi", "gpt-5.4")).toBe("gpt-5.4");

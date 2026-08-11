@@ -36,14 +36,14 @@ import { facts, shellLine, tildePath } from "./narrate.ts";
 import type { Partitioned } from "./partition.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
-import type { PlacementLease, RunRecord } from "./runs.ts";
+import type { RunRecord } from "./runs.ts";
 import {
-  acquirePlacementLease,
   assertRunNameAvailable,
   listRunRecords,
   resolveCallingRun,
   resolveRun,
   resolveRunReference,
+  runServerListenUrl,
   runsDirectory,
   stampClosedRuns,
   writeRunRecord,
@@ -687,10 +687,9 @@ export async function runCommand(context: Context, parts: Partitioned): Promise<
   if (rest.length > 0) throw new UsageError("x-run takes exactly one run id or name");
   const { record, discovered } = await resolveRun(context.env, context.home, reference);
   if (discovered) {
-    context.narrator.row(
-      "session",
-      `${record.session_id} · discovered from the ${record.harness} store`,
-    );
+    // The Run server tier answers before the store can (the thread is visible
+    // from attach), so the row no longer claims which tier it was.
+    context.narrator.row("session", `${record.session_id} · discovered`);
   }
   const label = (name: string, value: string): string => `${name.padEnd(10)}${value}`;
   const lines = [
@@ -707,6 +706,9 @@ export async function runCommand(context: Context, parts: Partitioned): Promise<
     label("from", describeProvenance(record.from ?? null)),
     label("terminal", record.terminal ?? "none recorded"),
     label("session", record.session_id ?? "not yet discovered"),
+    ...(record.server?.socket != null
+      ? [label("server", tildePath(record.server.socket.replace(/^unix:\/\//, ""), context.home))]
+      : []),
     label("command", shellLine(record.command)),
   ];
   return { kind: "result", data: record, human: lines.join("\n") };
@@ -965,8 +967,18 @@ async function finishLaunch(
 
   narrateYolo(context, yolo, applied, utility);
 
+  // Minted before balancing, not at record time: a codex placement derives
+  // its Run server socket from the run id (ADR 0026), and the socket has to
+  // be in the composed command.
+  const mintedRunId = surface !== null && !utility ? crypto.randomUUID() : null;
+  const serverRequest =
+    mintedRunId !== null && spec.harness === "codex"
+      ? runServerListenUrl(context.env, context.home, mintedRunId)
+      : undefined;
+
   let launchSpec = spec;
   let decision: BalanceDecision | null = null;
+  let composedServer: string | null = null;
   if (utility) {
     context.narrator.row("account", `skipped · ${spec.command[1]} is a utility invocation`);
   } else if (balanceDisabled(context.env, noBalance)) {
@@ -980,11 +992,19 @@ async function finishLaunch(
       account,
       model: routingModel,
       dryRun,
+      server: serverRequest,
       narrator: context.narrator,
     });
     launchSpec = balanced.spec;
     decision = balanced.decision;
     context.narrator.row("account", describeAccount(balanced.decision));
+    if (serverRequest !== undefined) {
+      composedServer = serverRequest;
+      context.narrator.row(
+        "server",
+        facts("dedicated", tildePath(serverRequest.slice("unix://".length), context.home)),
+      );
+    }
   }
 
   const data = {
@@ -1010,45 +1030,37 @@ async function finishLaunch(
     if (!dryRun && surface.name !== null) {
       await assertRunNameAvailable(context.env, context.home, surface.name);
     }
-    // Held rather than bound, because the lease is taken inside the backend's
-    // own call and has to survive back out here to be released on failure.
-    const held: { lease: PlacementLease | null } = { lease: null };
-    const placement = await surface.backend
-      .place({
-        spec: launchSpec,
-        intent: surface.intent,
-        title: surface.title,
-        name: surface.name,
-        provenance,
-        dryRun,
-        prepare: (workspacePath) => {
-          const trust = ensureWorkspaceTrusted(
-            spec.harness,
-            context.env,
-            context.home,
-            workspacePath,
-          );
-          if (trust !== "not applicable") {
-            context.narrator.row("trust", facts(spec.harness, `workspace ${trust}`));
-          }
-          if (spec.harness === "codex") {
-            held.lease = acquirePlacementLease(context.env, context.home, workspacePath);
-          }
-          const anchored = workspaceArguments(spec.harness, workspacePath);
-          if (anchored.length > 0) {
-            context.narrator.row("anchor", facts(tildePath(workspacePath, context.home), "--cd"));
-          }
-          return anchored;
-        },
-        narrator: context.narrator,
-        env: context.env,
-      })
-      .catch((error: unknown) => {
-        // Nothing started in the workspace, so the slot goes back immediately
-        // rather than blocking the retry this failure is about to prompt.
-        held.lease?.release();
-        throw error;
-      });
+    // Captured back out of the backend's call so the record can hold the
+    // command the harness actually received — the composed spec plus what
+    // Prepare appended (ADR 0023's anchoring).
+    let appended: string[] = [];
+    const placement = await surface.backend.place({
+      spec: launchSpec,
+      intent: surface.intent,
+      title: surface.title,
+      name: surface.name,
+      provenance,
+      dryRun,
+      prepare: (workspacePath) => {
+        const trust = ensureWorkspaceTrusted(
+          spec.harness,
+          context.env,
+          context.home,
+          workspacePath,
+        );
+        if (trust !== "not applicable") {
+          context.narrator.row("trust", facts(spec.harness, `workspace ${trust}`));
+        }
+        const anchored = workspaceArguments(spec.harness, workspacePath);
+        if (anchored.length > 0) {
+          context.narrator.row("anchor", facts(tildePath(workspacePath, context.home), "--cd"));
+        }
+        appended = anchored;
+        return anchored;
+      },
+      narrator: context.narrator,
+      env: context.env,
+    });
     context.narrator.row("surface", surface.backend.name);
     if (placement.project !== null) {
       context.narrator.row(
@@ -1084,11 +1096,14 @@ async function finishLaunch(
         facts(placement.provenance.detail, unrecorded ? "not recorded" : undefined),
       );
     }
+    // The command as the harness received it: the composed spec plus what
+    // Prepare appended. Dry runs never prepare, so theirs is the spec alone.
+    const finalCommand = [...launchSpec.command, ...appended];
     let runId: string | null = null;
     if (!dryRun) {
-      runId = crypto.randomUUID();
+      runId = mintedRunId;
       const record: RunRecord = {
-        run_id: runId,
+        run_id: runId as string,
         created_at: new Date().toISOString(),
         kind: surface.kind,
         backend: surface.backend.name,
@@ -1102,28 +1117,28 @@ async function finishLaunch(
           id: placement.workspace.id,
         },
         terminal: placement.terminal,
-        command: launchSpec.command,
+        command: finalCommand,
         session_id: spec.sessionId,
+        server: composedServer === null ? null : { socket: composedServer },
         from: provenance.kind === "none" ? null : provenance,
       };
       const recordPath = writeRunRecord(context.env, context.home, record);
       context.narrator.detail("record", tildePath(recordPath, context.home));
-      context.narrator.row("run", runId);
-      context.narrator.row(
-        "launch",
-        facts(shellLine(launchSpec.command), `on ${surface.backend.name}`),
-      );
+      context.narrator.row("run", runId as string);
+      context.narrator.row("launch", facts(shellLine(finalCommand), `on ${surface.backend.name}`));
     } else {
       context.narrator.row("dry run", "nothing placed · command on stdout");
     }
     const surfaceData = {
       ...data,
+      command: finalCommand,
       run_id: runId,
       surface: {
         backend: surface.backend.name,
         project: placement.project,
         workspace: placement.workspace,
         terminal: placement.terminal,
+        server: composedServer,
         provenance: {
           requested: provenance,
           recorded: placement.provenance.recorded,
@@ -1134,7 +1149,7 @@ async function finishLaunch(
     return {
       kind: "result",
       data: surfaceData,
-      human: runId ?? shellLine(launchSpec.command),
+      human: runId ?? shellLine(finalCommand),
     };
   }
 

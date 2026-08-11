@@ -26,6 +26,7 @@ interface SurfaceData {
     project: { name: string; created: boolean } | null;
     workspace: { name: string; path: string | null; id: string | null; created: boolean };
     terminal: string | null;
+    server: string | null;
     provenance: { requested: Provenance; recorded: boolean; detail: string };
   };
 }
@@ -187,6 +188,8 @@ describe("surface placements", () => {
         created: false,
       },
       terminal: "term_test-1",
+      // Claude needs no Run server; the field states so rather than vanishing.
+      server: null,
       // An existing workspace keeps the lineage it has (ADR 0015).
       provenance: { requested: { kind: "none" }, recorded: false, detail: NOT_CREATED_DETAIL },
     });
@@ -730,37 +733,86 @@ describe("run names", () => {
     expect(run(world, ["x-run", "auth-flow", "--x-json"]).code).toBe(0);
   });
 
-  test("a second codex Placement into one workspace waits its turn", () => {
+  /** A balanced Placement composes through codex-swap, which is where the Run
+   * server lives; the fake agentusage supplies the account half. */
+  function installFakeBalance(world: World): void {
+    const fake = join(world.binDir, "agentusage");
+    writeFileSync(
+      fake,
+      ["#!/usr/bin/env bash", `dir="$(dirname "$0")"`, `cat "$dir/balance-codex.json"`, ""].join(
+        "\n",
+      ),
+    );
+    chmodSync(fake, 0o755);
+    writeFileSync(
+      join(world.binDir, "balance-codex.json"),
+      JSON.stringify({
+        schema_version: 1,
+        provider: "codex",
+        ok: true,
+        accountKey: "account:org-test",
+        lease: { leaseId: "lease-test-1" },
+        reason: "highest headroom",
+      }),
+    );
+  }
+
+  function placeBalanced(world: World, name: string): SurfaceData {
+    const result = Bun.spawnSync({
+      cmd: [
+        "bun",
+        MAIN,
+        "--x-harness",
+        "codex",
+        "--x-surface",
+        "--x-name",
+        name,
+        "--x-no-yolo",
+        "--x-json",
+      ],
+      cwd: world.workspace,
+      env: {
+        PATH: `${world.binDir}:${process.env["PATH"] ?? ""}`,
+        HOME: world.home,
+        CLAUDE_CONFIG_DIR: join(world.root, "claude"),
+        CODEX_HOME: join(world.root, "codex"),
+        PI_CODING_AGENT_DIR: join(world.root, "pi"),
+      },
+    });
+    expect(result.exitCode).toBe(0);
+    return surfaceData({
+      code: result.exitCode,
+      stdout: result.stdout.toString(),
+      stderr: result.stderr.toString(),
+    });
+  }
+
+  test("a placed codex run gets its own server, and two in one workspace get two", () => {
     const world = makeWorld();
-    placeNamed(world, "first-run");
-    const result = run(world, [
-      "--x-harness",
-      "codex",
-      "--x-surface",
-      "--x-name",
-      "second-run",
-      "--x-no-yolo",
-      "--x-json",
-    ]);
-    expect(result.code).toBe(1);
-    const envelope = JSON.parse(result.stdout) as AnyEnvelope;
-    expect(envelope.error?.code).toBe("placement_in_flight");
-    expect(envelope.error?.recovery).toContain("retry");
+    installFakeBalance(world);
+
+    const first = placeBalanced(world, "first-run");
+    expect(first.surface.server).toMatch(/^unix:\/\/.+\.sock$/);
+    const serverFlag = first.command.indexOf("--server");
+    expect(serverFlag).toBeGreaterThan(0);
+    expect(first.command[serverFlag + 1]).toBe(first.surface.server as string);
+    const record = readRecord(world, first.run_id as string);
+    expect(record.server?.socket).toBe(first.surface.server as string);
+
+    // The identity is structural now, so a second codex Placement into the
+    // same workspace is not serialized — it simply gets its own socket
+    // (ADR 0026, retiring ADR 0020's lease).
+    const second = placeBalanced(world, "second-run");
+    expect(second.surface.server).toMatch(/^unix:\/\/.+\.sock$/);
+    expect(second.surface.server).not.toBe(first.surface.server);
   });
 
-  test("claude is placed beside a held codex slot: only codex needs telling apart", () => {
+  test("an unbalanced codex Placement composes no server, and says nothing of one", () => {
     const world = makeWorld();
-    placeNamed(world, "codex-run");
-    const result = run(world, [
-      "--x-harness",
-      "claude",
-      "--x-surface",
-      "--x-name",
-      "claude-run",
-      "--x-no-yolo",
-      "--x-json",
-    ]);
-    expect(result.code).toBe(0);
+    const runId = placeNamed(world, "raw-run");
+    const record = readRecord(world, runId);
+    expect(record.server ?? null).toBeNull();
+    expect(record.command).not.toContain("--server");
   });
 
   test("codex's workspace trust is answered before anything starts in it", () => {

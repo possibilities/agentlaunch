@@ -64,12 +64,14 @@ the harnesses actually write, not from their documentation.
   vocabulary, selectors, and ensure mechanics live there and nowhere else.
 - `runs.ts` owns run records and session-id discovery (ADR 0014): one
   JSON file per run under `~/.local/state/agentsurface/runs/`, ids
-  validated like session ids, discovery by workspace-cwd and birth-time
+  validated like session ids, discovery by the run's own server socket
+  first (codex placements, ADR 0026), then workspace-cwd and birth-time
   match against the stores.
 - `balance.ts` composes the account-balancing prefix around a spec
   (ADR 0003): shells `agentusage balance --json`, wraps with cswap /
   codex-swap [pi] run, never edits the harness argv after the wrapper's
-  `--`.
+  `--`. A codex Placement's Run server rides the wrapper's own grammar
+  (`--server`, ADR 0026).
 - `config.ts` reads `~/.config/agentsurface/config.json`, validating it
   with `config-schema.ts` — yolo defaults on (ADR 0009), and a malformed
   disabling config fails the launch rather than launching with the gates
