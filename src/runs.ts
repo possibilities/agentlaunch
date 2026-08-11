@@ -539,22 +539,38 @@ export function resolvedWorkspacePath(path: string): string {
   }
 }
 
+/** What `sockaddr_un.sun_path` holds, under the smallest of the platforms we
+ * run on (macOS 104, Linux 108) with room for the terminator. */
+const SOCKET_PATH_LIMIT = 100;
+
 /**
  * The Run server's socket (ADR 0026): one per codex Placement, named by the
- * run id so record and socket point at each other. `sockaddr_un` allows about
- * 100 bytes; a state directory deep enough to blow that budget (temp HOMEs in
- * tests do) hashes the id instead — the record's `server.socket` is the
- * authoritative spelling either way.
+ * run id so record and socket point at each other. A state directory deep
+ * enough to blow the `sockaddr_un` budget (temp HOMEs in tests do) hashes the
+ * id instead — the record's `server.socket` is the authoritative spelling
+ * either way. When even the hashed name does not fit, the directory itself
+ * spends the budget and no name can help: the Placement is refused here,
+ * before anything is created, rather than composing a socket codex-swap could
+ * only fail to bind.
  */
 export function runServerListenUrl(env: Environ, home: string, runId: string): string {
   const directory = join(stateDirectory(env, home, "agentsurface"), "servers");
+  const full = join(directory, `${runId}.sock`);
+  const short = createHash("sha256").update(runId).digest("hex").slice(0, 12);
+  const path =
+    Buffer.byteLength(full) <= SOCKET_PATH_LIMIT ? full : join(directory, `${short}.sock`);
+  const size = Buffer.byteLength(path);
+  if (size > SOCKET_PATH_LIMIT) {
+    throw new CliError(
+      "run_server_path_too_long",
+      `${directory} leaves no room for a Run server socket: ${size} bytes where a unix socket path allows ${SOCKET_PATH_LIMIT}`,
+      "point XDG_STATE_HOME at a shorter absolute directory, or place the run from a shorter home",
+    );
+  }
   // The server binding this socket is codex-swap's, which treats the listen
   // path as caller-owned — so the caller's directory has to exist.
   mkdirSync(directory, { recursive: true });
-  const full = join(directory, `${runId}.sock`);
-  if (Buffer.byteLength(full) <= 100) return `unix://${full}`;
-  const short = createHash("sha256").update(runId).digest("hex").slice(0, 12);
-  return `unix://${join(directory, `${short}.sock`)}`;
+  return `unix://${path}`;
 }
 
 /**

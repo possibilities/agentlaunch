@@ -9,7 +9,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Envelope } from "../src/envelope.ts";
 import type { RunRecord } from "../src/runs.ts";
@@ -61,7 +60,10 @@ interface World {
  * what makes ensure observable.
  */
 function makeWorld(): World {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), "agentsurface-surface-")));
+  // Rooted in /tmp rather than the platform temp directory: a balanced codex
+  // Placement puts a Run server socket under this HOME, and macOS's per-user
+  // temp path alone spends more than a unix socket path allows.
+  const root = realpathSync(mkdtempSync(join("/tmp", "agentsurface-surface-")));
   roots.push(root);
   const binDir = join(root, "bin");
   mkdirSync(binDir, { recursive: true });

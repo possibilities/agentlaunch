@@ -17,6 +17,7 @@ import {
   listRunRecords,
   releaseRunName,
   reserveRunName,
+  runServerListenUrl,
   runsDirectory,
   writeRunRecord,
 } from "../src/runs.ts";
@@ -32,6 +33,14 @@ afterEach(() => {
 
 function makeHome(): string {
   const home = mkdtempSync(join(tmpdir(), "agentsurface-runs-"));
+  homes.push(home);
+  return home;
+}
+
+/** A home short enough for the socket-path budget: macOS's per-user temp
+ * directory alone spends more than a unix socket path allows. */
+function makeShortHome(): string {
+  const home = mkdtempSync(join("/tmp", "as-"));
   homes.push(home);
   return home;
 }
@@ -169,4 +178,41 @@ describe("run name reservations", () => {
     const when = new Date(Date.now() - byMs);
     for (const entry of readdirSync(directory)) utimesSync(join(directory, entry), when, when);
   }
+});
+
+describe("run server socket paths", () => {
+  const RUN_ID = "0199c2f7-4a1e-7c3d-9b2a-5f6e7d8c9b0a";
+
+  test("a short state directory keeps the run id in the socket name", () => {
+    const home = makeShortHome();
+    const url = runServerListenUrl(ENV, home, RUN_ID);
+    expect(url).toBe(`unix://${home}/.local/state/agentsurface/servers/${RUN_ID}.sock`);
+  });
+
+  test("a deep state directory hashes the id to stay inside the budget", () => {
+    const home = join(makeShortHome(), "d".repeat(20));
+    const url = runServerListenUrl(ENV, home, RUN_ID);
+    const path = url.slice("unix://".length);
+    expect(Buffer.byteLength(path)).toBeLessThanOrEqual(100);
+    expect(path).not.toContain(RUN_ID);
+    expect(path).toMatch(/\/[0-9a-f]{12}\.sock$/);
+  });
+
+  test("a state directory that spends the whole budget is refused, uncreated", () => {
+    const home = join(makeShortHome(), "x".repeat(40), "y".repeat(40));
+    const failure = (() => {
+      try {
+        return runServerListenUrl(ENV, home, RUN_ID);
+      } catch (error) {
+        return error as CliError;
+      }
+    })();
+    expect(failure).toBeInstanceOf(CliError);
+    expect((failure as CliError).code).toBe("run_server_path_too_long");
+    // Named so the operator can see which directory spent it.
+    expect((failure as CliError).message).toContain(join(home, ".local", "state"));
+    expect((failure as CliError).recovery).toContain("XDG_STATE_HOME");
+    // Refused before anything was created, so nothing is left to clean up.
+    expect(existsSync(join(home, ".local"))).toBe(false);
+  });
 });

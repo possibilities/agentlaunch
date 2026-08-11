@@ -989,10 +989,6 @@ async function finishLaunch(
   // its Run server socket from the run id (ADR 0026), and the socket has to
   // be in the composed command.
   const mintedRunId = surface !== null && !utility ? crypto.randomUUID() : null;
-  const serverRequest =
-    mintedRunId !== null && spec.harness === "codex"
-      ? runServerListenUrl(context.env, context.home, mintedRunId)
-      : undefined;
 
   let launchSpec = spec;
   let decision: BalanceDecision | null = null;
@@ -1006,6 +1002,13 @@ async function finishLaunch(
     );
   } else {
     if (account !== undefined) context.narrator.detail("pin", `${account} · still gated`);
+    // Derived here rather than with the run id: only a balanced codex
+    // Placement composes a Run server (ADR 0026), and deriving it is what
+    // refuses a state directory with no room for the socket.
+    const serverRequest =
+      mintedRunId !== null && spec.harness === "codex"
+        ? runServerListenUrl(context.env, context.home, mintedRunId)
+        : undefined;
     const balanced = await balanceSpec(context.env, spec, {
       account,
       model: routingModel,
