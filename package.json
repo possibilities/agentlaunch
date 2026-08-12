@@ -1,17 +1,35 @@
 {
-  "name": "agentsurface",
+  "name": "agentlaunch",
   "version": "0.1.0",
-  "description": "One launcher for agent harnesses: open and resume claude, codex, and pi in place today, place them on a surface tomorrow",
-  "private": true,
+  "description": "Resolve, balance, launch, and resume native Claude Code, Codex, and Pi sessions",
+  "private": false,
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "codex",
+    "pi",
+    "launcher"
+  ],
+  "homepage": "https://github.com/possibilities/agentlaunch#readme",
+  "bugs": "https://github.com/possibilities/agentlaunch/issues",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/possibilities/agentsurface.git"
+    "url": "git+https://github.com/possibilities/agentlaunch.git"
   },
   "type": "module",
   "bin": {
-    "agentsurface": "./src/main.ts"
+    "agentlaunch": "./src/main.ts"
   },
+  "files": [
+    "src",
+    "catalog.json",
+    "catalog.schema.json",
+    "config.schema.json",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "bun": ">=1.3.14"
   },

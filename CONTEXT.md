@@ -1,49 +1,66 @@
 # Glossary
 
-- **Harness** — An agent CLI/TUI that owns a conversation: claude, codex, pi. _Avoid_: agent (that is a running conversation), model.
-- **Runner** — agentsurface acting as a passthrough launcher in the current terminal and cwd, no surface involved. _Avoid_: wrapper mode, local mode.
-- **Surface** — A managed environment where launches are placed and can be referred to and controlled afterwards; Orca is the first backend, the API stays backend-generic. _Avoid_: platform, ADE (one backend, not the concept).
-- **Surface backend** — One implementation of the surface API (ADR 0012): Orca first, others later. The core speaks only the documented backend-generic contract; everything Orca-shaped lives in its adapter, the way harness asymmetries live in `harness.ts`. _Avoid_: integration (an adapter behind a seam, not a wiring-in).
-- **Workspace** — Where a run lives on a Surface: a directory plus the backend's bookkeeping around it; Orca implements it as a managed git worktree. A launch is placed in the workspace containing its anchor path (the cwd; a resume's is the session's own cwd), an existing one by `--x-workspace` selector, or a new one by `--x-new-workspace` name. _Avoid_: worktree as the generic term (one backend's implementation, and the land-worktree verb's own word).
-- **Provenance** — What a Placement descends from, stated by the caller and never inferred (ADR 0015): `--x-from run:<run-id>` (resolved through our own run registry) or a backend workspace selector, `--x-no-from` for nothing, and an omitted flag meaning nothing explicitly — because a backend that would otherwise read its environment must be told. Qualifies `--x-new-workspace` only; what a parent *means* is each backend's own **flavor**, and a `Placement` reports what it could record. _Avoid_: lineage and parent (Orca's flavor, not the concept), attribution for the whole.
-- **Ensure** — The surface doctrine (ADR 0013): Place materializes the backend entities the request implies — a project registered from the path the request names, a workspace created when the operator named one — each narrated created-or-found. Never invents a name or a checkout. _Avoid_: auto-create (ensure includes finding what exists).
-- **Anchor** — Telling a harness which directory it is working in, because it cannot see its own: codex reaches its model through a shared app-server, so its thread records that server's directory rather than the terminal's (ADR 0023/0024). A runner launch anchors to the invocation cwd; a Placement anchors at Prepare, to the Workspace, since that path may not exist when argv is composed. Absolute always — a relative path does not survive. claude and pi need none. _Avoid_: cwd (the shell's, which is exactly what does not reach the thread), working directory for the flag itself.
-- **Caller run** — The Run a worker is, answered from inside it by `x-whoami` (ADR 0024): matched on the session id the enclosing harness exports, else on the Workspace it is working in. Never stamped — an environment variable cannot carry it, because a codex session's tools read the app-server's environment rather than their own. Not being on a Surface is a refusal, so the question doubles as the gate. _Avoid_: identity (that is the session's), self.
-- **Run name** — The operator's own label for a Run, given by `--x-name` (ADR 0017): free text, never invented — an unnamed run is simply unnamed — and unique among open runs (ADR 0019), because it is the handle other agents address the run by and a name two live runs share resolves to neither. A name a closed run holds is free to reuse; one an open run holds is a `run_name_taken` refusal, never a generated variant. Passed to the harness where one has a launch-time name (claude and pi `--name`; codex has none, which the Narrative reports), and on a Surface it titles the terminal, labels a Workspace the Placement created, and is written to the run record. A `run:` reference resolves an exact run id first and a name second; several runs sharing a name is a refusal naming them. _Avoid_: title (what a backend calls its terminal's label), id (the identity a name is not).
-- **Run** — A Session plus where it was placed: every Placement writes a run record (ADR 0014) at `~/.local/state/agentsurface/runs/<run-id>.json`, named by a run id agentsurface mints and returns in the envelope immediately. The record holds the backend, workspace, composed command, terminal handle (an address, not the identity), the Run name when one was given, and the session id once discovered — by matching the store entry born in the run's workspace, backfilled on first need, never assigned. A record also names the **repo** the Workspace was cut from, stated by the backend at Placement so a resume can say where a session came from with the backend down and the checkout gone (ADR 0028). A record is stamped `closed_at`/`closed_as` when its workspace is landed or abandoned (ADR 0016), never deleted — the record outlives the workspace because the session does, and a closed record is what makes that session findable later, so `x-runs` filters them out of its default view rather than anything pruning them. Records are written whole and renamed into place, and every read-modify-write of one holds that run's own lock file across processes, so a backfill and a close stamp racing cannot drop each other's field. A record that will not parse is registry corruption, never a run that vanished: a command addressing that run refuses, and one enumerating around it warns loudly on stderr and answers about the rest. _Avoid_: job, and session for the whole (that is the harness's half).
-- **Open in place** — Starting a fresh harness session as the runner: `agentsurface <harness> [tokens…]`, agentsurface becomes the harness and gets out of the way. _Avoid_: spawn, attach.
-- **Launch spec** — The pure description of a launch: harness, command argv, session id when known. `--x-dry-run` prints it, the runner execs it, a surface will consume it. _Avoid_: plan, invocation.
-- **Session** — One harness conversation persisted in its session store, resumable by id. _Avoid_: run (a run is a session plus where it was placed), thread, chat.
-- **Session store** — The per-harness on-disk session location — claude `…/.claude/projects`, codex `…/.codex/sessions` plus `archived_sessions`, pi `…/.pi/agent/sessions` — each relocatable by env (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`). _Avoid_: history, database.
-- **Catalog** — The ordered description of harnesses, their models, and their effort sets: the built-in `catalog.json`, replaced outright by a custom `~/.config/agentsurface/catalog.json` (ADR 0010). Harness order is the ambiguity tiebreak for `model:effort` selection; defaults live in `defaults` objects. _Avoid_: config (that is the operator-preference file), registry.
-- **Level** — What `--x-level` takes: `<model>:<effort>`, both parts required and validated as one pair (ADR 0018), because which efforts a model allows is the catalog's to know and not the operator's to remember. Alone it selects the earliest harness offering the combination; with `--x-harness` it pins; one of the two flags is required on every launch. A level owns both dimensions — a forwarded native model or effort flag beside it is a fault — and a launch without one yields per dimension. _Avoid_: harness value (the retired union `--x-harness` took), model or effort alone (half a level is not one).
-- **Family** — A model list defined once at the catalog's top level and included by any number of harnesses, so one typed name works everywhere it is included; only the emitted spelling varies. A family may carry `efforts` (what members inherit) and `defaults` (supplying a harness that includes it and states none). _Avoid_: group, pool.
-- **Spelling** — What a model's catalog entry actually passes to the harness's native model flag, when it differs from the typed name. Optional on both family members and harness-local models; a Provider combines with the spelling, not the typed name. It is how a name the typed grammar forbids stays reachable — `opus-1m` is typed, `opus[1m]` is emitted. _Avoid_: alias, id (the harness's words for its side of the pair).
-- **Provider** — What a harness runs a family's models through; how a provider name combines with a model name is that harness's own semantics (pi: `provider/model`; claude and codex have none). _Avoid_: prefix (pi's spelling, not the concept).
-- **Effort** — A reasoning-depth name from the catalog's sets, inherited model > family > harness; arbitrary strings, listed low-to-high. The catalog owns which efforts exist; `harness.ts` owns how one is spelled at launch (`--effort`, `-c model_reasoning_effort=…`, `--thinking`). _Avoid_: thinking (pi's spelling).
-- **Partition rule** — The launch grammar (ADR 0008): a token starting `--x-` is agentsurface's wherever it sits, a bare `x-*` word in command position is agentsurface's, and every other token is Forwarded. Strictness applies only to x-space. _Avoid_: parsing the harness's side at all.
-- **Forwarded tokens** — The non-x tokens of an invocation, handed to the harness verbatim in the order typed: prompts, flags, and subcommands alike, native spellings only. _Avoid_: passthrough (the retired `--`-door concept).
-- **Extension flag** — Anything in the reserved `--x-*` namespace: agentsurface's own controls, processed before launch and never forwarded. An Extension flag may add or remove harness flags — even explicitly typed ones — and every such edit is narrated. Covers runner controls (`--x-account`, `--x-name`, `--x-no-balance`, `--x-verbose`, `--x-yolo`, `--x-no-yolo`, `--x-dry-run`, `--x-json`, `--x-help`) and the Surface flags (`--x-surface`, `--x-workspace`, `--x-new-workspace`, `--x-project`, `--x-from`, `--x-no-from`). _Avoid_: surface flag as the name for all of them — that is the subset below.
-- **x-command** — A bare `x-*` word in command position: agentsurface's own verbs (`x-resume`, `x-doctor`), and the reserved namespace any future cross-harness command lives in. _Avoid_: subcommand (a harness's own subcommands are Forwarded tokens).
-- **Surface flag** — An Extension flag that places a launch on a Surface rather than in this terminal: `--x-surface [backend]` plus the Workspace flags that say where (`--x-workspace`, `--x-new-workspace`, `--x-project`) and the Provenance flags that say what it came from (`--x-from`, `--x-no-from`). Their absence is what makes a launch runner mode; on one, the command returns a run id instead of becoming the harness. _Avoid_: using this for `--x-account` and friends, which are runner controls.
-- **Narrative** — The story a launch tells on stderr before the harness starts: where it opens, whether yolo applied (and anything it added or removed), which account balancing chose, and the final command. `--x-verbose` adds mechanism; `--x-json` silences it (ADR 0007). _Avoid_: log, output.
-- **Land** — Merging a Workspace's finished work back to the main line and releasing it from the Surface, in that order (ADR 0016/0022): `x-land <ref>` surveys, refuses, merges, releases, and stamps the run records. Git work is git's, done directly; the backend is asked only what it alone knows and does only what it alone can. Nothing half-happens — a conflicted merge rolls itself back. _Avoid_: merge (land is merge plus surface state); landing as a noun for arrival on a Surface (that is a Placement).
-- **Place** — Putting a finished Launch spec down on a Surface: the backend operation behind `--x-surface` (ADR 0013/0022), which creates a Workspace and a terminal and returns where it went. The inverse of Release. _Avoid_: land (that is the merge verb), deploy, spawn.
-- **Placement** — One arrival of a Launch spec on a Surface: what Place returns, what a Run record describes, and what `--x-surface` produces (ADR 0022). A Run is placed, never landed; landing is what later integrates its Workspace into the main line and releases it. ADRs 0012–0015, 0017, and 0019–0021 used landing for this concept before the vocabulary was resolved. _Avoid_: landing, arrival, deployment.
-- **Placement journal** — What a Placement has already created, written down before it can finish (ADR 0027): a file under `runs/.placing/<run-id>.json` stamped at each completed phase — `reserved`, `account-claimed`, `workspace-created`, `terminal-created` — where the fifth state, open, is the Run record itself, which is why committing the record clears the journal. Agentsurface's own bookkeeping, like the records beside it; nothing about it crosses the surface API. An **interrupted Placement** is a journal its own process stamped failed, or one nothing has touched for longer than a Placement can still be in flight (10 minutes, so a killed Placement is invisible — and its name still reserved — until the bound passes); `x-runs` and `x-doctor` name them, including the account and lease one is still spending, and nothing is released automatically. A journal is cleared by its own commit, and by a Land that releases the Workspace it named; every other one waits for the operator who finishes the compensation to delete it. _Avoid_: transaction, rollback (the compensation is the name reservation and a note, never a Workspace that may hold work).
-- **Prepare** — The moment inside Place between a Workspace existing and anything starting in it, where the caller answers what a harness would otherwise stop to ask (ADR 0021/0022). Backend-generic, because every backend must materialize a workspace before running a command in it; only the backend knows the path, which is why the caller is called back rather than told in advance. Throwing here refuses the Placement before any Attachment starts. _Avoid_: hook, pre-flight (that is Land's survey).
-- **Run server** — The dedicated, exclusive, account-pinned codex app-server a balanced codex Placement attaches through (ADR 0026): started and torn down by codex-swap with the session, socket derived from the run id and written to the run record. The one thread on it can only be the Run's session, so thread↔run is identity rather than inference — which is what retired the Placement lease (ADR 0020), the mechanism that could only *order* what this *identifies*. _Avoid_: app-server alone (codex's word for the program), shared server (the account-wide topology this replaces), placement lease (retired).
-- **Survey** — Reading an existing Workspace through the surface API: identity, whether it is the repository's primary checkout, the base ref it cuts from, and its live Attachments. Read-only, and deliberately free of git facts — those are read from the checkout with git. _Avoid_: status (reserved for the state of an agent), inspect.
-- **Release** — Letting a Workspace go: stop its Attachments, then remove it. The only destructive operation on the surface seam, and the inverse of Place. _Avoid_: delete, tear down, rm.
-- **Attachment** — One thing a backend runs inside a Workspace — an Orca terminal, a herdr pane or agent — addressed by the backend's own handle. Releasing a workspace stops them; a live one blocks a Land until `--x-force`. _Avoid_: terminal (Orca's implementation), process.
-- **Blocker** — Something true of a Workspace that stops it being landed, each carrying the flag that clears it or null when none does: `dirty`, `terminals`, `children`, `base_branch`, `base_dirty`. Reported by `x-land --x-dry-run`, raised as `land_blocked` otherwise. _Avoid_: error, check, precondition.
-- **Swap** — Running a harness under one specific account's credentials/profile: cswap for claude, codex-swap for codex and pi (`codex-swap pi run`, pi rides the codex account pool). _Avoid_: balancing (choosing the account is balancing; running under it is swap).
-- **Balance** — Choosing which account a launch should use, from live quota observations; `agentusage balance` owns this and launchers consume its answer. On by default for every launch (ADR 0003). _Avoid_: swap.
-- **Balanced launch** — A launch whose spec is wrapped in the chosen account's swap prefix; the harness argv after the wrapper's `--` stays byte-identical. _Avoid_: routed launch (keeper's term).
-- **Utility invocation** — A launch whose first Forwarded token is a management or service word (codex `login`, claude `doctor`, pi `auth`, bare `--version`…): it opens no account-bound session, so it passes through unwrapped instead of balancing, and never receives a yolo flag (ADR 0005). _Avoid_: passthrough.
-- **Pin** — Forcing a balanced launch onto one named account with `--x-account`; the swap tool's eligibility gate still judges it. _Avoid_: override (that is `--x-no-balance`).
-- **Yolo** — Launching a harness in its own unattended permission setting, whatever that harness's softest workable one is: on by default (ADR 0009), disabled by the personal config (`~/.config/agentsurface/config.json`) or a per-launch `--x-no-yolo`; spelled `--permission-mode auto` (claude, ADR 0028), `--dangerously-bypass-approvals-and-sandbox` (codex), `--approve` (pi). A spelling is a token sequence, not always one flag. Never injected into a Utility invocation, never duplicated, never overrides a Gate flag the caller set themselves; an explicit `--x-no-yolo` redacts a forwarded spelling and the Narrative says so. _Avoid_: unsafe mode, permission bypass (one harness's semantics), auto-approve.
-- **Gate flag** — A harness flag whose *value* settles the permission gates, so the caller typing it at all has decided however they set it: claude's `--permission-mode`, and nothing else today. Yolo never injects over one, and only redacts it when the value is Yolo's own. _Avoid_: permission flag (that is any of them).
-- **Workspace trust** — The question a harness asks once about a directory it has not seen, pre-answered during Placement for the Workspace just created (ADR 0021/0022). Distinct from Yolo: yolo is about per-*tool* confirmations, this is about the *directory*, and no yolo flag covers it — verified on codex, the only harness that currently asks. Written where the dialog itself writes it, and never over an entry the operator already made — matched however that entry is spelled, and written as one locked read-check-replace, because two Placements appending at once produce a `[projects.…]` table twice and a config codex cannot read. _Avoid_: suppressing the prompt (the answer is stated, for a directory the operator's own tooling created).
-- **Redaction** — An Extension flag removing a harness flag the caller explicitly forwarded (today: `--x-no-yolo` removing a yolo spelling). Always narrated, and listed in the envelope's `redactions`. _Avoid_: filtering, stripping (say what was removed and why).
-- **Envelope** — The `{schema_version, ok, error, data}` wrapper every machine-format outcome is emitted in under `--x-json`, shared across the agent* family; usage faults exit before a command runs and are not Envelopes. _Avoid_: payload.
+**Harness** — One native interactive agent CLI: `claude`, `codex`, or `pi`.
+AgentLaunch selects one but does not replace its behavior. _Avoid_: backend.
+
+**Native token** — Any command-line token outside the reserved `--x-*`
+namespace. Forwarded in order and judged only by the harness. `--name` and
+`-n` are native tokens; AgentLaunch gives them no special meaning. _Avoid_:
+passthrough flag (the whole native vocabulary passes through).
+
+**Extension flag** — An AgentLaunch control in the reserved `--x-*`
+namespace, removed before the native command runs. Unknown extension flags are
+usage errors. _Avoid_: wrapper flag.
+
+**Level** — One catalog pair, `<model>:<effort>`, requested by `--x-level`.
+The catalog validates the pair and resolves the harness and native spellings.
+
+**Launch spec** — The resolved native launch: harness, exact command argv, and
+native session ID for a resume. `--x-dry-run --x-json` exposes it with the
+associated decisions. _Avoid_: run (there is no AgentLaunch run lifecycle).
+
+**Native session** — A conversation owned and persisted by the harness. Its ID,
+metadata, name (if any), and lifecycle are native state. AgentLaunch only reads
+the ID/store/cwd needed to resume it. _Avoid_: AgentLaunch session.
+
+**Session store** — The harness's own files under the native default or its
+environment override (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+`PI_CODING_AGENT_DIR`). AgentLaunch never writes them.
+
+**Resume cwd** — The directory recorded in native session metadata. A resume
+starts there when it still exists; otherwise it starts in the invocation cwd
+and states the missing/unknown native directory.
+
+**Anchor** — The native Codex `--cd <absolute-cwd>` AgentLaunch adds to a new
+Codex launch unless the caller already supplied `--cd`/`-C`. This ensures the
+native session records the launch directory. Claude and Pi inherit cwd.
+
+**Utility invocation** — A harness management/service command that opens no
+account-bound model session, such as `codex login`, `claude doctor`, `pi auth`,
+or bare `--version`. It passes through unbalanced and without yolo injection.
+
+**Balance** — Choosing an eligible account through `agentusage balance`.
+AgentLaunch consumes the answer; AgentUsage owns policy and capacity facts.
+
+**Swap** — Starting under the chosen account: `cswap` for Claude,
+`codex-swap` for Codex and Pi. Choosing is balance; credential activation is
+swap.
+
+**Pin** — `--x-account <selector>`, which forces the candidate account while
+retaining the swap tool's eligibility gate. _Avoid_: bypass.
+
+**Yolo** — Each harness's native unattended permission setting, enabled by
+default and configurable globally/per harness. An explicit `--x-no-yolo` may
+redact a caller-forwarded positive spelling; the narrative reports it.
+
+**Narrative** — Labelled decisions on stderr before the harness starts: cwd,
+model, effort, yolo, account, and command. `--x-verbose` adds mechanism;
+`--x-json` silences it.
+
+**Envelope** — The `{schema_version, ok, error, data}` JSON result emitted by
+machine-format commands. Usage faults happen before command execution and are
+not envelopes.
+
+**Recursion sentinel** — `AGENTLAUNCH_LAUNCH=1`, set on launched descendants
+so fleet-owned bare harness shims exec the real binary instead of returning to
+AgentLaunch.

@@ -1,329 +1,149 @@
-# AgentSurface
+# AgentLaunch
 
-[![CI](https://github.com/possibilities/agentsurface/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/possibilities/agentsurface/actions/workflows/ci.yml)
+AgentLaunch resolves, balances, and starts interactive Claude Code, Codex, and
+Pi sessions. It can also find a native session by ID and resume it in the
+directory recorded by that harness.
 
-One launcher for every agent harness. `agentsurface --x-harness claude` (or
-`codex`, or `pi`) starts that harness in this terminal; name a level instead
-and the catalog picks the harness that offers it.
-
-Every launch is balanced across accounts and yolo'd by default. `x-resume`
-reopens a stored session whichever harness owns it, and `--x-surface` places the
-same launch in a managed workspace instead, returning a run id.
+Its boundary ends when the native process starts. AgentLaunch has no workspace,
+pane, agent identity, naming, presence, steering, or post-launch registry. A
+native flag such as Claude's `--name` is forwarded unchanged and is never
+interpreted or persisted here.
 
 ## Install
 
-    bash scripts/install.sh
+Requirements: Bun 1.3.14 or newer, the desired native harnesses, and—unless
+launching with `--x-no-balance`—AgentUsage plus `cswap` and `codex-swap`.
 
-Links `~/.local/bin/agentsurface` to this checkout (no build step) and writes
-the deployed SHA to `~/.local/state/agentsurface/deployed-sha`.
-`scripts/install.sh --uninstall` removes both.
+```sh
+git clone https://github.com/possibilities/agentlaunch.git ~/code/agentlaunch
+~/code/agentlaunch/scripts/install.sh --install
+```
 
-## Use
+The hardened, rerunnable installer links `~/.local/bin/agentlaunch` to the
+checkout and writes a deployment receipt under
+`~/.local/state/agentlaunch/`. It accepts `--uninstall` and refuses foreign or
+unsafe paths instead of replacing them.
 
-    agentsurface --x-harness claude "fix the failing tests"
-    agentsurface --x-level gpt-5.6-sol:ultra "hard problem"
-    agentsurface --x-harness pi --x-level gpt-5.6-luna:max
-    agentsurface --x-harness claude --model sonnet "quick question"
-    agentsurface x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
-    agentsurface x-resume 019fcb41-6f70-7283-aa42-97510cb09818 --x-harness codex
-    agentsurface x-doctor
+## Launch
 
-One partition rule (ADR 0008): a token starting `--x-` is agentsurface's, and
-every other token is the harness's, forwarded in the order typed — prompts,
-flags, and subcommands alike, native spellings only. Unknown `--x-*` flags are
-usage faults; unknown harness flags are the harness's to judge, so a harness
-upgrade never changes how a command parses here. Bare `x-*` words in command
-position are reserved for agentsurface (`x-resume`, `x-doctor`).
+```sh
+agentlaunch --x-harness claude "fix the failing tests"
+agentlaunch --x-level gpt-5.6-sol:ultra "hard problem"
+agentlaunch --x-harness pi --x-level gpt-5.6-luna:max
+agentlaunch --x-harness codex --x-dry-run --x-json
+```
 
-Every launch names what it runs through two flags (ADR 0018), at least one of
-them required. `--x-harness claude` launches that harness on its catalog
-defaults. `--x-level gpt-5.6-sol:ultra` names a **level** — a model and an
-effort, both parts required — and resolves to the earliest harness in catalog
-order offering it. Together they pin and validate. A level keeps its two parts
-in one value because the catalog validates them as one pair: which efforts a
-model allows is the catalog's to know, not something to match up in your head
-before typing.
+A launch must name `--x-harness`, `--x-level`, or both:
 
-The resolved model and effort are injected in the harness's own spelling, and
-narrated: `--model` everywhere (pi gets `openai-codex/gpt-5.6-sol`), then
-`--effort` (claude), `-c model_reasoning_effort="…"` (codex), or `--thinking`
-(pi). `--x-level` owns both dimensions, so a native model or effort flag
-forwarded beside it is a usage fault. Without one, a launch yields per
-dimension: a forwarded `--model sonnet` wins that dimension and only the
-effort is injected. Utility invocations (`codex login`, bare `--version`) take
-no injection, and resumes never do — a session continues on its own model.
+- `--x-harness claude|codex|pi` uses that harness's catalog defaults.
+- `--x-level <model>:<effort>` chooses the earliest catalog harness offering
+  the pair.
+- Together, the flags pin and validate the full request.
 
-`x-resume` without `--x-harness` detects which session store owns the id, and
-refuses with the candidates named when that is ambiguous. `--x-dry-run` prints
-the command instead of launching; add `--x-json` for the machine envelope.
+AgentLaunch injects the resolved model and effort using each harness's native
+spelling. Without `--x-level`, an explicitly forwarded native model or effort
+argument owns that dimension. With `--x-level`, a duplicate native decision is
+a usage error.
 
-A resume runs **where the conversation lived** (ADR 0028) — the session's own
-recorded cwd — and the `cwd` row says which directory that is, including when
-it is gone and the resume falls back to where you stand. `run:<run-id-or-name>`
-resumes what a Placement recorded instead of a raw id:
+The partition rule is simple: every `--x-*` token belongs to AgentLaunch;
+everything else belongs to the harness and remains in order. Unknown
+`--x-*` flags fail. Unknown native flags—including `--name` or `-n`—are
+forwarded without inspection.
 
-    agentsurface x-resume run:auth-flow
-    agentsurface x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
+## Resume
 
-A run whose workspace has since been released refuses rather than picking a
-directory for you, naming the repo it was cut from and the ways to place it
-somewhere; resuming that session by its own id still works, and the refusal
-spells it out.
+```sh
+agentlaunch x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
+agentlaunch x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60 --x-harness claude
+```
 
-## On a surface
+Without `--x-harness`, AgentLaunch searches all three native stores. It
+refuses absent or ambiguous IDs. With `--x-harness`, it skips detection and
+uses that harness's native resume spelling.
 
-    agentsurface --x-harness claude --x-surface "fix the tests"
-    agentsurface --x-harness codex --x-surface --x-new-workspace fix-tests --x-json
-    agentsurface x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60 --x-surface
-    agentsurface x-runs
-    agentsurface x-run <run-id>
+The resumed process starts in the cwd recorded by the native session. If the
+directory is unavailable, AgentLaunch says so and starts where it was invoked.
+Resume injects no model or effort; the session continues with its native state.
 
-`--x-surface` places the launch in a managed workspace, and the command returns
-instead of becoming the harness (ADR 0013/0022). The same composed command —
-balanced, yolo'd, model and effort injected — starts in a terminal there. The
-surface API is backend-generic; Orca is the first backend (ADR 0012), and its
-worktrees implement workspaces. Where a launch is placed:
+| Harness | Store (override honored) | Native resume |
+| --- | --- | --- |
+| Claude | `$CLAUDE_CONFIG_DIR` or `~/.claude/projects` | `claude --resume <id>` |
+| Codex | `$CODEX_HOME` or `~/.codex` | `codex resume <id>` |
+| Pi | `$PI_CODING_AGENT_DIR` or `~/.pi/agent/sessions` | `pi --session <id>` |
 
-- default — the workspace containing the cwd. A resume defaults to the
-  workspace containing the *session's own* cwd, so a conversation continues
-  where it lived.
-- `--x-workspace <sel>` — an existing workspace, selector interpreted by the
-  backend (orca: `name:`, `path:`, `branch:`, `id:`).
-- `--x-new-workspace <name>` — created on demand, with **ensure** (ADR 0013):
-  the project it belongs to is registered automatically, from `--x-project` (a
-  registered name, or `path:<repo>` to register one), else the cwd's git
-  repository. Ensure never invents a name — no flags and no enclosing workspace
-  is a loud fault, not a conjured worktree.
+## Accounts and permissions
 
-A new workspace also says what it came from. **Provenance is stated, never
-inferred** (ADR 0015): `--x-from run:<run-id-or-name>` names a previous run — resolved
-through agentsurface's own registry, so an agent naming what it spawned from
-never learns a backend's selector spelling — or takes the backend's own
-workspace selector; `--x-no-from` says nothing did. Saying nothing *means*
-nothing: the backend is told "none" explicitly, because one that would
-otherwise read its own environment (Orca infers a parent from the calling
-terminal) has to be told not to, and a command should not change meaning with
-the tab it was typed in. What a parent means is each backend's own flavor, so
-the envelope reports what was actually recorded rather than assuming it took.
+Session launches balance by default:
 
-A run can carry the operator's own label. `--x-name <name>` is passed to the
-harness where one has a launch-time name (claude and pi `--name`; codex has
-none, so a runner launch narrates the drop rather than failing), and on a
-surface it titles the terminal, labels a workspace the Placement created, and
-is written to the run record — so codex loses nothing there. **A name is a
-label, not an identity** (ADR 0017): free text, never invented, and unique
-among open runs (ADR 0019) — a name a closed run holds is free to reuse, one
-an open run holds is a `run_name_taken` refusal rather than a generated
-variant. It reads back wherever a run id does — `x-run auth-flow`, `--x-from
-run:auth-flow`, `x-land run:auth-flow` — with the id tier matched first and
-several runs sharing a name refused by name rather than guessed between.
+- Claude: `agentusage balance claude`, then `cswap run <slot> --share-history`.
+- Codex and Pi: `agentusage balance codex`, then `codex-swap run|resume` or
+  `codex-swap pi run` with the selected account/claim.
 
-Every Placement writes a **run record** (ADR 0014/0022): one JSON file under
-`~/.local/state/agentsurface/runs/`, whose run id is printed. Under `--x-json`,
-legal here without `--x-dry-run`, the envelope carries `run_id` and
-`surface {backend, project, workspace, terminal, server, provenance}`.
+`--x-account <selector>` pins a balanced launch but keeps the swap tool's
+eligibility checks. `--x-no-balance` runs the raw harness.
+`AGENTLAUNCH_NO_BALANCE=1` makes that the machine default.
 
-A balanced codex Placement additionally gets a **Run server** (ADR 0026): a
-dedicated, exclusive, account-pinned app-server on a socket derived from the
-run id, started and torn down by codex-swap with the session. The one thread
-on that socket can only be the run's session, so thread↔run is identity
-rather than inference — two codex runs in one workspace are simply two
-sockets, and the old per-workspace Placement lease (ADR 0020) is retired.
+Yolo is on by default and means each harness's own unattended setting:
 
-The session id is *discovered*, never assigned. A codex run's own server
-answers from the moment its TUI attaches (`codex-swap app-server threads`),
-before any turn; otherwise `x-run <run-id>` matches the store entry born in
-the run's workspace and backfills the record; `x-runs` lists the open runs,
-with `--x-closed`/`--x-all` for the history. The record's terminal handle is
-the backend's address for the future steer verb.
+- Claude: `--permission-mode auto`
+- Codex: `--dangerously-bypass-approvals-and-sandbox`
+- Pi: `--approve`
 
-Records are never removed. A closed one is what still names the session and
-the repository a finished conversation came from, which is what makes
-`x-resume run:<ref>` work long after the checkout is gone — so they are kept
-and filtered out of the default listing rather than pruned.
+Use `--x-no-yolo`, optionally followed by a harness scope. A caller-supplied
+native gate flag wins; explicit `--x-no-yolo` removes a forwarded positive
+yolo spelling and reports that redaction. Utility invocations such as
+`codex login`, `claude doctor`, and `pi auth` pass through without balance or
+yolo injection.
 
-A surface dry run resolves read-only. A refused surface (runtime unreachable,
-workspace missing) fails the launch loudly, never falling back to this
-terminal. Utility invocations cannot be placed.
+## Output and machine use
 
-## Landing finished work
+Before a launch, labelled decision rows go to stderr. Stdout remains the
+result. `--x-dry-run` prints a shell-runnable command; adding `--x-json`
+prints a schema-versioned envelope with the exact argv and decisions.
 
-    agentsurface x-land name:fix-tests --x-dry-run
-    agentsurface x-land name:fix-tests
-    agentsurface x-land run:<run-id> --x-force
+```sh
+agentlaunch --x-harness codex --x-dry-run --x-json
+agentlaunch x-resume <id> --x-dry-run --x-json
+agentlaunch x-doctor --x-json
+```
 
-`x-land` is the other end of a run's life: it merges a workspace's finished
-work back to the main line and lets the surface go, in that order (ADR 0016).
-Survey, refuse, merge, release, reconcile — a checkout is never removed until
-its work provably landed somewhere else. The workspace is named the way
-`--x-from` names one: `run:<run-id-or-name>` through our own registry, or the
-backend's own selector.
+`--x-json` requires `--x-dry-run` for interactive launches. Real launches
+adopt the native harness's exit status. Domain failures exit 1; usage faults
+exit 2.
 
-Git work is done with git, in the repository's primary checkout, which is found
-with `git worktree list` rather than asked of the backend. The surface is
-consulted only for what it alone knows — which workspace, whose repo, what is
-still attached — and does only what it alone can: stop terminals, remove the
-workspace.
+`x-doctor` reports native binaries, store paths/counts and overrides, config,
+and catalog health. It is read-only.
 
-**Nothing half-happens.** A merge conflict is rolled back with `git merge
---abort` and raised as `land_conflict` naming the conflicted files, with the
-target branch exactly as it was; resolve it in the workspace and run `x-land`
-again. Refusals name what is in the way and the flag that clears it:
+## Configuration and catalog
 
-| Blocker | Means | Cleared by |
-|---|---|---|
-| `dirty` | uncommitted or untracked changes | `--x-abandon` |
-| `terminals` | live terminals in the workspace | `--x-force` |
-| `children` | workspaces descend from this one | `--x-force` |
-| `base_branch` | the primary checkout is on another branch | `git switch` |
-| `base_dirty` | the primary checkout is unclean | commit or stash |
+The optional strict config is `~/.config/agentlaunch/config.json`:
 
-The two force flags are deliberately separate: `--x-force` clears operational
-obstacles and can lose no work, `--x-abandon` discards work and skips the merge
-entirely, and neither implies the other. Committing is judgment, so a dirty
-workspace is refused rather than committed for you. The repository's own
-primary checkout is refused unconditionally. Merging is local — nothing is
-pushed. `--x-dry-run` reports the same survey and blockers and changes nothing,
-which is how to ask "can this be landed?" without a second command.
+```json
+{
+  "$schema": "/path/to/config.schema.json",
+  "yolo": { "claude": true, "codex": false, "pi": true }
+}
+```
 
-Run records are **stamped, not deleted**: `closed_at` and `closed_as`
-(`landed` | `abandoned`). A record is the last thing tying a run id to a
-session id, and the session outlives the workspace it was born in.
+The built-in [catalog.json](catalog.json) defines harness order, models,
+efforts, defaults, and native spellings. A custom
+`~/.config/agentlaunch/catalog.json` replaces it outright. Both formats have
+checked-in JSON Schemas generated from strict Zod sources.
 
-## The catalog
+## Bare harness shims
 
-`catalog.json`, shipped with the checkout, is the ordered description of
-harnesses, their models, and their effort sets (ADR 0010). A custom
-`~/.config/agentsurface/catalog.json` replaces it outright — no merging.
-`catalog.schema.json` describes the file for editors, generated from the zod
-source of truth (`bun run generate:schemas`).
+Fleet installations may route bare `claude`, `codex`, and `pi` through
+AgentLaunch. The child receives `AGENTLAUNCH_LAUNCH=1`; the shims use that
+sentinel to exec the real binary rather than recur. The shims are installed by
+the fleet owner, not this repository.
 
-- **Families** define a model list once. The `claude` family is included by the
-  claude harness, and the `gpt` family as-is by codex and through the
-  `openai-codex` provider by pi — so `gpt-5.6-sol` means the same thing on
-  both, and only the emitted spelling differs. What a provider means is each
-  harness's own semantics; claude and codex have none, so a provider on their
-  includes is a fault.
-- **Spellings** let a model be typed one way and emitted another. A member's
-  optional `spelling` is what reaches the harness's `--model`, so a name the
-  typed grammar forbids stays reachable: the claude family offers `opus-1m`
-  and `sonnet-1m`, emitted as claude's own `opus[1m]` / `sonnet[1m]` long-
-  context aliases. A provider combines with the spelling, not the typed name.
-- **Efforts** inherit model > family > harness — a member's own set wins, else
-  the family's, else the harness's — so `ultra` is allowed exactly where it is
-  real.
-- **Defaults** live in a `defaults` object: per harness, per family (supplying
-  any harness that includes it and states none of its own — two
-  defaults-bearing includes without own defaults is a fault), and per model
-  (`{"effort": …}` only, overriding the harness's resolved default when that
-  model is chosen). There is no default harness; every launch names one.
-- **Resolution** is the two launch flags: `--x-harness` alone launches that
-  harness's defaults, `--x-level` alone walks the harness order and the
-  earliest offering wins (`gpt-5.6-sol:ultra` picks codex over pi), and both
-  together pin and validate.
-- **Validation** is strict and total at load. Unknown keys or families,
-  providers without semantics, duplicates after family expansion, missing
-  effort chains, and unsatisfiable defaults are all `catalog_invalid`, and a
-  malformed custom catalog fails rather than falling back. `x-doctor` reports
-  the active catalog's source, order, model counts, and resolved defaults.
+## Development
 
-## Yolo mode
+```sh
+bun install --frozen-lockfile
+bun run check
+bash scripts/smoke.sh
+```
 
-Yolo is on by default (ADR 0009): every launch gets its harness's own
-unattended permission setting — `--permission-mode auto` (claude, whose auto
-mode classifies each action rather than waving all of them through, ADR 0028),
-`--dangerously-bypass-approvals-and-sandbox` (codex), `--approve` (pi, whose
-tools never prompt, so this only auto-trusts project-local files).
-`~/.config/agentsurface/config.json` disables it with `{"yolo": false}` or a
-per-harness map like `{"yolo": {"codex": false}}`. Per launch, `--x-yolo` and
-`--x-no-yolo` override the config; both repeat and take an optional harness
-scope (`--x-no-yolo codex`) that only bites when the launch matches.
-
-An explicit `--x-no-yolo` also *removes* a yolo spelling that was explicitly
-forwarded, and narrates the removal. A spelling the caller already forwarded is
-never duplicated (pi's `-a` alias and claude's `--dangerously-skip-permissions`
-included), pi's own `--no-approve` and any other `--permission-mode` the caller
-chose are never overridden, and utility invocations never get the flag. A malformed config
-fails the launch loudly; `x-doctor` reports the config's path, validity, and
-per-harness state. `config.schema.json` describes the file for editors — name
-it in a `"$schema"` key, which the loader accepts and ignores — and is
-generated from the same zod schema the loader validates with, so what it
-documents is what the launcher accepts.
-
-With the PATH shims installed, upstream tools — orca's per-agent default args
-included — stop encoding permission flags per harness: they run the bare
-command, and the launcher decides.
-
-## Balanced launches
-
-Every launch and resume is balanced by default (ADR 0003). `agentusage balance`
-picks the account from live quota observations, and the command is wrapped in
-the swap tool's public contract: `cswap run <slot> --share-history -- …`
-(claude), `codex-swap run|resume --claim <lease> -- …` (codex, with
-`--server unix://<socket>` ahead of the claim on a Placement — the Run
-server, ADR 0026), or `codex-swap pi run --claim <lease> -- …` (pi, riding
-the codex account pool). The harness argv after the wrapper's `--` is
-byte-identical to the unbalanced command.
-Routing reads the native `--model` (or codex's `-m`) from the forwarded tokens;
-a claude resume routes on the session's last-used model.
-
-Pins and escape hatches: `--x-account <sel>` pins one account (still gated by
-the swap tool), `--x-no-balance` launches raw once, and
-`AGENTSURFACE_NO_BALANCE=1` defaults a machine without the stack to raw. A
-refused balance (no capacity, stale observations, missing tools) fails the
-launch loudly with a recovery, never launching silently unbalanced. Dry runs
-balance without reserving or claiming anything.
-
-Utility invocations are the exception (ADR 0005). A leading management or
-service word — codex `login`, `app-server`, `mcp`…, claude `doctor`, `mcp`…, pi
-`auth`…, or a bare `--help`/`--version` — opens no account-bound session, so it
-passes through to the real binary unwrapped even when the balancing stack is
-missing. Shimmed `codex login --device-auth` just logs in; `codex exec`,
-`review`, `resume`, `fork`, prompts, and flag launches still balance.
-
-On this machine, bare `claude`/`codex`/`pi` are AgentStart-installed PATH shims
-that exec `agentsurface --x-harness <harness> "$@"`, so every launch balances
-however it was typed. The `AGENTSURFACE_LAUNCH=1` sentinel marks already-routed
-children so shims exec the real binary (ADR 0004);
-`AGENTSURFACE_SHIM_BYPASS=1` is the manual escape.
-
-## The launch narrative
-
-Every launch and resume reports its decisions on stderr, one labelled row each,
-before the harness takes the terminal:
-
-    open    claude
-    cwd     ~/code/agentsurface
-    yolo    on · --permission-mode auto
-    account claude-swap slot 1 · full-focus
-    launch  cswap run 1 --share-history -- claude --permission-mode auto
-
-stdout stays the result, so `--x-dry-run` remains a runnable line and
-`--x-json` a parseable envelope — and `--x-json` silences the rows outright,
-since the envelope already carries every fact they would report (ADR 0007).
-When an x-flag edits the harness's own tokens, the edit is a row too: `yolo
-off · removed --permission-mode auto · explicitly forwarded ·
---x-no-yolo wins`. `--x-verbose` adds mechanism rows: the config consulted, the
-`agentusage` command shelled, the session file a resume matched, the resolved
-binary, and the sentinel.
-
-## For agents
-
-`agentsurface --agent-teaser` is the one-line summary and `--agent-help` the
-runbook. The top level is agentsurface's own namespace — no harness named,
-nothing to forward — so the conventional spellings stay there. Machine outcomes
-are one `{schema_version, ok, error, data}` envelope on stdout under `--x-json`.
-Exit codes are 0 success, 1 domain error, and 2 usage fault, except harness
-launches and `x-resume`, which exit with the launched harness's own code.
-
-## Develop
-
-    bun run check          # lint + typecheck + test — the commit gate
-    bash scripts/smoke.sh  # every documented command against a throwaway HOME
-
-`AGENTS.md` carries repository guidance, `CONTEXT.md` the glossary, and
-`docs/adr/` the load-bearing decisions. The roadmap and the context behind it
-live in the wiki, not here:
-
-    agentwiki get agentsurface-roadmap
-    agentwiki get agentsurface-build-context
+The project is MIT licensed. Historical AgentSurface commits are retained in
+Git; the current product intentionally contains only native launch and resume.

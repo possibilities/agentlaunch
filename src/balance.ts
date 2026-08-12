@@ -30,12 +30,6 @@ export interface BalanceRequest {
   model: string | undefined;
   /** Dry runs must not reserve or claim anything. */
   dryRun: boolean;
-  /** The Run server's listen URL (codex placements, ADR 0026): codex-swap
-   * starts a dedicated exclusive app-server there, pinned to the account it
-   * chose, and attaches the session to it. Codex only — pi has no app-server
-   * and claude no equivalent — and fail-hard on codex-swap's side: a
-   * placement whose server cannot start is refused, never quietly shared. */
-  server: string | undefined;
   narrator: Narrator;
 }
 
@@ -47,7 +41,7 @@ export interface BalancedLaunch {
 /** Balance is on unless the launch or the machine opts out. */
 export function balanceDisabled(env: Environ, noBalanceFlag: boolean): boolean {
   if (noBalanceFlag) return true;
-  const machine = env["AGENTSURFACE_NO_BALANCE"];
+  const machine = env["AGENTLAUNCH_NO_BALANCE"];
   return machine !== undefined && machine !== "";
 }
 
@@ -119,7 +113,7 @@ async function balanceCodexFamily(
     return {
       spec: {
         ...spec,
-        command: composeCodexFamily(spec, ["--account", request.account], request.server),
+        command: composeCodexFamily(spec, ["--account", request.account]),
       },
       decision: {
         provider: "codex",
@@ -162,7 +156,7 @@ async function balanceCodexFamily(
   // spelling — a real command a human can copy-run through the same gate.
   const pin = leaseId !== null ? ["--claim", leaseId] : ["--account", accountKey];
   return {
-    spec: { ...spec, command: composeCodexFamily(spec, pin, request.server) },
+    spec: { ...spec, command: composeCodexFamily(spec, pin) },
     decision: {
       provider: "codex",
       route: null,
@@ -177,31 +171,17 @@ async function balanceCodexFamily(
  * codex opens wrap as `codex-swap run`, codex resumes as
  * `codex-swap resume <id>` (the session id moves into the wrapper's
  * grammar), pi always as `codex-swap pi run` — pi's own `--session` flag
- * rides the forwarded args untouched. A Run server rides the wrapper's own
- * grammar (`--server <url>`), never the harness argv after the `--`.
+ * rides the forwarded args untouched.
  */
-export function composeCodexFamily(
-  spec: LaunchSpec,
-  pin: string[],
-  server?: string | undefined,
-): string[] {
+export function composeCodexFamily(spec: LaunchSpec, pin: string[]): string[] {
   if (spec.harness === "pi") {
     return ["codex-swap", "pi", "run", ...pin, "--", ...spec.command.slice(1)];
   }
-  const dedicated = server !== undefined ? ["--server", server] : [];
   if (spec.sessionId !== null) {
     // buildResume shaped: ["codex", "resume", <id>, ...passthrough]
-    return [
-      "codex-swap",
-      "resume",
-      spec.sessionId,
-      ...dedicated,
-      ...pin,
-      "--",
-      ...spec.command.slice(3),
-    ];
+    return ["codex-swap", "resume", spec.sessionId, ...pin, "--", ...spec.command.slice(3)];
   }
-  return ["codex-swap", "run", ...dedicated, ...pin, "--", ...spec.command.slice(1)];
+  return ["codex-swap", "run", ...pin, "--", ...spec.command.slice(1)];
 }
 
 /** Pi model ids may carry the provider prefix; lanes match on the bare id. */
@@ -228,7 +208,7 @@ async function runBalanceJson(
     throw new CliError(
       "balance_unavailable",
       `${bin} is not on PATH; balanced launches need the agentusage stack`,
-      "install it, or pass --x-no-balance (or set AGENTSURFACE_NO_BALANCE=1) to launch unbalanced",
+      "install it, or pass --x-no-balance (or set AGENTLAUNCH_NO_BALANCE=1) to launch unbalanced",
     );
   }
   const child = Bun.spawn([resolved, ...rest], {
@@ -256,7 +236,7 @@ async function runBalanceJson(
   if (code === 0 && body !== null && body["ok"] === true) return body;
 
   // agentusage spells refusals two ways: `{error: {code, message}}` and the
-  // balance-verb `{refusal, detail}`; both must surface verbatim.
+  // balance-verb `{refusal, detail}`; both must be reported verbatim.
   const error = body?.["error"];
   const errorRecord =
     typeof error === "object" && error !== null ? (error as Record<string, unknown>) : null;

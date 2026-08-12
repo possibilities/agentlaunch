@@ -16,7 +16,7 @@ observations, or a missing stack fail the launch with a recovery naming the
 fix — a silent fallback to an unbalanced launch would quietly drain
 whatever account is active. The escape hatches are explicit: `--x-account`
 pins (still gated by the swap tool), `--x-no-balance` launches raw once,
-`AGENTSURFACE_NO_BALANCE=1` defaults a machine to raw. Dry runs balance
+`AGENTLAUNCH_NO_BALANCE=1` defaults a machine to raw. Dry runs balance
 without reserving or claiming, so codex/pi dry runs print the copy-runnable
 `--account` spelling rather than a lease that was never minted.
 

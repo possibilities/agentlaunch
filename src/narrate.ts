@@ -1,5 +1,5 @@
 /**
- * The launch narrative: what agentsurface decided, in order, before the
+ * The launch narrative: what agentlaunch decided, in order, before the
  * harness takes the terminal. Bare `claude` now balances accounts and
  * injects permission flags on its own, so the story is the only thing
  * making that legible.
@@ -16,8 +16,7 @@ export interface Narrator {
   readonly verbose: boolean;
 }
 
-/** Wide enough for the longest label (workspace), so values line up in one
- * column. */
+/** Wide enough for current labels, so values line up in one column. */
 const LABEL_WIDTH = 10;
 
 /** Values are lists of facts, not sentences. */

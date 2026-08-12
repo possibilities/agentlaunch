@@ -4,14 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 SOURCE="$ROOT/src/main.ts"
-BIN_DIR="${AGENTSURFACE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
-STATE_DIR="${AGENTSURFACE_INSTALL_STATE_DIR:-$HOME/.local/state/agentsurface}"
-TARGET="$BIN_DIR/agentsurface"
+BIN_DIR="${AGENTLAUNCH_INSTALL_BIN_DIR:-$HOME/.local/bin}"
+STATE_DIR="${AGENTLAUNCH_INSTALL_STATE_DIR:-$HOME/.local/state/agentlaunch}"
+TARGET="$BIN_DIR/agentlaunch"
 RECEIPT="$STATE_DIR/deployed-sha"
-UPSTREAM_ORIGIN="git@github.com:possibilities/agentsurface.git"
+UPSTREAM_ORIGIN="git@github.com:possibilities/agentlaunch.git"
 # A fork installs from its own checkout, so the origin this refuses to
 # install from has to be overridable; the upstream spelling is the default.
-EXPECTED_ORIGIN="${AGENTSURFACE_INSTALL_EXPECTED_ORIGIN:-$UPSTREAM_ORIGIN}"
+EXPECTED_ORIGIN="${AGENTLAUNCH_INSTALL_EXPECTED_ORIGIN:-$UPSTREAM_ORIGIN}"
 TMP_PATH=""
 
 cleanup() {
@@ -25,11 +25,11 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/install.sh [--install|--uninstall|--help]
 
-With no option, installs agentsurface. Installation runs Bun's frozen dependency
-install, links ~/.local/bin/agentsurface to this checkout, and writes the deployed
-Git SHA to ~/.local/state/agentsurface/deployed-sha.
+With no option, installs agentlaunch. Installation runs Bun's frozen dependency
+install, links ~/.local/bin/agentlaunch to this checkout, and writes the deployed
+Git SHA to ~/.local/state/agentlaunch/deployed-sha.
 
-Set AGENTSURFACE_INSTALL_BIN_DIR and AGENTSURFACE_INSTALL_STATE_DIR to use other
+Set AGENTLAUNCH_INSTALL_BIN_DIR and AGENTLAUNCH_INSTALL_STATE_DIR to use other
 locations (including for hermetic tests).
 USAGE
 }
@@ -144,10 +144,10 @@ normalized_origin() {
   local origin="$1"
   origin="${origin%/}"
   case "$origin" in
-    https://github.com/possibilities/agentsurface|https://github.com/possibilities/agentsurface.git)
+    https://github.com/possibilities/agentlaunch|https://github.com/possibilities/agentlaunch.git)
       printf '%s\n' "$UPSTREAM_ORIGIN"
       ;;
-    git@github.com:possibilities/agentsurface|git@github.com:possibilities/agentsurface.git|ssh://git@github.com/possibilities/agentsurface|ssh://git@github.com/possibilities/agentsurface.git)
+    git@github.com:possibilities/agentlaunch|git@github.com:possibilities/agentlaunch.git|ssh://git@github.com/possibilities/agentlaunch|ssh://git@github.com/possibilities/agentlaunch.git)
       printf '%s\n' "$UPSTREAM_ORIGIN"
       ;;
     *)
@@ -164,11 +164,11 @@ validate_managed_checkout() {
   [[ "$root" == /* ]] || die "Refusing managed command with a non-absolute source root: $root"
   validate_path "$root" "source root"
   validate_directory "$root" "source root"
-  validate_safe_file "$source" "agentsurface source command"
-  [[ -x "$source" ]] || die "Refusing non-executable agentsurface source command: $source"
-  sha="$(checkout_head "$root")" || die "Refusing agentsurface source outside an exact Git checkout: $root"
-  origin="$(git -C "$root" remote get-url origin 2>/dev/null)" || die "Refusing agentsurface source without an origin: $root"
-  [[ "$(normalized_origin "$origin")" == "$EXPECTED_ORIGIN" ]] || die "Refusing agentsurface source with foreign origin: $root"
+  validate_safe_file "$source" "agentlaunch source command"
+  [[ -x "$source" ]] || die "Refusing non-executable agentlaunch source command: $source"
+  sha="$(checkout_head "$root")" || die "Refusing agentlaunch source outside an exact Git checkout: $root"
+  origin="$(git -C "$root" remote get-url origin 2>/dev/null)" || die "Refusing agentlaunch source without an origin: $root"
+  [[ "$(normalized_origin "$origin")" == "$EXPECTED_ORIGIN" ]] || die "Refusing agentlaunch source with foreign origin: $root"
   MANAGED_ROOT="$root"
   MANAGED_SHA="$sha"
 }
@@ -217,7 +217,7 @@ receipt_exists() {
   [[ -e "$RECEIPT" || -L "$RECEIPT" ]]
 }
 
-install_agentsurface() {
+install_agentlaunch() {
   local sha
 
   command -v bun >/dev/null 2>&1 || die "Bun is required but was not found in PATH"
@@ -242,7 +242,7 @@ install_agentsurface() {
 
   (cd "$ROOT" && bun install --frozen-lockfile)
 
-  TMP_PATH="$BIN_DIR/.agentsurface-link.$$.$RANDOM"
+  TMP_PATH="$BIN_DIR/.agentlaunch-link.$$.$RANDOM"
   [[ ! -e "$TMP_PATH" && ! -L "$TMP_PATH" ]] || die "Refusing unsafe temporary command path: $TMP_PATH"
   ln -s -- "$SOURCE" "$TMP_PATH"
   mv -f -- "$TMP_PATH" "$TARGET"
@@ -267,7 +267,7 @@ install_agentsurface() {
   echo "Installed $TARGET at $sha"
 }
 
-uninstall_agentsurface() {
+uninstall_agentlaunch() {
   local have_state=0 removed=0
 
   validate_path "$BIN_DIR" "bin"
@@ -299,9 +299,9 @@ uninstall_agentsurface() {
   fi
 
   if (( removed )); then
-    echo "Removed agentsurface installation"
+    echo "Removed agentlaunch installation"
   else
-    echo "Agentsurface is not installed"
+    echo "AgentLaunch is not installed"
   fi
 }
 
@@ -311,10 +311,10 @@ fi
 
 case "${1:---install}" in
   --install)
-    install_agentsurface
+    install_agentlaunch
     ;;
   --uninstall)
-    uninstall_agentsurface
+    uninstall_agentlaunch
     ;;
   --help|-h)
     usage

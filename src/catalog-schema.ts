@@ -1,5 +1,5 @@
 /**
- * The catalog surface as a zod schema — the single source of truth:
+ * The catalog format as a zod schema — the single source of truth:
  * `loadCatalog` in `catalog.ts` validates the built-in and a custom file
  * alike with it, and `scripts/generate-schema.ts` emits `catalog.schema.json`
  * from it, so a catalog key exists exactly when it is declared (and
@@ -12,7 +12,7 @@
  * - Invariants that need the whole document — include references, provider
  *   semantics, duplicates after family expansion, the effort-inheritance
  *   chain, defaults resolution — live in `catalog.ts`, not here.
- * - Validation failures surface as one `catalog_invalid` CliError via
+ * - Validation failures become one `catalog_invalid` CliError via
  *   `catalogParseError`, on the first issue in document order.
  */
 import { z } from "zod";
@@ -197,7 +197,7 @@ const catalogShape = {
  * stripped. */
 export const catalogValuesSchema = z.strictObject(catalogShape);
 
-/** What `catalog.schema.json` documents: the same surface plus the `$schema`
+/** What `catalog.schema.json` documents: the same format plus the `$schema`
  * key a catalog file may carry for editor tooling. */
 export const catalogFileSchema = z.strictObject({
   $schema: z
@@ -227,7 +227,7 @@ function formatIssuePath(path: ReadonlyArray<PropertyKey>): string {
   return formatted;
 }
 
-/** The single error a failed catalog parse surfaces: the first issue in
+/** The single error a failed catalog parse reports: the first issue in
  * document order, addressed by path. */
 export function catalogParseError(error: z.ZodError, path: string): CliError {
   const issue = error.issues[0];

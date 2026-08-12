@@ -14,10 +14,10 @@ afterEach(() => {
 });
 
 function writeConfig(content: string): { env: Environ; home: string } {
-  const root = mkdtempSync(join(tmpdir(), "agentsurface-config-"));
+  const root = mkdtempSync(join(tmpdir(), "agentlaunch-config-"));
   roots.push(root);
   const home = join(root, "home");
-  const directory = join(home, ".config", "agentsurface");
+  const directory = join(home, ".config", "agentlaunch");
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "config.json"), content);
   return { env: {}, home };
@@ -37,7 +37,7 @@ function faultOf(content: string): CliError {
 
 describe("loadConfig", () => {
   test("missing file means yolo on everywhere (ADR 0009)", () => {
-    const root = mkdtempSync(join(tmpdir(), "agentsurface-config-"));
+    const root = mkdtempSync(join(tmpdir(), "agentlaunch-config-"));
     roots.push(root);
     const config = loadConfig({}, join(root, "home"));
     expect(config.exists).toBe(false);
@@ -45,11 +45,11 @@ describe("loadConfig", () => {
   });
 
   test("XDG_CONFIG_HOME relocates the file", () => {
-    const root = mkdtempSync(join(tmpdir(), "agentsurface-config-"));
+    const root = mkdtempSync(join(tmpdir(), "agentlaunch-config-"));
     roots.push(root);
     const env: Environ = { XDG_CONFIG_HOME: join(root, "xdg") };
     expect(configPath(env, join(root, "home"))).toBe(
-      join(root, "xdg", "agentsurface", "config.json"),
+      join(root, "xdg", "agentlaunch", "config.json"),
     );
   });
 
@@ -107,10 +107,10 @@ describe("loadConfig", () => {
   });
 
   test("a file that cannot be read fails rather than defaulting", () => {
-    const root = mkdtempSync(join(tmpdir(), "agentsurface-config-"));
+    const root = mkdtempSync(join(tmpdir(), "agentlaunch-config-"));
     roots.push(root);
     const home = join(root, "home");
-    mkdirSync(join(home, ".config", "agentsurface", "config.json"), { recursive: true });
+    mkdirSync(join(home, ".config", "agentlaunch", "config.json"), { recursive: true });
     expect(() => loadConfig({}, home)).toThrow(CliError);
   });
 

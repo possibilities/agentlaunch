@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "agentsurface",
+      "name": "agentlaunch",
       "dependencies": {
         "zod": "^4",
       },

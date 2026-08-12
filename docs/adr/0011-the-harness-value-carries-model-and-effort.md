@@ -23,9 +23,9 @@ and states none; two defaults-bearing includes without own defaults is a
 fault), and per model (effort only) — effort sets inherit model > family
 > harness, harness-level sets and defaults turn optional, and the
 top-level default harness is gone. Moving the harness off the command
-position keeps agentsurface shaped like the harnesses it launches: argv
+position keeps agentlaunch shaped like the harnesses it launches: argv
 is nothing but x-flags and forwarded tokens, and the shims exec
-`agentsurface --x-harness <name> "$@"`. Rejected: the harness value as a
+`agentlaunch --x-harness <name> "$@"`. Rejected: the harness value as a
 positional (colon-parsing at argv[0], name-vs-token ambiguity, and a
 none-route that could swallow typos as prompts); sparse colon forms
 (`claude:opus:`), whose fill rules made ownership ambiguous; value-based

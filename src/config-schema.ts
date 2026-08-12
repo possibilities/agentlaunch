@@ -1,5 +1,5 @@
 /**
- * The launcher config surface as a zod schema — the single source of truth:
+ * The launcher config format as a zod schema — the single source of truth:
  * `loadConfig` in `config.ts` validates the file with it, and
  * `scripts/generate-schema.ts` emits `config.schema.json` from it, so a
  * config key exists exactly when it is declared (and described) here.
@@ -11,7 +11,7 @@
  * - No `.default()` anywhere: an omitted key stays omitted through the
  *   parse, so what a missing `yolo` means is the loader's decision to state
  *   (ADR 0009) rather than something the parse quietly injects.
- * - Validation failures surface as one `config_invalid` CliError via
+ * - Validation failures become one `config_invalid` CliError via
  *   `configParseError`, naming the offending key.
  */
 import { z } from "zod";
@@ -70,7 +70,7 @@ const configShape = {
  * stripped. */
 export const configValuesSchema = z.strictObject(configShape);
 
-/** What `config.schema.json` documents: the same surface plus the `$schema`
+/** What `config.schema.json` documents: the same format plus the `$schema`
  * key a config file may carry for editor tooling. */
 export const configFileSchema = z.strictObject({
   $schema: z

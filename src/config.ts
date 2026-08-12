@@ -22,7 +22,7 @@ export interface Config {
 const ALL_YOLO: Record<HarnessName, boolean> = { claude: true, codex: true, pi: true };
 
 export function configPath(env: Environ, home: string): string {
-  return join(configDirectory(env, home, "agentsurface"), "config.json");
+  return join(configDirectory(env, home, "agentlaunch"), "config.json");
 }
 
 export function loadConfig(env: Environ, home: string): Config {

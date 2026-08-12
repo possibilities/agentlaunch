@@ -2,10 +2,10 @@
 
 Bare `claude`, `codex`, and `pi` on this machine are shims (installed by
 AgentStart, ahead of the real binaries on PATH) that exec
-`agentsurface open <harness> -- "$@"` — every launch balances, however it
-was typed. The recursion this invites (agentsurface → swap tool → harness
-from PATH → shim → agentsurface …) is broken by one env sentinel:
-`AGENTSURFACE_LAUNCH=1`, stamped by `launch()` on every child, means
+`agentlaunch --x-harness <harness> "$@"` — every launch balances, however it
+was typed. The recursion this invites (agentlaunch → swap tool → harness
+from PATH → shim → agentlaunch …) is broken by one env sentinel:
+`AGENTLAUNCH_LAUNCH=1`, stamped by `launch()` on every child, means
 "already routed" — a shim seeing it execs the real binary, found by
 scanning PATH past the shim's own directory.
 
@@ -16,7 +16,8 @@ pi runner and link spawns, cswap's session-mode launch), so a manual
 the user named instead of being silently re-balanced by the shim. It also
 rides into every harness's own subprocesses, so a harness shelling out to
 another harness gets the real binary — nested launches never re-balance.
-`AGENTSURFACE_SHIM_BYPASS=1` is the human escape for one raw call.
+The fleet's shim contract may also expose a deliberate human bypass for one
+raw call; that belongs to the shim owner, not AgentLaunch's CLI.
 
 Because shimmed argv arrives entirely in the passthrough, routing reads
 `--model` from forwarded args when the launcher flag is absent — a shimmed

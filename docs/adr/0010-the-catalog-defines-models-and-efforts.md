@@ -2,7 +2,7 @@
 
 Model and effort return as data, not flags-with-adapters: the catalog —
 built-in `catalog.json`, replaced outright by
-`~/.config/agentsurface/catalog.json` when that exists — is the ordered
+`~/.config/agentlaunch/catalog.json` when that exists — is the ordered
 description of harnesses, their models, and their effort sets. Families
 define a model list once (a top-level map); a harness includes one as-is
 or through a `provider`, whose meaning is the harness's own semantics (pi
@@ -24,7 +24,7 @@ default satisfiable where it is declared — and a malformed custom catalog
 fails rather than falling back to the built-in. This record also adopts
 the fleet's config conventions — zod 4 as the schema source of truth, a
 generated `catalog.schema.json`, a drift test — and with them
-agentsurface's first runtime dependency. Rejected: merging custom over
+agentlaunch's first runtime dependency. Rejected: merging custom over
 built-in (merge semantics on an ordered list are a swamp); `{min, max}`
 effort ranges (custom efforts break any global ordering); a raw prefix
 instead of `provider` (the harness owns the spelling; the catalog only

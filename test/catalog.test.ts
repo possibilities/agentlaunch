@@ -14,14 +14,14 @@ afterEach(() => {
 });
 
 function emptyHome(): { env: Environ; home: string } {
-  const root = mkdtempSync(join(tmpdir(), "agentsurface-catalog-"));
+  const root = mkdtempSync(join(tmpdir(), "agentlaunch-catalog-"));
   roots.push(root);
   return { env: {}, home: join(root, "home") };
 }
 
 function writeCatalog(content: string): { env: Environ; home: string } {
   const { env, home } = emptyHome();
-  const directory = join(home, ".config", "agentsurface");
+  const directory = join(home, ".config", "agentlaunch");
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "catalog.json"), content);
   return { env, home };

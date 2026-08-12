@@ -30,19 +30,19 @@ export async function launch(
     throw new CliError(
       "harness_not_installed",
       `${bin} is not on PATH`,
-      `install ${bin} or run agentsurface from a shell where it resolves`,
+      `install ${bin} or run agentlaunch from a shell where it resolves`,
     );
   }
   narrator.detail("bin", resolved);
-  narrator.detail("env", "AGENTSURFACE_LAUNCH=1 · PATH shims exec the real binary");
+  narrator.detail("env", "AGENTLAUNCH_LAUNCH=1 · PATH shims exec the real binary");
   const child = Bun.spawn([resolved, ...rest], {
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",
     ...(cwd === null ? {} : { cwd }),
     // The sentinel marks every descendant as already-routed: PATH shims
-    // exec the real harness instead of re-entering agentsurface (ADR 0004).
-    env: { ...env, AGENTSURFACE_LAUNCH: "1" },
+    // exec the real harness instead of re-entering agentlaunch (ADR 0004).
+    env: { ...env, AGENTLAUNCH_LAUNCH: "1" },
   });
   // The terminal delivers Ctrl-C to the whole foreground group; swallowing
   // our copy keeps the wrapper alive so the harness decides what an

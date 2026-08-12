@@ -1,14 +1,13 @@
 import { CliError } from "./errors.ts";
 
 /**
- * One bounded subprocess call, shared by every backend that shells out
- * (S10): a deadline past which the child is killed and then waited on rather
+ * One bounded subprocess call: a deadline past which the child is killed and
+ * then waited on rather
  * than left to leak, a typed `subprocess_timeout` domain error naming the
  * command instead of the caller hanging forever, and a capped stderr tail so
  * a runaway child cannot grow an error message without bound. Defaults are
- * generous per caller (orca ~30s, git ~60s) so a slow-but-alive operation
- * never false-trips; a timeout means the child did not finish, not that it
- * was merely slow to start.
+ * generous per caller so a slow-but-alive operation never false-trips; a
+ * timeout means the child did not finish, not that it was merely slow to start.
  */
 
 const MAX_STDERR_CHARS = 4000;
@@ -30,7 +29,7 @@ export interface BoundedSpawnOptions {
   cwd?: string;
   env: Record<string, string | undefined>;
   timeoutMs: number;
-  /** Names the command in a timeout's domain error, e.g. "orca worktree show", "git merge". */
+  /** Names the command in a timeout's domain error. */
   label: string;
 }
 
@@ -63,7 +62,7 @@ export async function spawnBounded(options: BoundedSpawnOptions): Promise<Bounde
       throw new CliError(
         "subprocess_timeout",
         `${options.label} did not finish within ${options.timeoutMs}ms`,
-        "the command may still be running outside our view; check its own backend and retry",
+        "check the command's own status and retry",
       );
     }
     return { code, stdout, stderr: stderr.slice(0, MAX_STDERR_CHARS) };

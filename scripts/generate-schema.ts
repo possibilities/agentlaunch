@@ -14,13 +14,13 @@ import { z } from "zod";
 import { catalogFileSchema } from "../src/catalog-schema.ts";
 import { configFileSchema } from "../src/config-schema.ts";
 
-const CATALOG_TITLE = "agentsurface catalog";
+const CATALOG_TITLE = "agentlaunch catalog";
 const CATALOG_DESCRIPTION =
-  "The ordered description of harnesses, their models, and their effort sets, read from the built-in catalog.json shipped with the checkout — or, when it exists, ~/.config/agentsurface/catalog.json (XDG_CONFIG_HOME relocates the directory), which REPLACES the built-in outright rather than merging with it. Every launch consumes it through two flags: --x-harness <harness> alone launches that harness's defaults, --x-level <model>:<effort> alone resolves to the earliest harness in the file's order offering the combination, and both together pin and validate. Effort sets inherit model > family > harness; defaults live in a \"defaults\" object per harness, per family (supplying a harness that includes it and states none), and per model (effort only). The file is validated strictly and totally at load; every fault is a catalog_invalid error rather than a silently ignored line, and x-doctor reports it.";
+  "The ordered description of harnesses, their models, and their effort sets, read from the built-in catalog.json shipped with the checkout — or, when it exists, ~/.config/agentlaunch/catalog.json (XDG_CONFIG_HOME relocates the directory), which REPLACES the built-in outright rather than merging with it. Every launch consumes it through two flags: --x-harness <harness> alone launches that harness's defaults, --x-level <model>:<effort> alone resolves to the earliest harness in the file's order offering the combination, and both together pin and validate. Effort sets inherit model > family > harness; defaults live in a \"defaults\" object per harness, per family (supplying a harness that includes it and states none), and per model (effort only). The file is validated strictly and totally at load; every fault is a catalog_invalid error rather than a silently ignored line, and x-doctor reports it.";
 
-const CONFIG_TITLE = "agentsurface launcher configuration";
+const CONFIG_TITLE = "agentlaunch launcher configuration";
 const CONFIG_DESCRIPTION =
-  "Per-user configuration for the agentsurface launcher, read from ~/.config/agentsurface/config.json (XDG_CONFIG_HOME relocates the directory). The file is optional: with no file at all, yolo is ON for every harness (ADR 0009) — the file exists to disable it. When the file does exist it is validated strictly and every fault is a config_invalid domain error that fails the launch — a config that would be silently misread is worse than none, because a disabling config with a typo would quietly launch with the permission gates down against the operator's wishes. Only `x-doctor` downgrades that to a report.";
+  "Per-user configuration for the agentlaunch launcher, read from ~/.config/agentlaunch/config.json (XDG_CONFIG_HOME relocates the directory). The file is optional: with no file at all, yolo is ON for every harness (ADR 0009) — the file exists to disable it. When the file does exist it is validated strictly and every fault is a config_invalid domain error that fails the launch — a config that would be silently misread is worse than none, because a disabling config with a typo would quietly launch with the permission gates down against the operator's wishes. Only `x-doctor` downgrades that to a report.";
 
 type Schema = Record<string, unknown>;
 

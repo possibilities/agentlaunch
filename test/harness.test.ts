@@ -1,29 +1,18 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { UsageError } from "../src/errors.ts";
-import type { TrustOutcome } from "../src/harness.ts";
 import {
   applyYolo,
   buildOpen,
   buildResume,
   effortArguments,
   effortDimensionToken,
-  ensureWorkspaceTrusted,
   modelArguments,
   modelDimensionToken,
-  nameArguments,
-  nameDimensionToken,
   parseHarnessName,
+  sessionFileFacts,
   sessionStore,
   utilityInvocation,
 } from "../src/harness.ts";
@@ -276,23 +265,6 @@ describe("model and effort spellings", () => {
   });
 });
 
-describe("run-name spellings", () => {
-  test("claude and pi take --name; codex has none at launch", () => {
-    expect(nameArguments("claude", "auth flow")).toEqual(["--name", "auth flow"]);
-    expect(nameArguments("pi", "auth flow")).toEqual(["--name", "auth flow"]);
-    expect(nameArguments("codex", "auth flow")).toBeNull();
-  });
-
-  test("name-dimension detection sees --name, --name=, and the -n alias", () => {
-    expect(nameDimensionToken("claude", ["-p", "hi", "--name", "x"])).toBe("--name");
-    expect(nameDimensionToken("pi", ["--name=x"])).toBe("--name=x");
-    expect(nameDimensionToken("claude", ["-n", "x"])).toBe("-n");
-    // Codex has no launch-time name, so nothing there can conflict.
-    expect(nameDimensionToken("codex", ["--name", "x"])).toBeNull();
-    expect(nameDimensionToken("pi", ["hello"])).toBeNull();
-  });
-});
-
 describe("sessionStore", () => {
   const home = "/home/user";
 
@@ -323,145 +295,31 @@ describe("sessionStore", () => {
   });
 });
 
-describe("ensureWorkspaceTrusted", () => {
-  const homes: string[] = [];
+describe("sessionFileFacts", () => {
+  test("reads native cwd and ids from claude, codex, and pi files", async () => {
+    const root = mkdtempSync(join(tmpdir(), "agentlaunch-session-facts-"));
+    try {
+      const claude = join(root, "claude-id.jsonl");
+      const codex = join(root, "rollout-codex-id.jsonl");
+      const pi = join(root, "pi.jsonl");
+      writeFileSync(claude, `${JSON.stringify({ cwd: "/work/claude" })}\n`);
+      writeFileSync(
+        codex,
+        `${JSON.stringify({ type: "session_meta", payload: { id: "codex-id", cwd: "/work/codex" } })}\n`,
+      );
+      writeFileSync(pi, `${JSON.stringify({ id: "pi-id", cwd: "/work/pi" })}\n`);
 
-  afterEach(() => {
-    for (const home of homes) rmSync(home, { recursive: true, force: true });
-    homes.length = 0;
-  });
-
-  interface TrustWorld {
-    codexHome: string;
-    config: string;
-    workspace: string;
-  }
-
-  function makeTrustWorld(): TrustWorld {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "agentsurface-trust-")));
-    homes.push(root);
-    const workspace = join(root, "ws");
-    mkdirSync(workspace, { recursive: true });
-    const codexHome = join(root, "codex");
-    return { codexHome, config: join(codexHome, "config.toml"), workspace };
-  }
-
-  function trust(world: TrustWorld, workspace = world.workspace): TrustOutcome {
-    return ensureWorkspaceTrusted(
-      "codex",
-      { CODEX_HOME: world.codexHome },
-      "/home/user",
-      workspace,
-    );
-  }
-
-  test("only codex is asked, because only codex asks", () => {
-    const world = makeTrustWorld();
-    expect(ensureWorkspaceTrusted("claude", { CODEX_HOME: world.codexHome }, "/h", "/ws")).toBe(
-      "not applicable",
-    );
-    expect(existsSync(world.config)).toBe(false);
-  });
-
-  test("the answer is written once, and read back as already given", () => {
-    const world = makeTrustWorld();
-    expect(trust(world)).toBe("trusted");
-    const written = readFileSync(world.config, "utf8");
-    expect(written).toContain(`[projects.${JSON.stringify(world.workspace)}]`);
-    expect(written).toContain('trust_level = "trusted"');
-    expect(trust(world)).toBe("already");
-    expect(readFileSync(world.config, "utf8")).toBe(written);
-  });
-
-  test("an operator's own answer is matched however it is spelled, and never rewritten", () => {
-    const world = makeTrustWorld();
-    mkdirSync(world.codexHome, { recursive: true });
-    // Literal-string key, spaces around the dot, and an answer that refuses:
-    // a judgement is a judgement whatever it says (ADR 0021).
-    const operator = `model = "gpt-5.6"\n\n[ projects . '${world.workspace}' ]\ntrust_level = "untrusted"\n`;
-    writeFileSync(world.config, operator);
-    expect(trust(world)).toBe("already");
-    expect(readFileSync(world.config, "utf8")).toBe(operator);
-  });
-
-  test("an answer under a [projects] table counts, whichever key spelling it uses", () => {
-    const world = makeTrustWorld();
-    mkdirSync(world.codexHome, { recursive: true });
-    const operator = `[projects]\n"${world.workspace}" = { trust_level = "trusted" }\n`;
-    writeFileSync(world.config, operator);
-    expect(trust(world)).toBe("already");
-    expect(readFileSync(world.config, "utf8")).toBe(operator);
-  });
-
-  test("everything the operator wrote survives the write byte for byte", () => {
-    const world = makeTrustWorld();
-    mkdirSync(world.codexHome, { recursive: true });
-    const operator = [
-      "# codex settings this repository knows nothing about",
-      'model = "gpt-5.6"',
-      "",
-      "[mcp_servers.docs]",
-      'command = "docs-server"',
-      "",
-      `[projects."${join(world.workspace, "elsewhere")}"]`,
-      'trust_level = "trusted"',
-      "",
-    ].join("\n");
-    writeFileSync(world.config, operator);
-    expect(trust(world)).toBe("trusted");
-    const written = readFileSync(world.config, "utf8");
-    expect(written.startsWith(operator)).toBe(true);
-    expect(written.slice(operator.length)).toBe(
-      `\n[projects.${JSON.stringify(world.workspace)}]\ntrust_level = "trusted"\n`,
-    );
-  });
-
-  test("an inline projects table is refused rather than corrupted", () => {
-    const world = makeTrustWorld();
-    mkdirSync(world.codexHome, { recursive: true });
-    const operator = `projects = { "/elsewhere" = { trust_level = "trusted" } }\n`;
-    writeFileSync(world.config, operator);
-    expect(() => trust(world)).toThrow(/inline table/);
-    expect(readFileSync(world.config, "utf8")).toBe(operator);
-  });
-
-  test("concurrent processes answering for the same workspaces write one table each", async () => {
-    const world = makeTrustWorld();
-    const workspaces = Array.from({ length: 60 }, (_, index) => {
-      const path = join(world.workspace, `w${index}`);
-      mkdirSync(path, { recursive: true });
-      return path;
-    });
-    // Other agentsurface *processes* are what the lock has to exclude, so the
-    // race is run as processes: an in-process mutex would pass this trivially.
-    const script = join(dirname(world.codexHome), "answer.ts");
-    // Every child answers for the same directory at the same instant: without
-    // a shared start they simply take turns, and take turns is what the bug
-    // looks like when it is not reproduced.
-    const startAt = Date.now() + 2_000;
-    writeFileSync(
-      script,
-      [
-        `import { ensureWorkspaceTrusted } from ${JSON.stringify(join(import.meta.dir, "..", "src", "harness.ts"))};`,
-        `while (Date.now() < ${startAt}) Bun.sleepSync(1);`,
-        `for (const workspace of ${JSON.stringify(workspaces)}) {`,
-        `  ensureWorkspaceTrusted("codex", { CODEX_HOME: ${JSON.stringify(world.codexHome)} }, "/home/user", workspace);`,
-        "}",
-        "",
-      ].join("\n"),
-    );
-    const children = Array.from({ length: 4 }, () =>
-      Bun.spawn({ cmd: ["bun", script], stdout: "pipe", stderr: "pipe" }),
-    );
-    const codes = await Promise.all(children.map((child) => child.exited));
-    expect(codes).toEqual([0, 0, 0, 0]);
-    const written = readFileSync(world.config, "utf8");
-    for (const workspace of workspaces) {
-      const header = `[projects.${JSON.stringify(workspace)}]`;
-      expect(written.split(header).length - 1).toBe(1);
+      expect(await sessionFileFacts("claude", claude)).toEqual({
+        cwd: "/work/claude",
+        sessionId: "claude-id",
+      });
+      expect(await sessionFileFacts("codex", codex)).toEqual({
+        cwd: "/work/codex",
+        sessionId: "codex-id",
+      });
+      expect(await sessionFileFacts("pi", pi)).toEqual({ cwd: "/work/pi", sessionId: "pi-id" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
-    expect(written.split("\n").filter((line) => line.startsWith("[projects.")).length).toBe(
-      workspaces.length,
-    );
-  }, 30_000);
+  });
 });

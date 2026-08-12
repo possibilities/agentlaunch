@@ -35,10 +35,8 @@ The union value is retired loudly: a colon anywhere in `--x-harness` names
 the replacement (`pass --x-harness pi --x-level gpt-5.6-luna:max`) rather
 than reporting an unknown harness, because the old spelling is in every
 README, help block, and operator's muscle memory. The shims are unaffected
-— they exec `agentsurface --x-harness <harness> "$@"`, which is now simply
-the honest form. Run records carry `level` where they carried
-`harness_value`; the old key is read, never written, since a record outlives
-the workspace it describes.
+— they exec `agentlaunch --x-harness <harness> "$@"`, which is now simply
+the honest form.
 
 Rejected: renaming the union flag (`--x-use`, `--x-target`), which fixes the
 lie and keeps the polymorphic value; three flags, one per dimension, which

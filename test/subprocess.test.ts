@@ -50,7 +50,7 @@ describe("spawnBounded", () => {
 
 describe("whichInEnv", () => {
   test("resolves against the supplied env's PATH, not the parent process's", () => {
-    const dir = mkdtempSync(join(tmpdir(), "agentsurface-which-"));
+    const dir = mkdtempSync(join(tmpdir(), "agentlaunch-which-"));
     const bin = join(dir, "only-in-this-env");
     writeFileSync(bin, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     expect(whichInEnv("only-in-this-env", { PATH: dir })).toBe(bin);
@@ -60,7 +60,7 @@ describe("whichInEnv", () => {
   });
 
   test("an env whose PATH omits the binary reports it missing, even if the parent PATH has it", () => {
-    expect(whichInEnv("bash", { PATH: "/nonexistent-agentsurface-test-dir" })).toBeNull();
+    expect(whichInEnv("bash", { PATH: "/nonexistent-agentlaunch-test-dir" })).toBeNull();
   });
 
   test("an env with no PATH key falls back to the parent process's PATH", () => {

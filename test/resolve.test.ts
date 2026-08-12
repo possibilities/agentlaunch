@@ -14,7 +14,7 @@ const PI_ID = "0198a7b2-1111-7222-8333-444455556666";
 let roots: string[] = [];
 
 function tempRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "agentsurface-test-"));
+  const root = mkdtempSync(join(tmpdir(), "agentlaunch-test-"));
   roots.push(root);
   return root;
 }

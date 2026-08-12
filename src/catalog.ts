@@ -12,7 +12,7 @@ import { configDirectory } from "./paths.ts";
  * The catalog: the ordered description of harnesses, their models, and
  * their effort sets (ADR 0010, reshaped by ADR 0011). The built-in
  * `catalog.json` ships with the checkout; a custom file at
- * ~/.config/agentsurface/catalog.json REPLACES it outright — no merging, so
+ * ~/.config/agentlaunch/catalog.json REPLACES it outright — no merging, so
  * what will happen is answerable by reading one file. A malformed custom
  * catalog is a `catalog_invalid` fault, never a silent fall-back to the
  * built-in: a catalog written to constrain must not quietly stop
@@ -55,7 +55,7 @@ export interface Catalog {
 }
 
 export function catalogPath(env: Environ, home: string): string {
-  return join(configDirectory(env, home, "agentsurface"), "catalog.json");
+  return join(configDirectory(env, home, "agentlaunch"), "catalog.json");
 }
 
 export const BUILTIN_CATALOG_PATH = join(import.meta.dir, "..", "catalog.json");
@@ -75,7 +75,7 @@ function parseCatalog(path: string, source: Catalog["source"]): Catalog {
       "catalog_invalid",
       `${path} cannot be read: ${(error as Error).message}`,
       source === "built-in"
-        ? "reinstall agentsurface; the built-in catalog ships with the checkout"
+        ? "reinstall agentlaunch; the built-in catalog ships with the checkout"
         : `fix or remove ${path}`,
     );
   }

@@ -2,7 +2,7 @@ import { UsageError } from "./errors.ts";
 
 /**
  * The partition grammar (ADR 0008): every token of an invocation is either
- * agentsurface's — a `--x-*` flag anywhere, or a bare `x-*` word in command
+ * agentlaunch's — a `--x-*` flag anywhere, or a bare `x-*` word in command
  * position — or the harness's, forwarded in the order typed. Strictness
  * applies only to our side: an unknown `--x-*` is a usage fault; an unknown
  * anything-else is the harness's to judge, so a harness upgrade never
@@ -15,7 +15,7 @@ export interface XSpec {
   /** Boolean x-flags; a value or a repeat is a usage fault. */
   bool: Set<string>;
   /** Repeatable x-flags with an optional scope from a per-flag vocabulary
-   * (harness names for yolo, backend names for surface): bare covers "all",
+   * (harness names for yolo): bare covers "all",
    * and a following vocabulary word (or `=word`) narrows one occurrence. */
   scoped: Map<string, readonly string[]>;
 }

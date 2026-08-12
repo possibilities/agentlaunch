@@ -11,7 +11,7 @@ const SPEC: XSpec = {
   scoped: new Map<string, readonly string[]>([
     ["--x-yolo", HARNESSES],
     ["--x-no-yolo", HARNESSES],
-    ["--x-surface", ["orca"]],
+    ["--x-mode", ["fast"]],
   ]),
 };
 
@@ -67,13 +67,13 @@ describe("partition", () => {
   });
 
   test("each scoped flag has its own vocabulary", () => {
-    const parts = partition(["--x-surface", "orca", "--x-yolo", "claude"], SPEC);
-    expect(parts.scoped.get("x-surface")).toEqual(["orca"]);
+    const parts = partition(["--x-mode", "fast", "--x-yolo", "claude"], SPEC);
+    expect(parts.scoped.get("x-mode")).toEqual(["fast"]);
     expect(parts.scoped.get("x-yolo")).toEqual(["claude"]);
-    // A harness name is not a backend: the token stays a forwarded prompt.
-    const bare = partition(["--x-surface", "claude"], SPEC);
-    expect(bare.scoped.get("x-surface")).toEqual(["all"]);
+    // A harness name is outside the other flag's vocabulary and is forwarded.
+    const bare = partition(["--x-mode", "claude"], SPEC);
+    expect(bare.scoped.get("x-mode")).toEqual(["all"]);
     expect(bare.harness).toEqual(["claude"]);
-    expect(() => partition(["--x-surface=claude"], SPEC)).toThrow(UsageError);
+    expect(() => partition(["--x-mode=claude"], SPEC)).toThrow(UsageError);
   });
 });
