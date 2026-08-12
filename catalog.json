@@ -1,0 +1,35 @@
+{
+  "$schema": "./catalog.schema.json",
+  "families": {
+    "claude": {
+      "efforts": ["low", "medium", "high", "xhigh", "max"],
+      "models": [
+        { "model": "fable" },
+        { "model": "opus-1m", "spelling": "opus[1m]" },
+        { "model": "opus" },
+        { "model": "sonnet-1m", "spelling": "sonnet[1m]" },
+        { "model": "sonnet" },
+        { "model": "haiku" }
+      ],
+      "defaults": { "model": "opus-1m", "effort": "medium" }
+    },
+    "gpt": {
+      "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
+      "models": [
+        { "model": "gpt-5.6-sol" },
+        { "model": "gpt-5.6-terra" },
+        { "model": "gpt-5.6-luna", "efforts": ["low", "medium", "high", "xhigh", "max"] },
+        { "model": "gpt-5.5", "efforts": ["low", "medium", "high", "xhigh"] },
+        { "model": "gpt-5.4", "efforts": ["low", "medium", "high", "xhigh"] },
+        { "model": "gpt-5.4-mini", "efforts": ["low", "medium", "high", "xhigh"] },
+        { "model": "gpt-5.3-codex-spark", "efforts": ["low", "medium", "high", "xhigh"] }
+      ],
+      "defaults": { "model": "gpt-5.6-sol", "effort": "high" }
+    }
+  },
+  "harnesses": [
+    { "harness": "claude", "families": [{ "family": "claude" }] },
+    { "harness": "codex", "families": [{ "family": "gpt" }] },
+    { "harness": "pi", "families": [{ "family": "gpt", "provider": "openai-codex" }] }
+  ]
+}

@@ -1,0 +1,1512 @@
+import { existsSync } from "node:fs";
+import { type BalanceDecision, balanceDisabled, balanceSpec } from "./balance.ts";
+import {
+  BUILTIN_CATALOG_PATH,
+  catalogPath,
+  loadCatalog,
+  parseHarnessFlag,
+  parseLevel,
+  resolveRequest,
+} from "./catalog.ts";
+import { configPath, loadConfig } from "./config.ts";
+import { CliError, UsageError } from "./errors.ts";
+import type { HarnessName, LaunchSpec, YoloApplication, YoloDecision } from "./harness.ts";
+import {
+  applyYolo,
+  buildOpen,
+  buildResume,
+  callerSession,
+  effortArguments,
+  effortDimensionToken,
+  ensureWorkspaceTrusted,
+  HARNESS_NAMES,
+  modelArguments,
+  modelDimensionToken,
+  nameArguments,
+  nameDimensionToken,
+  sessionFileFacts,
+  sessionStore,
+  utilityInvocation,
+  workspaceArguments,
+  workspaceDimensionToken,
+} from "./harness.ts";
+import { landWorkspace } from "./land.ts";
+import type { Narrator } from "./narrate.ts";
+import { facts, shellLine, tildePath } from "./narrate.ts";
+import type { Partitioned } from "./partition.ts";
+import type { Environ } from "./paths.ts";
+import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
+import type { PlacementJournal, RunRecord } from "./runs.ts";
+import {
+  assertReservationHeld,
+  assertRunNameAvailable,
+  interruptedPlacements,
+  listRunRecords,
+  openPlacementJournal,
+  placementJournalPath,
+  releaseRunName,
+  reserveRunName,
+  resolveCallingRun,
+  resolveRun,
+  resolveRunReference,
+  runServerListenUrl,
+  runsDirectory,
+  scanRunRecords,
+  stampClosedRuns,
+  warnCorruptRunRecords,
+  writeRunRecord,
+} from "./runs.ts";
+import { whichInEnv } from "./subprocess.ts";
+import type { Provenance, SurfaceBackend, WorkspaceIntent } from "./surface.ts";
+import { BACKENDS, DEFAULT_BACKEND, surfaceBackend } from "./surface.ts";
+
+export interface Context {
+  env: Environ;
+  home: string;
+  cwd: string;
+  narrator: Narrator;
+}
+
+export type Outcome =
+  /** `cwd` is where the runner should start the harness — set only by a
+   * resume, which runs where the conversation lived (ADR 0028). Null is the
+   * invocation's own directory. A placed launch never carries one: the
+   * backend starts the terminal in the Workspace. */
+  | { kind: "launch"; spec: LaunchSpec; cwd: string | null }
+  | { kind: "result"; data: unknown; human: string };
+
+/** A launch dimension as the narrative and envelope report it: what value
+ * applies and whose decision it was. */
+interface DimensionReport {
+  value: string | null;
+  source: "requested" | "default" | "forwarded" | null;
+}
+
+export async function launchCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  const tokens = parts.harness;
+  const head = tokens[0];
+  if (head?.startsWith("x-")) {
+    throw new UsageError(
+      `unknown x command "${head}" — bare x-* words in command position are agentsurface's own; a prompt starting with "x-" needs the harness's -p spelling`,
+    );
+  }
+  const harnessFlag = parts.values["x-harness"];
+  const levelFlag = parts.values["x-level"];
+  if (harnessFlag === undefined && levelFlag === undefined) {
+    throw new UsageError(
+      "a launch names what it runs: pass --x-harness <harness>, --x-level <model>:<effort>, or both",
+    );
+  }
+  const level = levelFlag === undefined ? null : parseLevel(levelFlag);
+  const catalog = loadCatalog(context.env, context.home);
+  const resolution = resolveRequest(catalog, {
+    harness: harnessFlag === undefined ? undefined : parseHarnessFlag(harnessFlag),
+    model: level?.model,
+    effort: level?.effort,
+  });
+  const harness = resolution.harness;
+  context.narrator.row("open", harness);
+  context.narrator.row("cwd", tildePath(context.cwd, context.home));
+
+  const utility = utilityInvocation(harness, tokens);
+  const name = runName(parts);
+  // A named run's terminal reads as the operator's own label; without one it
+  // keeps saying what was launched.
+  const surface = surfaceRequest(
+    parts,
+    context.cwd,
+    name ?? (levelFlag === undefined ? harness : `${harness} ${levelFlag}`),
+    name,
+  );
+  if (utility && surface !== null) {
+    throw new UsageError(
+      `"${head}" is a utility invocation; it passes through and cannot be placed on a surface`,
+    );
+  }
+  // A level owns both dimensions (ADR 0011, on --x-level since 0018): it
+  // faults on a forwarded counterpart, and means nothing on a utility
+  // invocation. Without one the launch yields per dimension — the caller's
+  // native spelling wins, unjudged.
+  const requested = level !== null;
+  if (utility && requested) {
+    throw new UsageError(
+      `"${head}" is a utility invocation; model and effort do not apply — drop --x-level`,
+    );
+  }
+  if (utility && name !== null) {
+    throw new UsageError(
+      `"${head}" is a utility invocation; it opens no session to name — drop --x-name`,
+    );
+  }
+  let stream = tokens;
+  if (name !== null) {
+    const nameToken = nameDimensionToken(harness, tokens);
+    if (nameToken !== null) {
+      throw new UsageError(`--x-name set the run name; drop the forwarded "${nameToken}"`);
+    }
+    const args = nameArguments(harness, name);
+    if (args === null) {
+      // Codex has no launch-time name. A placed run keeps the name anyway —
+      // terminal title, card, and record — so on a surface this is mechanism
+      // rather than loss, and only a runner launch really drops it.
+      context.narrator.row(
+        "name",
+        facts(
+          name,
+          surface === null
+            ? "not passed · codex has no launch-time name"
+            : "surface only · codex has no launch-time name",
+        ),
+      );
+    } else {
+      stream = [...args, ...tokens];
+      context.narrator.row("name", facts(name, args.join(" ")));
+    }
+  }
+  let model: DimensionReport = { value: null, source: null };
+  let effort: DimensionReport = { value: null, source: null };
+  if (utility) {
+    context.narrator.detail("model", "never applied to a utility invocation");
+  } else {
+    const modelToken = modelDimensionToken(harness, tokens);
+    const effortToken = effortDimensionToken(harness, tokens);
+    if (requested && modelToken !== null) {
+      throw new UsageError(
+        `--x-level ${levelFlag} set the model; drop the forwarded "${modelToken}"`,
+      );
+    }
+    if (requested && effortToken !== null) {
+      throw new UsageError(
+        `--x-level ${levelFlag} set the effort; drop the forwarded "${effortToken}"`,
+      );
+    }
+    model =
+      modelToken === null
+        ? {
+            value: resolution.model.model,
+            source: resolution.modelDefaulted ? "default" : "requested",
+          }
+        : { value: modelFromArgs(tokens) ?? null, source: "forwarded" };
+    effort =
+      effortToken === null
+        ? { value: resolution.effort, source: resolution.effortDefaulted ? "default" : "requested" }
+        : { value: null, source: "forwarded" };
+    // Onto the stream, not the raw tokens: the name may already have been
+    // injected ahead of them.
+    stream = [
+      ...(modelToken === null ? modelArguments(resolution.model.spelling) : []),
+      ...(effortToken === null ? effortArguments(harness, resolution.effort) : []),
+      ...stream,
+    ];
+    context.narrator.row("model", facts(model.value ?? undefined, model.source ?? undefined));
+    context.narrator.row("effort", facts(effort.value ?? undefined, effort.source ?? undefined));
+  }
+
+  // A runner launch anchors itself: it already knows the directory, and a
+  // codex session cannot see its own (ADR 0024). A placement anchors later
+  // instead, at `prepare`, because its workspace may not exist yet.
+  if (!utility && surface === null) {
+    const anchorToken = workspaceDimensionToken(harness, tokens);
+    const anchored = anchorToken === null ? workspaceArguments(harness, context.cwd) : [];
+    if (anchored.length > 0) {
+      stream = [...anchored, ...stream];
+      context.narrator.row("anchor", facts(tildePath(context.cwd, context.home), "--cd"));
+    }
+  }
+
+  const yolo = resolveYolo(context, parts, harness);
+  const applied = applyYolo(harness, stream, yolo, utility);
+  return finishLaunch(
+    context,
+    parts,
+    buildOpen(harness, applied.tokens),
+    model.value ?? undefined,
+    yolo,
+    applied,
+    utility,
+    model,
+    effort,
+    surface === null ? null : { ...surface, kind: "open", level: levelFlag ?? null },
+  );
+}
+
+/** The surface flags as one decision: which backend, and the workspace
+ * intent the placement should satisfy. The anchor path — the invocation cwd
+ * on a launch, the session's own cwd on a resume — is what "current" means
+ * and what a new workspace's project is inferred from. Null anchor happens
+ * only on a resume whose session file is nowhere local. */
+function surfaceRequest(
+  parts: Partitioned,
+  anchor: string | null,
+  title: string,
+  name: string | null,
+): {
+  backend: SurfaceBackend;
+  intent: WorkspaceIntent;
+  title: string;
+  name: string | null;
+  from: FromRequest;
+} | null {
+  const scopes = parts.scoped.get("x-surface");
+  const workspace = parts.values["x-workspace"];
+  const newWorkspace = parts.values["x-new-workspace"];
+  const project = parts.values["x-project"];
+  const from = parts.values["x-from"];
+  const noFrom = parts.bools.has("x-no-from");
+  if (scopes === undefined) {
+    const stray =
+      workspace !== undefined
+        ? "--x-workspace"
+        : newWorkspace !== undefined
+          ? "--x-new-workspace"
+          : project !== undefined
+            ? "--x-project"
+            : from !== undefined
+              ? "--x-from"
+              : noFrom
+                ? "--x-no-from"
+                : null;
+    if (stray !== null) {
+      throw new UsageError(`${stray} says where a placed launch lives; add --x-surface`);
+    }
+    return null;
+  }
+  if (from !== undefined && noFrom) {
+    throw new UsageError("--x-from names what this run came from and --x-no-from says nothing did");
+  }
+  // Lineage is set when a workspace is created, so naming it for a workspace
+  // that already exists would mean rewriting history the placement did not make.
+  if ((from !== undefined || noFrom) && newWorkspace === undefined) {
+    throw new UsageError(
+      `${from !== undefined ? "--x-from" : "--x-no-from"} only qualifies --x-new-workspace; an existing workspace keeps the provenance it has`,
+    );
+  }
+  const names = [...new Set(scopes.filter((scope) => scope !== "all"))];
+  if (names.length > 1) {
+    throw new UsageError(`--x-surface names more than one backend (${names.join(", ")}); pick one`);
+  }
+  const backend = surfaceBackend(names[0] ?? DEFAULT_BACKEND);
+  if (workspace !== undefined && newWorkspace !== undefined) {
+    throw new UsageError(
+      "--x-workspace picks an existing workspace and --x-new-workspace creates one; pick one",
+    );
+  }
+  if (project !== undefined && newWorkspace === undefined) {
+    throw new UsageError("--x-project only qualifies --x-new-workspace");
+  }
+  if (newWorkspace !== undefined) {
+    if (anchor === null && project === undefined) {
+      throw new CliError(
+        "workspace_not_found",
+        "the session's cwd is unknown locally, so no project can be inferred",
+        "pass --x-project <selector> to name one",
+      );
+    }
+    return {
+      backend,
+      title,
+      name,
+      intent: { kind: "new", name: newWorkspace, project: project ?? null, path: anchor ?? "" },
+      // Omission is a decision, not a gap (ADR 0015): a backend that would
+      // otherwise infer gets told there is nothing to descend from.
+      from: from === undefined ? { kind: "none" } : { kind: "ref", ref: from },
+    };
+  }
+  if (workspace !== undefined) {
+    return {
+      backend,
+      title,
+      name,
+      intent: { kind: "existing", selector: workspace },
+      from: { kind: "none" },
+    };
+  }
+  if (anchor === null) {
+    throw new CliError(
+      "workspace_not_found",
+      "the session's cwd is unknown locally, so the current workspace cannot be resolved",
+      "pass --x-workspace <selector> or --x-new-workspace <name>",
+    );
+  }
+  return {
+    backend,
+    title,
+    name,
+    intent: { kind: "current", path: anchor },
+    from: { kind: "none" },
+  };
+}
+
+/** The operator's own label for a run, as typed. Free text — it names
+ * nothing on disk, so it needs no id alphabet — but an empty one would
+ * label nothing while looking deliberate. */
+function runName(parts: Partitioned): string | null {
+  const name = parts.values["x-name"];
+  if (name === undefined) return null;
+  if (name.trim() === "") throw new UsageError("--x-name needs a name");
+  return name;
+}
+
+/** The provenance flags as typed, before the run registry is consulted:
+ * resolving a `run:` reference is a read, so it waits for the launch build. */
+type FromRequest = { kind: "none" } | { kind: "ref"; ref: string };
+
+const RUN_REF = "run:";
+
+/** Our own vocabulary first (ADR 0015): a `run:` reference resolves through
+ * the run registry, so an agent naming what it spawned from never has to know
+ * the backend's selector spelling. Anything else is the backend's own
+ * selector, carried opaquely the way --x-workspace already is. */
+async function resolveProvenance(
+  context: Context,
+  from: FromRequest,
+  backend: string,
+): Promise<Provenance> {
+  if (from.kind === "none") return { kind: "none" };
+  if (!from.ref.startsWith(RUN_REF)) {
+    if (!from.ref.includes(":")) {
+      throw new UsageError(
+        `--x-from "${from.ref}" is neither run:<run-id-or-name> nor a backend workspace selector (orca takes name:, path:, branch:, id:)`,
+      );
+    }
+    return { kind: "selector", selector: from.ref };
+  }
+  const record = await resolveRunReference(
+    context.env,
+    context.home,
+    from.ref.slice(RUN_REF.length),
+  );
+  if (record.backend !== backend) {
+    context.narrator.detail(
+      "from",
+      `run ${record.run_id} was placed on ${record.backend} · matching by path on ${backend}`,
+    );
+  }
+  return {
+    kind: "run",
+    runId: record.run_id,
+    backend: record.backend,
+    workspace: record.workspace,
+  };
+}
+
+/** First model value in the forwarded tokens — --model, --model=, or
+ * codex's -m short. Read for account routing only; the tokens themselves
+ * are forwarded untouched. */
+function modelFromArgs(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--model" || arg === "-m") return args[i + 1];
+    if (arg.startsWith("--model=")) return arg.slice("--model=".length);
+    if (arg.startsWith("-m=")) return arg.slice("-m=".length);
+    // codex's attached short form; no other harness forwards -m tokens.
+    if (arg.startsWith("-m") && arg.length > 2) return arg.slice(2);
+  }
+  return undefined;
+}
+
+export async function resumeCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  const [reference, ...forwarded] = parts.harness;
+  if (reference === undefined) {
+    throw new UsageError("x-resume requires a session id or run:<run-id-or-name>");
+  }
+  if (parts.values["x-level"] !== undefined) {
+    throw new UsageError(
+      "x-resume takes no level: a session continues on the model and effort it was started with",
+    );
+  }
+  // A run reference resumes the conversation a Placement recorded, which is
+  // how a session stays findable once nobody remembers its uuid (ADR 0028).
+  // The same tiered vocabulary x-land and --x-from take: exact run id, then
+  // name. Anything else is a session id, so nothing about the old form moves.
+  const harnessFlag = parts.values["x-harness"];
+  const byRun = reference.startsWith(RUN_REFERENCE);
+  // Judged before the registry is touched, because a usage fault exits
+  // before a command runs: the record names the harness, so the flag that
+  // exists to skip store detection has nothing to say here.
+  if (byRun && harnessFlag !== undefined) {
+    throw new UsageError("a run reference names its own harness; drop --x-harness");
+  }
+  const fromRun = byRun
+    ? await resumeSiteFromRun(context, reference.slice(RUN_REFERENCE.length))
+    : null;
+  const sessionId = fromRun?.record.session_id ?? reference;
+  if (fromRun === null) assertSessionId(sessionId);
+  let harness: HarnessName;
+  let sessionPath: string | null = null;
+  if (fromRun !== null) {
+    harness = fromRun.record.harness;
+    context.narrator.row("resume", facts(harness, sessionId, `run ${fromRun.record.run_id}`));
+  } else if (harnessFlag !== undefined) {
+    harness = parseHarnessFlag(harnessFlag);
+    context.narrator.row("resume", facts(harness, sessionId, "by --x-harness"));
+  } else {
+    context.narrator.detail("scan", "claude, codex, and pi session stores");
+    const matches = await findSessions(sessionId, context.env, context.home);
+    const first = matches[0];
+    if (first === undefined) {
+      throw new CliError(
+        "session_not_found",
+        `session "${sessionId}" is not in the claude, codex, or pi session stores`,
+        `pass --x-harness claude|codex|pi to skip detection`,
+      );
+    }
+    if (matches.length > 1) {
+      throw new CliError(
+        "session_ambiguous",
+        `session "${sessionId}" exists in more than one store: ${matches
+          .map((match) => match.harness)
+          .join(", ")}`,
+        `pass --x-harness to pick one`,
+      );
+    }
+    harness = first.harness;
+    sessionPath = first.path;
+    context.narrator.row("resume", facts(harness, sessionId));
+    context.narrator.detail("session", tildePath(first.path, context.home));
+  }
+  // Where the conversation lived, which is where it is picked up (ADR 0028).
+  // A run reference answers from the record — the one thing that still knows
+  // once the checkout is gone — and a bare session id from the session's own
+  // cwd, which every store carries.
+  const lived =
+    fromRun !== null
+      ? fromRun.record.workspace.path
+      : await sessionCwd(context, harness, sessionId, sessionPath);
+  // A directory that is gone is stated, never silently swapped for wherever
+  // the operator happened to be standing. Only a run reference refuses over
+  // it (that happens above), because only a run knows what it would refuse
+  // about; a bare session id has nothing better to offer than staying put.
+  const cwd = lived !== null && existsSync(lived) ? lived : null;
+  context.narrator.row(
+    "cwd",
+    cwd !== null
+      ? facts(tildePath(cwd, context.home), "the session's own directory")
+      : facts(
+          tildePath(context.cwd, context.home),
+          lived === null
+            ? "the session's own directory is unknown"
+            : `${tildePath(lived, context.home)} is gone`,
+        ),
+  );
+  // A surface resume is placed where the conversation lived: that same
+  // directory anchors the current-workspace default and the project
+  // inference, whether or not it still exists locally.
+  const anchor = parts.scoped.get("x-surface") !== undefined ? lived : null;
+  if (anchor !== null) context.narrator.detail("anchor", `${anchor} · where the session lived`);
+  // A resume takes no injection ever, so a name here is purely the surface's
+  // and the record's: it labels where the conversation was picked up, and
+  // never renames the session the harness already knows.
+  const resumeName = runName(parts);
+  if (resumeName !== null) {
+    context.narrator.row(
+      "name",
+      facts(resumeName, "surface and record · a resume injects nothing"),
+    );
+  }
+  const surface = surfaceRequest(parts, anchor, resumeName ?? `${harness} resume`, resumeName);
+
+  const model = await resumeRoutingModel(context, harness, sessionId, sessionPath, forwarded);
+  if (model !== undefined) context.narrator.detail("model", `${model} · drives routing`);
+  const yolo = resolveYolo(context, parts, harness);
+  const applied = applyYolo(harness, forwarded, yolo, false);
+  return finishLaunch(
+    context,
+    parts,
+    buildResume(harness, sessionId, applied.tokens),
+    model,
+    yolo,
+    applied,
+    false,
+    NO_DIMENSION,
+    NO_DIMENSION,
+    surface === null ? null : { ...surface, kind: "resume", level: null },
+    cwd,
+  );
+}
+
+/** What `x-resume` reads as a run rather than a session id. `run:` is the
+ * vocabulary x-land and --x-from already take, resolved in the same tiers —
+ * exact run id first, then name (ADR 0017/0019). */
+const RUN_REFERENCE = "run:";
+
+/**
+ * Resuming what a Placement recorded (ADR 0028). Two things have to be true
+ * before a run can be picked up, and each is refused in its own words: the
+ * run must have a session — a Placement nobody ever spoke to has none — and
+ * the Workspace it was placed in must still be there, because a resume runs
+ * where the conversation lived and will not invent somewhere else.
+ */
+async function resumeSiteFromRun(
+  context: Context,
+  reference: string,
+): Promise<{ record: RunRecord }> {
+  if (reference.length === 0) {
+    throw new UsageError("run: needs a run id or name — agentsurface x-runs lists them");
+  }
+  const { record, discovered } = await resolveRun(context.env, context.home, reference);
+  if (discovered) context.narrator.row("session", `${record.session_id} · discovered`);
+  if (record.session_id === null) {
+    throw new CliError(
+      "run_not_resumable",
+      `run ${record.run_id} has no session: nothing was ever discovered for it`,
+      "a harness writes its session on the first turn — if that run never took one there is nothing to resume",
+    );
+  }
+  const lived = record.workspace.path;
+  if (!existsSync(lived)) {
+    const repo = record.repo ?? null;
+    throw new CliError(
+      "workspace_released",
+      facts(
+        `run ${record.run_id} was ${record.closed_as ?? "closed"}`,
+        `${tildePath(lived, context.home)} no longer exists`,
+        repo === null ? undefined : `it was cut from ${repo.name}`,
+      ),
+      repo?.path != null
+        ? `place it somewhere: --x-surface --x-new-workspace <name> --x-project path:${repo.path}; or resume the session where you stand: agentsurface x-resume ${record.session_id}`
+        : `place it somewhere with --x-surface --x-new-workspace <name>, or resume the session where you stand: agentsurface x-resume ${record.session_id}`,
+    );
+  }
+  return { record };
+}
+
+/** The directory a session recorded for itself — every store carries one, and
+ * it is the only answer for a session no Placement ever made. */
+async function sessionCwd(
+  context: Context,
+  harness: HarnessName,
+  sessionId: string,
+  known: string | null,
+): Promise<string | null> {
+  const path =
+    known ??
+    (await findSessions(sessionId, context.env, context.home)).find(
+      (match) => match.harness === harness,
+    )?.path ??
+    null;
+  if (path === null) return null;
+  try {
+    return (await sessionFileFacts(harness, path)).cwd;
+  } catch {
+    return null;
+  }
+}
+
+/** Per-launch flags beat the config; without either, yolo is on (ADR 0009).
+ * Explicit flags skip the config read, so --x-no-yolo (and --x-yolo) still
+ * work while the file is malformed. */
+function resolveYolo(context: Context, parts: Partitioned, harness: HarnessName): YoloDecision {
+  const on = scopeApplies(parts, "x-yolo", harness);
+  const off = scopeApplies(parts, "x-no-yolo", harness);
+  if (on && off) {
+    throw new UsageError(`--x-yolo conflicts with --x-no-yolo for ${harness}; pick one`);
+  }
+  if (on || off) {
+    context.narrator.detail("config", "not consulted · yolo set by flag");
+    return { on, explicitOff: off };
+  }
+  const config = loadConfig(context.env, context.home);
+  context.narrator.detail(
+    "config",
+    facts(
+      tildePath(config.path, context.home),
+      config.exists ? describeYolo(config.yolo) : "missing · yolo on everywhere",
+    ),
+  );
+  return { on: config.yolo[harness], explicitOff: false };
+}
+
+/** A bare occurrence covers every harness; a scoped one only its own. */
+function scopeApplies(parts: Partitioned, flag: string, harness: HarnessName): boolean {
+  const scopes = parts.scoped.get(flag) ?? [];
+  return scopes.includes("all") || scopes.includes(harness);
+}
+
+function describeYolo(yolo: Record<HarnessName, boolean>): string {
+  return HARNESS_NAMES.map((harness) => `${harness} ${yolo[harness] ? "on" : "off"}`).join(", ");
+}
+
+/**
+ * The model that should drive account routing for a resume: an explicit
+ * model in the forwarded tokens wins; otherwise, for claude, the session
+ * file's last-used model (a resume continues on it, so its quota window is
+ * the one being spent). Best-effort — balance treats null as no model
+ * workload, which is the conservation default.
+ */
+async function resumeRoutingModel(
+  context: Context,
+  harness: HarnessName,
+  sessionId: string,
+  sessionPath: string | null,
+  forwarded: string[],
+): Promise<string | undefined> {
+  const explicit = modelFromArgs(forwarded);
+  if (explicit !== undefined) return explicit;
+  if (harness !== "claude") return undefined;
+  const path =
+    sessionPath ??
+    (await findSessions(sessionId, context.env, context.home)).find(
+      (match) => match.harness === "claude",
+    )?.path ??
+    null;
+  if (path === null) return undefined;
+  try {
+    const text = await Bun.file(path).text();
+    const at = text.lastIndexOf('"model"');
+    if (at === -1) return undefined;
+    return text.slice(at).match(/^"model"\s*:\s*"([^"]+)"/)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+export async function doctorCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  if (parts.harness.length > 0) throw new UsageError("x-doctor takes no arguments");
+  const reports = [];
+  const lines: string[] = [];
+  for (const harness of HARNESS_NAMES) {
+    const store = sessionStore(harness, context.env, context.home);
+    const bin = whichInEnv(harness, context.env);
+    const exists = existsSync(store.root);
+    const sessions = await countSessions(store);
+    reports.push({
+      harness,
+      bin,
+      store: {
+        root: store.root,
+        override: store.override,
+        override_active: store.overrideActive,
+        exists,
+        sessions,
+      },
+    });
+    lines.push(
+      harness,
+      `  bin    ${bin ?? "not on PATH"}`,
+      `  store  ${store.root} — ${exists ? `${sessions} sessions` : "missing"}`,
+      `  env    ${store.override} ${store.overrideActive ? "(active)" : "(not set)"}`,
+    );
+  }
+  const config = configReport(context);
+  lines.push(
+    "config",
+    `  path   ${config.path} ${config.exists ? "" : "(missing — yolo on everywhere)"}`.trimEnd(),
+    config.valid
+      ? `  yolo   ${HARNESS_NAMES.map((h) => `${h} ${config.yolo?.[h] ? "on" : "off"}`).join(", ")}`
+      : `  yolo   INVALID: ${config.error}`,
+  );
+  const catalog = catalogReport(context);
+  lines.push("catalog", `  path   ${catalog.path} (${catalog.source})`);
+  if (catalog.valid && catalog.harnesses !== null) {
+    lines.push(
+      `  order  ${catalog.harnesses.map((entry) => entry.harness).join(", ")}`,
+      `  models ${catalog.harnesses.map((entry) => `${entry.harness} ${entry.models}`).join(", ")}`,
+      `  defaults ${catalog.harnesses
+        .map((entry) => `${entry.harness} ${entry.defaults.model}:${entry.defaults.effort}`)
+        .join(", ")}`,
+    );
+  } else {
+    lines.push(`  order  INVALID: ${catalog.error}`);
+  }
+  const backends = [];
+  lines.push("surface");
+  for (const backend of Object.values(BACKENDS)) {
+    const health = await backend.doctor(context.env);
+    backends.push({ backend: backend.name, ...health });
+    lines.push(
+      `  ${backend.name.padEnd(6)} ${health.reachable ? "reachable" : "unreachable"} · ${health.detail}`,
+    );
+  }
+  // Doctor reads the registry the tolerant way and reports what would not
+  // parse as a health item of its own: a corrupt record is one run missing
+  // from every answer, which is exactly the kind of thing this command exists
+  // to name rather than to die on.
+  const { records: runs, corrupt } = await scanRunRecords(context.env, context.home);
+  warnCorruptRunRecords(corrupt);
+  lines.push(
+    `  runs   ${runs.length} recorded · ${tildePath(runsDirectory(context.env, context.home), context.home)}`,
+  );
+  if (corrupt.length > 0) {
+    lines.push(
+      `  corrupt ${corrupt.length} unreadable record(s) · every listing skips them`,
+      ...corrupt.map((entry) => `    ${tildePath(entry.path, context.home)} · ${entry.recovery}`),
+    );
+  }
+  const interrupted = await interruptedPlacements(context.env, context.home);
+  if (interrupted.length > 0) {
+    lines.push(
+      `  placing ${interrupted.length} interrupted · ${facts(
+        ...interrupted.map(
+          (journal) => holdingAccount(journal) ?? `${journal.run_id} holds nothing`,
+        ),
+      )} · agentsurface x-runs names what they left`,
+    );
+  }
+  return {
+    kind: "result",
+    data: {
+      harnesses: reports,
+      config,
+      catalog,
+      surface: {
+        backends,
+        runs: runs.length,
+        corrupt,
+        interrupted: interrupted.length,
+      },
+    },
+    human: lines.join("\n"),
+  };
+}
+
+interface ConfigReport {
+  path: string;
+  exists: boolean;
+  valid: boolean;
+  yolo: Record<HarnessName, boolean> | null;
+  error: string | null;
+}
+
+interface CatalogReport {
+  source: "built-in" | "custom";
+  path: string;
+  valid: boolean;
+  harnesses: Array<{
+    harness: HarnessName;
+    models: number;
+    defaults: { model: string; effort: string };
+  }> | null;
+  error: string | null;
+}
+
+/** Doctor reports a malformed catalog instead of dying on it — same
+ * downgrade as the config. */
+function catalogReport(context: Context): CatalogReport {
+  const custom = catalogPath(context.env, context.home);
+  try {
+    const catalog = loadCatalog(context.env, context.home);
+    return {
+      source: catalog.source,
+      path: catalog.path,
+      valid: true,
+      harnesses: catalog.harnesses.map((entry) => ({
+        harness: entry.harness,
+        models: entry.models.length,
+        defaults: { model: entry.model, effort: entry.effort },
+      })),
+      error: null,
+    };
+  } catch (error) {
+    const isCustom = existsSync(custom);
+    return {
+      source: isCustom ? "custom" : "built-in",
+      path: isCustom ? custom : BUILTIN_CATALOG_PATH,
+      valid: false,
+      harnesses: null,
+      error: (error as Error).message,
+    };
+  }
+}
+
+export async function runsCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  if (parts.harness.length > 0) throw new UsageError("x-runs takes no arguments");
+  const closedOnly = parts.bools.has("x-closed");
+  const all = parts.bools.has("x-all");
+  if (closedOnly && all) throw new UsageError("--x-closed narrows the listing; drop --x-all");
+  const records = await listRunRecords(context.env, context.home);
+  // Open runs are what an operator is deciding about; closed ones are the
+  // history that makes an old session findable later (ADR 0028), and they
+  // accumulate, so they do not bury the live ones by default. --x-json is
+  // unfiltered either way: the view is the human's, never the contract.
+  const shown = all
+    ? records
+    : records.filter((record) => (record.closed_at == null) !== closedOnly);
+  // The hint has to be a reference that actually resolves: a name two runs
+  // share is an ambiguous_run refusal, and closed runs are free to share one
+  // (ADR 0019), so a duplicated name falls back to the id it cannot hide.
+  const byName = new Map<string, number>();
+  for (const record of records) {
+    if (record.name !== null && record.name !== undefined) {
+      byName.set(record.name, (byName.get(record.name) ?? 0) + 1);
+    }
+  }
+  const lines = shown.map((record) => {
+    const name = record.name ?? null;
+    const reference = name !== null && byName.get(name) === 1 ? name : record.run_id;
+    return facts(
+      record.run_id,
+      name ?? undefined,
+      record.backend,
+      record.harness,
+      record.workspace.name,
+      record.closed_as ?? "open",
+      record.session_id === null ? "no session discovered" : `resume run:${reference}`,
+      record.created_at,
+    );
+  });
+  if (shown.length === 0 && records.length > 0) {
+    lines.push(closedOnly ? "no closed runs" : "no open runs");
+  }
+  // A Placement that never committed has no record to list, and hiding it
+  // would leave whatever it created unaccounted for (ADR 0027). Never
+  // filtered: an interrupted Placement is neither open nor closed, and it is
+  // holding things.
+  const interrupted = await interruptedPlacements(context.env, context.home);
+  lines.push(...interrupted.map((journal) => describeInterrupted(context, journal)));
+  const hidden = records.length - shown.length;
+  if (hidden > 0) {
+    lines.push(
+      `${hidden} ${closedOnly ? "open" : "closed"} run(s) not shown · ${
+        closedOnly ? "agentsurface x-runs" : "agentsurface x-runs --x-closed"
+      }`,
+    );
+  }
+  return {
+    kind: "result",
+    data: { runs: records, interrupted },
+    human: lines.length > 0 ? lines.join("\n") : "no recorded runs",
+  };
+}
+
+function describeInterrupted(context: Context, journal: PlacementJournal): string {
+  return facts(
+    `interrupted ${journal.run_id}`,
+    journal.name ?? undefined,
+    `stopped after ${journal.phase}`,
+    journal.workspace?.created === true
+      ? `workspace ${tildePath(journal.workspace.path, context.home)} created and never attached`
+      : undefined,
+    journal.terminal == null ? undefined : `terminal ${journal.terminal}`,
+    // What it is still spending: a Placement killed after balancing holds an
+    // account and its lease even when it never reached a Workspace (ADR 0027).
+    holdingAccount(journal),
+    journal.failure ?? undefined,
+    tildePath(placementJournalPath(context.env, context.home, journal.run_id), context.home),
+  );
+}
+
+/** The account claim an interrupted Placement is still holding, named as the
+ * operator would have to name it to release it, or undefined when it never
+ * claimed one (balancing off, or killed before it ran). */
+function holdingAccount(journal: PlacementJournal): string | undefined {
+  const key = journal.account?.key ?? null;
+  const lease = journal.account?.lease ?? null;
+  if (key === null && lease === null) return undefined;
+  const held = key === null ? "an account" : `account ${key}`;
+  return lease === null ? `holding ${held}` : `holding ${held} · lease ${lease}`;
+}
+
+export async function runCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  const [reference, ...rest] = parts.harness;
+  if (reference === undefined) throw new UsageError("x-run requires a run id or name");
+  if (rest.length > 0) throw new UsageError("x-run takes exactly one run id or name");
+  const { record, discovered } = await resolveRun(context.env, context.home, reference);
+  if (discovered) {
+    // The Run server tier answers before the store can (the thread is visible
+    // from attach), so the row no longer claims which tier it was.
+    context.narrator.row("session", `${record.session_id} · discovered`);
+  }
+  const label = (name: string, value: string): string => `${name.padEnd(10)}${value}`;
+  const lines = [
+    label("run", record.run_id),
+    label("name", record.name ?? "unnamed"),
+    label("created", record.created_at),
+    label("kind", record.kind),
+    label("backend", record.backend),
+    label("harness", facts(record.harness, record.level ?? record.harness_value ?? undefined)),
+    label(
+      "workspace",
+      facts(record.workspace.name, tildePath(record.workspace.path, context.home)),
+    ),
+    label("from", describeProvenance(record.from ?? null)),
+    label("terminal", record.terminal ?? "none recorded"),
+    label("session", record.session_id ?? "not yet discovered"),
+    ...(record.server?.socket != null
+      ? [label("server", tildePath(record.server.socket.replace(/^unix:\/\//, ""), context.home))]
+      : []),
+    label("command", shellLine(record.command)),
+  ];
+  return { kind: "result", data: record, human: lines.join("\n") };
+}
+
+/**
+ * x-whoami (ADR 0024): the run the caller is, answered from inside it. This is
+ * how a worker learns it is on a surface at all — the question a role skill
+ * has to answer before it can say anything else — and it needs nothing stamped
+ * for it, because the harness names its own session and the registry holds the
+ * rest. Not being on a surface is a refusal rather than an empty answer, so
+ * the command doubles as the gate.
+ */
+export async function whoamiCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  if (parts.harness.length > 0) throw new UsageError("x-whoami takes no arguments");
+  const caller = callerSession(context.env);
+  const { record, matched } = await resolveCallingRun(
+    context.env,
+    context.home,
+    context.cwd,
+    caller,
+  );
+  context.narrator.detail(
+    "matched",
+    matched === "session" ? `${record.harness} session id` : "workspace path",
+  );
+  const label = (name: string, value: string): string => `${name.padEnd(10)}${value}`;
+  const data = { ...record, matched };
+  return {
+    kind: "result",
+    data,
+    human: [
+      label("run", record.run_id),
+      label("name", record.name ?? "unnamed"),
+      label("harness", record.harness),
+      label(
+        "workspace",
+        facts(record.workspace.name, tildePath(record.workspace.path, context.home)),
+      ),
+      label("from", describeProvenance(record.from ?? null)),
+      label("session", record.session_id ?? "not yet discovered"),
+      label("matched", matched === "session" ? "session id" : "workspace path"),
+    ].join("\n"),
+  };
+}
+
+/**
+ * x-land (ADR 0016): merge a workspace's work back to the main line, let the
+ * surface go, and reconcile the registry. The ref vocabulary is the one
+ * --x-from already established — `run:<run-id>` resolves through our own
+ * registry, anything else is the backend's selector — so an agent that can
+ * say where a run came from can say which workspace to land without learning
+ * a second grammar.
+ */
+export async function landCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  const [ref, ...rest] = parts.harness;
+  if (ref === undefined) throw new UsageError("x-land requires a workspace reference");
+  if (rest.length > 0) throw new UsageError("x-land takes exactly one workspace reference");
+  // Same scoped spelling as a launch's --x-surface: bare means the default
+  // backend, a vocabulary word names one.
+  const scopes = [...new Set((parts.scoped.get("x-surface") ?? []).filter((s) => s !== "all"))];
+  if (scopes.length > 1) {
+    throw new UsageError(
+      `--x-surface names more than one backend (${scopes.join(", ")}); pick one`,
+    );
+  }
+  const backend = surfaceBackend(scopes[0] ?? DEFAULT_BACKEND);
+  const dryRun = parts.bools.has("x-dry-run");
+  const force = parts.bools.has("x-force");
+  const abandon = parts.bools.has("x-abandon");
+  const selector = await resolveWorkspaceRef(context, ref, backend.name);
+
+  context.narrator.row("land", facts(backend.name, selector, dryRun ? "dry run" : undefined));
+  const result = await landWorkspace(
+    { env: context.env, home: context.home, narrator: context.narrator },
+    backend,
+    { selector, into: parts.values["x-into"], force, abandon, dryRun },
+    (workspacePath, closedAs) =>
+      stampClosedRuns(context.env, context.home, workspacePath, closedAs),
+  );
+
+  // On a dry run the survey *is* the result, and it goes to stdout — so the
+  // narrative says only which workspace was read, and never restates it
+  // (ADR 0007). A real land's stdout is one line, so its decisions are rows.
+  if (!dryRun) {
+    context.narrator.row(
+      "workspace",
+      facts(result.workspace.name, tildePath(result.workspace.path, context.home)),
+    );
+    context.narrator.row(
+      "branch",
+      facts(
+        result.branch ?? "detached",
+        result.into === null ? "abandoned" : `into ${result.into}`,
+        result.unpushed === null || result.unpushed === 0
+          ? undefined
+          : `${result.unpushed} unpushed`,
+      ),
+    );
+    context.narrator.row(
+      "release",
+      facts(
+        result.removed ? "workspace removed" : "workspace kept",
+        result.stopped.length > 0 ? `${result.stopped.length} terminal(s) stopped` : undefined,
+        result.branch_deleted ? "branch deleted" : "branch kept",
+      ),
+    );
+    if (result.runs.length > 0) {
+      context.narrator.row("runs", facts(`${result.runs.length} stamped`, ...result.runs));
+    }
+  }
+
+  const lines = dryRun
+    ? [
+        `${"workspace".padEnd(10)}${facts(result.workspace.name, result.workspace.path)}`,
+        `${"branch".padEnd(10)}${facts(result.branch ?? "detached", result.into === null ? "abandon" : `into ${result.into}`)}`,
+        `${"commits".padEnd(10)}${facts(
+          result.commits === null ? "not counted" : `${result.commits} to merge`,
+          result.behind === null || result.behind === 0 ? undefined : `${result.behind} behind`,
+          result.unpushed === null || result.unpushed === 0
+            ? undefined
+            : `${result.unpushed} unpushed`,
+        )}`,
+        `${"terminals".padEnd(10)}${
+          result.attachments.length === 0
+            ? "none"
+            : result.attachments.map((a) => facts(a.title, a.live ? "live" : "stopped")).join(" · ")
+        }`,
+        `${"blockers".padEnd(10)}${
+          result.blockers.length === 0
+            ? "none · ready to land"
+            : result.blockers
+                .map((b) => facts(b.code, b.detail, b.cleared_by ?? "no override"))
+                .join(`\n${" ".repeat(10)}`)
+        }`,
+      ]
+    : [
+        `${"landed".padEnd(10)}${facts(result.workspace.name, result.branch ?? "detached", result.merge ?? "")}`,
+      ];
+  return { kind: "result", data: result, human: lines.join("\n") };
+}
+
+/** The --x-from vocabulary, reused: ours before anyone's, and a ref with no
+ * colon is a fault rather than a guess at which namespace was meant. */
+async function resolveWorkspaceRef(
+  context: Context,
+  ref: string,
+  backend: string,
+): Promise<string> {
+  if (ref.startsWith(RUN_REF)) {
+    const record = await resolveRunReference(context.env, context.home, ref.slice(RUN_REF.length));
+    if (record.backend !== backend) {
+      context.narrator.detail(
+        "land",
+        `run ${record.run_id} was placed on ${record.backend} · matching by path on ${backend}`,
+      );
+    }
+    return record.workspace.id !== null && record.backend === backend
+      ? `id:${record.workspace.id}`
+      : `path:${record.workspace.path}`;
+  }
+  if (!ref.includes(":")) {
+    throw new UsageError(
+      `x-land "${ref}" is neither run:<run-id-or-name> nor a backend workspace selector (orca takes name:, path:, branch:, id:)`,
+    );
+  }
+  return ref;
+}
+
+/** A record written before provenance existed has no field at all, which
+ * reads the same as one that stated nothing — neither descends from a run. */
+function describeProvenance(provenance: Provenance | null): string {
+  if (provenance === null) return "none";
+  switch (provenance.kind) {
+    case "none":
+      return "none";
+    case "selector":
+      return provenance.selector;
+    case "run":
+      return facts(`run ${provenance.runId}`, provenance.workspace.name);
+  }
+}
+
+/** Doctor reports a malformed config instead of dying on it — diagnosis is
+ * its whole job. */
+function configReport(context: Context): ConfigReport {
+  try {
+    const config = loadConfig(context.env, context.home);
+    return {
+      path: config.path,
+      exists: config.exists,
+      valid: true,
+      yolo: config.yolo,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      path: configPath(context.env, context.home),
+      exists: true,
+      valid: false,
+      yolo: null,
+      error: (error as Error).message,
+    };
+  }
+}
+
+const NO_DIMENSION: DimensionReport = { value: null, source: null };
+
+/** A launch that is placed on a Surface instead of becoming the harness. */
+interface SurfaceLaunch {
+  backend: SurfaceBackend;
+  intent: WorkspaceIntent;
+  title: string;
+  name: string | null;
+  kind: "open" | "resume";
+  /** The --x-level value as typed, null when the launch took the harness's
+   * defaults — and always on a resume, which takes no level. */
+  level: string | null;
+  from: FromRequest;
+}
+
+async function finishLaunch(
+  context: Context,
+  parts: Partitioned,
+  spec: LaunchSpec,
+  routingModel: string | undefined,
+  yolo: YoloDecision,
+  applied: YoloApplication,
+  utility: boolean,
+  model: DimensionReport = NO_DIMENSION,
+  effort: DimensionReport = NO_DIMENSION,
+  surface: SurfaceLaunch | null = null,
+  /** Only a resume sets this: the directory the conversation lived in
+   * (ADR 0028). A placed launch ignores it — the backend starts the terminal
+   * in the Workspace, which is that same directory by construction. */
+  runnerCwd: string | null = null,
+): Promise<Outcome> {
+  const dryRun = parts.bools.has("x-dry-run");
+  // A placed launch returns instead of becoming the harness, so its
+  // envelope needs no dry run.
+  if (parts.bools.has("x-json") && !dryRun && surface === null) {
+    throw new UsageError(
+      "this command launches an interactive harness; --x-json needs --x-dry-run",
+    );
+  }
+  const noBalance = parts.bools.has("x-no-balance");
+  const account = parts.values["x-account"];
+  if (noBalance && account !== undefined) {
+    throw new UsageError("--x-account pins a balanced launch; drop --x-no-balance");
+  }
+
+  // A utility invocation passes through unwrapped (ADR 0005): no account is
+  // spent, and the swap wrappers reject several of these commands outright.
+  // The launch sentinel still makes PATH shims exec the real binary.
+  if (utility && account !== undefined) {
+    throw new UsageError(
+      `--x-account pins a session launch; "${spec.command[1]}" is a utility invocation that passes through`,
+    );
+  }
+
+  narrateYolo(context, yolo, applied, utility);
+
+  // Minted before balancing, not at record time: a codex placement derives
+  // its Run server socket from the run id (ADR 0026), and the socket has to
+  // be in the composed command.
+  const mintedRunId = surface !== null && !utility ? crypto.randomUUID() : null;
+  // The floor discovery scans a session store against (ADR 0014), captured
+  // now rather than when the record is written: Claude and Pi can write
+  // their session file the moment their terminal starts, which is inside
+  // `backend.place` below — well before the record's own `created_at`.
+  const placedAfter = mintedRunId !== null ? new Date().toISOString() : null;
+
+  // A Placement claims an account, creates a Workspace, and starts a terminal
+  // in it before the run record that describes all three can be written, so
+  // every phase is journaled as it completes: a failure after that leaves a
+  // durable trace naming what exists, instead of an orphan nobody recorded.
+  // A dry run creates nothing, so it journals nothing.
+  const journal =
+    mintedRunId !== null && surface !== null && !dryRun
+      ? openPlacementJournal(context.env, context.home, {
+          run_id: mintedRunId,
+          backend: surface.backend.name,
+          harness: spec.harness,
+          name: surface.name,
+        })
+      : null;
+  // Reserved before the backend is asked for anything, because the record
+  // that claims the name is only written once the Placement commits: the
+  // check answers for committed runs, the reservation covers the window
+  // (ADR 0019). Every exit that is not that commit releases it.
+  let releaseName: (() => Promise<void>) | null = null;
+
+  try {
+    await journal?.record("reserved", {});
+
+    let launchSpec = spec;
+    let decision: BalanceDecision | null = null;
+    let composedServer: string | null = null;
+    if (utility) {
+      context.narrator.row("account", `skipped · ${spec.command[1]} is a utility invocation`);
+    } else if (balanceDisabled(context.env, noBalance)) {
+      context.narrator.row(
+        "account",
+        `skipped · balancing off ${noBalance ? "for this launch" : "(AGENTSURFACE_NO_BALANCE)"}`,
+      );
+    } else {
+      if (account !== undefined) context.narrator.detail("pin", `${account} · still gated`);
+      // Derived here rather than with the run id: only a balanced codex
+      // Placement composes a Run server (ADR 0026), and deriving it is what
+      // refuses a state directory with no room for the socket.
+      const serverRequest =
+        mintedRunId !== null && spec.harness === "codex"
+          ? runServerListenUrl(context.env, context.home, mintedRunId)
+          : undefined;
+      const balanced = await balanceSpec(context.env, spec, {
+        account,
+        model: routingModel,
+        dryRun,
+        server: serverRequest,
+        narrator: context.narrator,
+      });
+      launchSpec = balanced.spec;
+      decision = balanced.decision;
+      context.narrator.row("account", describeAccount(balanced.decision));
+      if (serverRequest !== undefined) {
+        composedServer = serverRequest;
+        context.narrator.row(
+          "server",
+          facts("dedicated", tildePath(serverRequest.slice("unix://".length), context.home)),
+        );
+      }
+      await journal?.record("account-claimed", {
+        account: { key: decision.accountKey, lease: decision.leaseId },
+        server: composedServer,
+      });
+    }
+
+    const data = {
+      harness: spec.harness,
+      // What was asked for, whether or not the harness had a spelling for it:
+      // on codex a runner launch drops it, and the narrative says so.
+      name: runName(parts),
+      session_id: spec.sessionId,
+      cwd: context.cwd,
+      command: launchSpec.command,
+      balance: decision,
+      utility,
+      yolo: yolo.on,
+      redactions: applied.redacted,
+      model: model.value,
+      model_source: model.source,
+      effort: effort.value,
+      effort_source: effort.source,
+    };
+
+    if (surface !== null) {
+      const provenance = await resolveProvenance(context, surface.from, surface.backend.name);
+      if (!dryRun && surface.name !== null) {
+        const name = surface.name;
+        const runId = mintedRunId as string;
+        await assertRunNameAvailable(context.env, context.home, name);
+        await reserveRunName(context.env, context.home, name, runId);
+        releaseName = () => releaseRunName(context.env, context.home, name, runId);
+      }
+      // Captured back out of the backend's call so the record can hold the
+      // command the harness actually received — the composed spec plus what
+      // Prepare appended (ADR 0023's anchoring).
+      let appended: string[] = [];
+      const placement = await surface.backend.place({
+        spec: launchSpec,
+        intent: surface.intent,
+        title: surface.title,
+        name: surface.name,
+        provenance,
+        dryRun,
+        prepare: async (workspacePath) => {
+          // Prepare is where the Workspace first exists and nothing has
+          // started in it yet, which makes it the one moment the caller can
+          // journal a Workspace a later failure would orphan. Only a
+          // Placement that asked for a new one created it; an existing one
+          // was somebody else's before this Placement and stays theirs.
+          await journal?.record("workspace-created", {
+            workspace: { path: workspacePath, created: surface.intent.kind === "new" },
+          });
+          const trust = ensureWorkspaceTrusted(
+            spec.harness,
+            context.env,
+            context.home,
+            workspacePath,
+          );
+          if (trust !== "not applicable") {
+            context.narrator.row("trust", facts(spec.harness, `workspace ${trust}`));
+          }
+          const anchored = workspaceArguments(spec.harness, workspacePath);
+          if (anchored.length > 0) {
+            context.narrator.row("anchor", facts(tildePath(workspacePath, context.home), "--cd"));
+          }
+          appended = anchored;
+          return anchored;
+        },
+        narrator: context.narrator,
+        env: context.env,
+      });
+      if (placement.terminal !== null) {
+        await journal?.record("terminal-created", { terminal: placement.terminal });
+      }
+      context.narrator.row("surface", surface.backend.name);
+      if (placement.project !== null) {
+        context.narrator.row(
+          "project",
+          facts(
+            placement.project.name,
+            placement.project.created ? (dryRun ? "would register" : "registered") : "existing",
+          ),
+        );
+      }
+      context.narrator.row(
+        "workspace",
+        facts(
+          placement.workspace.name,
+          placement.workspace.created
+            ? "created"
+            : dryRun && surface.intent.kind === "new"
+              ? "would create"
+              : "existing",
+          placement.workspace.path === null
+            ? undefined
+            : tildePath(placement.workspace.path, context.home),
+        ),
+      );
+      // Provenance is decided only where a workspace is created; an existing
+      // one keeps what it had, so there is no decision to report.
+      if (surface.intent.kind === "new") {
+        // A dry run records nothing by definition, so the note is reserved for
+        // a backend that could not express what was asked.
+        const unrecorded = !placement.provenance.recorded && !dryRun;
+        context.narrator.row(
+          "from",
+          facts(placement.provenance.detail, unrecorded ? "not recorded" : undefined),
+        );
+      }
+      // The command as the harness received it: the composed spec plus what
+      // Prepare appended. Dry runs never prepare, so theirs is the spec alone.
+      const finalCommand = [...launchSpec.command, ...appended];
+      let runId: string | null = null;
+      if (!dryRun) {
+        runId = mintedRunId;
+        const record: RunRecord = {
+          run_id: runId as string,
+          created_at: new Date().toISOString(),
+          placed_after: placedAfter,
+          kind: surface.kind,
+          backend: surface.backend.name,
+          harness: spec.harness,
+          level: surface.level,
+          name: surface.name,
+          workspace: {
+            name: placement.workspace.name,
+            // Outside a dry run a placed Workspace always has its path.
+            path: placement.workspace.path ?? context.cwd,
+            id: placement.workspace.id,
+          },
+          repo:
+            placement.project === null
+              ? null
+              : { name: placement.project.name, path: placement.project.path },
+          terminal: placement.terminal,
+          command: finalCommand,
+          session_id: spec.sessionId,
+          server: composedServer === null ? null : { socket: composedServer },
+          from: provenance.kind === "none" ? null : provenance,
+        };
+        // The reservation must still name this run at the moment the record
+        // is published: the reap path acts on files, not intentions, so this
+        // is the check that makes "at most one open run per name" hold
+        // whatever interleaving happened while the backend was working.
+        if (surface.name !== null) {
+          await assertReservationHeld(context.env, context.home, surface.name, runId as string);
+        }
+        const recordPath = await writeRunRecord(context.env, context.home, record);
+        // The open record is the commit: it is published only once every
+        // resource it describes exists, and it is what the journal becomes.
+        await journal?.commit();
+        context.narrator.detail("record", tildePath(recordPath, context.home));
+        context.narrator.row("run", runId as string);
+        context.narrator.row(
+          "launch",
+          facts(shellLine(finalCommand), `on ${surface.backend.name}`),
+        );
+      } else {
+        context.narrator.row("dry run", "nothing placed · command on stdout");
+      }
+      const surfaceData = {
+        ...data,
+        command: finalCommand,
+        run_id: runId,
+        surface: {
+          backend: surface.backend.name,
+          project: placement.project,
+          workspace: placement.workspace,
+          terminal: placement.terminal,
+          server: composedServer,
+          provenance: {
+            requested: provenance,
+            recorded: placement.provenance.recorded,
+            detail: placement.provenance.detail,
+          },
+        },
+      };
+      return {
+        kind: "result",
+        data: surfaceData,
+        human: runId ?? shellLine(finalCommand),
+      };
+    }
+
+    if (!dryRun) {
+      context.narrator.row("launch", shellLine(launchSpec.command));
+      return { kind: "launch", spec: launchSpec, cwd: runnerCwd };
+    }
+    context.narrator.row("dry run", "nothing launched · command on stdout");
+    return { kind: "result", data, human: shellLine(launchSpec.command) };
+  } catch (error) {
+    // Compensation is only ever what is safe to undo without a decision: the
+    // name goes back, and what the Placement created is written down for the
+    // operator. Releasing a Workspace is x-land's job, because it can discard
+    // work — an interrupted Placement is named, never cleaned up behind.
+    if (releaseName !== null) await releaseName().catch(() => {});
+    await journal?.interrupt(error).catch(() => {});
+    throw error;
+  }
+}
+
+/** Yolo changes what the harness will let the model do, and --x-no-yolo can
+ * remove a flag the caller explicitly forwarded — both land in the
+ * narrative, on stderr with every other row (ADR 0007). */
+function narrateYolo(
+  context: Context,
+  yolo: YoloDecision,
+  applied: YoloApplication,
+  utility: boolean,
+): void {
+  if (applied.redacted.length > 0) {
+    context.narrator.row(
+      "yolo",
+      facts(
+        "off",
+        `removed ${applied.redacted.join(" ")}`,
+        "explicitly forwarded · --x-no-yolo wins",
+      ),
+    );
+    return;
+  }
+  if (utility) {
+    context.narrator.detail("yolo", yolo.on ? "on · never applied to a utility invocation" : "off");
+    return;
+  }
+  if (applied.presentNegative) {
+    context.narrator.row(
+      "yolo",
+      facts("off", `${applied.present} forwarded · the caller's spelling wins`),
+    );
+    return;
+  }
+  if (!yolo.on) {
+    context.narrator.row("yolo", "off · permission prompts stay on");
+    return;
+  }
+  context.narrator.row(
+    "yolo",
+    applied.injected !== null
+      ? facts("on", applied.injected)
+      : facts("on", `${applied.present} already forwarded`),
+  );
+}
+
+function describeAccount(decision: BalanceDecision): string {
+  return facts(
+    decision.route !== null
+      ? `claude-swap slot ${decision.route.slot}`
+      : (decision.accountKey ?? "chosen by the swap tool"),
+    decision.leaseId === null ? undefined : `lease ${decision.leaseId}`,
+    decision.reason ?? undefined,
+  );
+}
