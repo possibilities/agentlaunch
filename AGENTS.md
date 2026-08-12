@@ -90,7 +90,9 @@ the harnesses actually write, not from their documentation.
   that shape them (`facts`, `tildePath`, `shellLine`). Everything it emits
   goes to stderr; nothing in it may write stdout (ADR 0007).
 - `launch.ts` spawns a spec with inherited stdio and reports the child's
-  exit as our own, spelling fatal signals as 128+n.
+  exit as our own, spelling fatal signals as 128+n. It takes a directory
+  only because a resume runs where its conversation lived (ADR 0028);
+  every other launch inherits this process's own.
 - `commands.ts` returns either a launch or a printable result per command;
   `main.ts` is dispatch, envelope emission, and exit codes; `help.ts` is
   all prose.

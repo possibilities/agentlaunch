@@ -4,8 +4,8 @@ export const TOP_HELP = `agentsurface — one launcher for agent harnesses
 
 Usage:
   agentsurface --x-harness <harness> [tokens…]  Launch a harness here
-  agentsurface x-resume <session-id> [tokens…]  Reopen a stored session by id
-  agentsurface x-runs                           List recorded surface runs
+  agentsurface x-resume <session-id|run:ref>    Reopen a stored session
+  agentsurface x-runs [--x-closed|--x-all]      List recorded surface runs
   agentsurface x-run <run-id|name>              Show one run; discover its session id
   agentsurface x-whoami                         Report the run you are, from inside it
   agentsurface x-land <workspace-ref>           Merge a workspace back and release it
@@ -176,7 +176,7 @@ Examples:
   agentsurface --x-harness claude --x-surface "fix the tests"
   agentsurface --x-harness codex --x-surface --x-new-workspace fix-tests --x-json
 `,
-  "x-resume": `agentsurface x-resume <session-id> [tokens…]
+  "x-resume": `agentsurface x-resume <session-id>|run:<run-id-or-name> [tokens…]
 
 Reopen a stored session in this terminal. Without --x-harness the id is
 looked up in the claude, codex, and pi session stores; ambiguity and
@@ -185,8 +185,22 @@ follow the partition rule: --x-* is agentsurface's, everything else is
 forwarded to the harness after the resume spelling. Resumes take no
 model/effort injection — a session continues on its own model.
 
+A run:<run-id-or-name> reference resumes the session a Placement recorded,
+resolved in the same tiers x-land takes: exact run id first, then name. The
+record names the harness, so a run reference never scans the stores and does
+not take --x-harness.
+
+A resume runs where the conversation lived (ADR 0028) — the session's own
+recorded cwd, or the Workspace the run was placed in — and the cwd row says
+which directory that is. A run whose Workspace has been released refuses,
+naming the repo it came from and the ways to place it somewhere; resuming
+that session by its own id still works and is named in the refusal. A bare
+session id whose directory is gone does not refuse: it says so and continues
+where you stand.
+
 x-flags:
-  --x-harness <name>     claude|codex|pi — skip store detection
+  --x-harness <name>     claude|codex|pi — skip store detection (a run
+                         reference already names one)
   --x-surface [backend]  Resume onto a surface: the session continues in a
                          workspace instead of this terminal. Defaults to
                          the workspace containing the session's own cwd;
@@ -236,13 +250,24 @@ interrupted Placement's journal once you have finished its compensation —
 x-runs names the file. Landing the workspace a Placement created is the one
 path that clears a journal for you.
 `,
-  "x-runs": `agentsurface x-runs [--x-json]
+  "x-runs": `agentsurface x-runs [--x-closed|--x-all] [--x-json]
 
 List recorded surface runs, newest first: run id, name (when the Placement
-gave one), backend, harness, workspace, session id (or "not yet
-discovered"), and Placement time. Records live one file per run under
-~/.local/state/agentsurface/runs/ and are written by every non-dry
-surface Placement (ADR 0014/0022).
+gave one), backend, harness, workspace, whether it is open or how it closed,
+how to resume it (or "no session discovered"), and Placement time. Records
+live one file per run under ~/.local/state/agentsurface/runs/ and are
+written by every non-dry surface Placement (ADR 0014/0022).
+
+Open runs are listed by default, with a count of the closed ones. Closed
+records are kept forever — a closed record is what still names the session
+and the repo a finished conversation came from (ADR 0028) — so they are
+behind a flag rather than burying the live runs:
+
+  --x-closed             List the closed runs instead
+  --x-all                List every run, open and closed
+
+--x-json is unfiltered whatever the flags say: the view is the operator's,
+never the contract.
 
 A Placement interrupted between its resources has no record yet, and is
 listed after them as "interrupted <run-id>": the phase it stopped after,
@@ -340,7 +365,7 @@ the workspace it was born in.
 };
 
 export const AGENT_TEASER =
-  "Launch agent harnesses (claude, codex, pi) in place or on a surface: agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…] resolves against the catalog and injects the model/effort in the harness's own spelling; --x-surface places the launch in a managed workspace (Orca) and returns a run id; x-resume <session-id> reopens a session with cross-store detection; x-runs/x-run inspect surface runs and x-whoami answers which run the caller is; x-land merges a finished workspace back to the main line and releases it; x-doctor reports install health.";
+  "Launch agent harnesses (claude, codex, pi) in place or on a surface: agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…] resolves against the catalog and injects the model/effort in the harness's own spelling; --x-surface places the launch in a managed workspace (Orca) and returns a run id; x-resume <session-id>|run:<ref> reopens a session with cross-store detection, in the directory it lived in; x-runs/x-run inspect surface runs and x-whoami answers which run the caller is; x-land merges a finished workspace back to the main line and releases it; x-doctor reports install health.";
 
 export const AGENT_HELP = `agentsurface agent runbook
 
@@ -354,8 +379,8 @@ What it is
 
 Commands
   agentsurface --x-harness <harness> [--x-level <model>:<effort>] [tokens…]  [--x-surface [backend]]
-  agentsurface x-resume <session-id> [tokens…]  [--x-harness claude|codex|pi] [--x-surface]
-  agentsurface x-runs [--x-json]
+  agentsurface x-resume <session-id | run:<run-id-or-name>> [tokens…]  [--x-harness claude|codex|pi] [--x-surface]
+  agentsurface x-runs [--x-closed | --x-all] [--x-json]
   agentsurface x-whoami [--x-json]
   agentsurface x-run <run-id | run-name> [--x-json]
   agentsurface x-land <run:<run-id-or-name> | selector> [--x-into <branch>] [--x-force] [--x-abandon] [--x-dry-run] [--x-json]

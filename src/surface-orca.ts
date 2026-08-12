@@ -83,7 +83,7 @@ export const orcaBackend: SurfaceBackend = {
     const children = record["childWorktreeIds"];
     return {
       backend: "orca",
-      workspace: worktree,
+      workspace: { name: worktree.name, path: worktree.path, id: worktree.id },
       baseRef,
       primary: record["isMainWorktree"] === true,
       children: Array.isArray(children) ? children.length : 0,
@@ -146,7 +146,7 @@ export const orcaBackend: SurfaceBackend = {
 };
 
 interface ResolvedWorkspace {
-  project: { name: string; created: boolean } | null;
+  project: { name: string; path: string | null; created: boolean } | null;
   workspace: { name: string; path: string | null; id: string | null; created: boolean };
   provenance: { recorded: boolean; detail: string };
 }
@@ -172,7 +172,7 @@ async function resolveWorkspace(request: PlaceRequest): Promise<ResolvedWorkspac
           "pass --x-workspace <selector> to pick one, or --x-new-workspace <name> to create one",
         );
       }
-      return { project: null, workspace: { ...worktree, created: false }, provenance: NOT_CREATED };
+      return await placedInExisting(request, worktree);
     }
     case "existing": {
       const worktree = await findWorktree(request, intent.selector);
@@ -183,11 +183,26 @@ async function resolveWorkspace(request: PlaceRequest): Promise<ResolvedWorkspac
           "orca worktree list names them; orca selectors are name:, path:, branch:, id:",
         );
       }
-      return { project: null, workspace: { ...worktree, created: false }, provenance: NOT_CREATED };
+      return await placedInExisting(request, worktree);
     }
     case "new":
       return await createWorkspace(request, intent);
   }
+}
+
+/** Placing a run in a workspace that already existed: nothing is created and
+ * the lineage stays whatever it was, but the repo is still reported, because
+ * that is a fact about where the run lives rather than about this Placement. */
+async function placedInExisting(
+  request: PlaceRequest,
+  worktree: OrcaWorktree,
+): Promise<ResolvedWorkspace> {
+  const repo = await repoOf(request, worktree.repoId);
+  return {
+    project: repo === null ? null : { name: repo.name, path: repo.path, created: false },
+    workspace: { name: worktree.name, path: worktree.path, id: worktree.id, created: false },
+    provenance: NOT_CREATED,
+  };
 }
 
 /** Orca's flavor of provenance: an arbitrary, reassignable lineage link
@@ -229,7 +244,7 @@ async function createWorkspace(
   const parent = parentArgs(request.provenance);
   if (request.dryRun || repo.id === null) {
     return {
-      project: { name: repo.name, created: repo.created },
+      project: { name: repo.name, path: repo.path, created: repo.created },
       workspace: { name: intent.name, path: null, id: null, created: false },
       provenance: { recorded: false, detail: parent.detail },
     };
@@ -254,8 +269,8 @@ async function createWorkspace(
   }
   const named = await labelWorkspace(request, worktree);
   return {
-    project: { name: repo.name, created: repo.created },
-    workspace: { ...named, created: true },
+    project: { name: repo.name, path: repo.path, created: repo.created },
+    workspace: { name: named.name, path: named.path, id: named.id, created: true },
     provenance: { recorded: true, detail: parent.detail },
   };
 }
@@ -290,6 +305,9 @@ interface EnsuredRepo {
   /** Null only on a dry run that would have registered. */
   id: string | null;
   name: string;
+  /** The checkout the repo is rooted at — known even on the dry run, since
+   * that is the path ensure would have registered. */
+  path: string;
   created: boolean;
 }
 
@@ -313,7 +331,7 @@ async function ensureRepo(
     intent.project !== null ? intent.project.slice("path:".length) : await gitToplevel(intent.path);
   const existing = repos.find((repo) => repo.path === root);
   if (existing !== undefined) return { ...existing, created: false };
-  if (request.dryRun) return { id: null, name: basename(root), created: true };
+  if (request.dryRun) return { id: null, name: basename(root), path: root, created: true };
   await orcaJson(request.env, request.narrator, ["repo", "add", "--path", root]);
   const registered = (await listRepos(request)).find((repo) => repo.path === root);
   if (registered === undefined) {
@@ -366,6 +384,11 @@ interface OrcaWorktree {
   name: string;
   path: string;
   id: string;
+  /** Which repo Orca files it under. Read here because it is the only route
+   * from a workspace to the repository a Run came from, and it must never
+   * ride along into a Placement's workspace object — every construction from
+   * one of these names its fields. */
+  repoId: string | null;
 }
 
 /** Every Orca lookup needs only these two, and all three request types carry
@@ -406,7 +429,26 @@ function readWorktree(record: Record<string, unknown> | null): OrcaWorktree | nu
   const id = stringField(record, "id");
   const path = stringField(record, "path");
   if (id === null || path === null) return null;
-  return { id, path, name: stringField(record, "displayName") ?? basename(path) };
+  return {
+    id,
+    path,
+    name: stringField(record, "displayName") ?? basename(path),
+    repoId: stringField(record, "repoId"),
+  };
+}
+
+/** The repo a workspace belongs to, as the Placement reports it. Orca names
+ * it only by id on a worktree, so the registry is the one place that turns
+ * that into something a person can read — and a lookup that fails is a null
+ * project rather than a refused Placement, since nothing here is load-bearing
+ * for starting the run. */
+async function repoOf(request: OrcaCall, repoId: string | null): Promise<OrcaRepo | null> {
+  if (repoId === null) return null;
+  try {
+    return (await listRepos(request)).find((repo) => repo.id === repoId) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Orca runs agents in terminals, so a terminal is what a workspace has

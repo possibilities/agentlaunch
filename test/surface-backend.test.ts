@@ -23,7 +23,7 @@ interface SurfaceData {
   command: string[];
   surface: {
     backend: string;
-    project: { name: string; created: boolean } | null;
+    project: { name: string; path: string | null; created: boolean } | null;
     workspace: { name: string; path: string | null; id: string | null; created: boolean };
     terminal: string | null;
     server: string | null;
@@ -103,7 +103,16 @@ function makeWorld(): World {
   });
   answer("worktree-show", {
     ok: true,
-    result: { worktree: { id: `repo1::${workspace}`, path: workspace, displayName: "main" } },
+    result: {
+      // repoId is what a worktree carries in orca 1.4.177, and the only route
+      // from a workspace to the repository a Run came from (ADR 0028).
+      worktree: {
+        id: `repo1::${workspace}`,
+        path: workspace,
+        displayName: "main",
+        repoId: "repo1",
+      },
+    },
   });
   answer("repo-list", {
     ok: true,
@@ -196,6 +205,23 @@ function readRecord(world: World, runId: string): RunRecord {
   return JSON.parse(readFileSync(join(runsDir(world), `${runId}.json`), "utf8")) as RunRecord;
 }
 
+/** A named codex Placement into the world's existing workspace — the shape
+ * most of these tests start from, since a name is what a run is addressed by. */
+function placeNamed(world: World, name: string, args: string[] = []): string {
+  const result = run(world, [
+    "--x-harness",
+    "codex",
+    "--x-surface",
+    "--x-name",
+    name,
+    "--x-no-yolo",
+    "--x-json",
+    ...args,
+  ]);
+  expect(result.code).toBe(0);
+  return surfaceData(result).run_id!;
+}
+
 describe("surface placements", () => {
   test("a launch is placed in the current workspace and records a run", () => {
     const world = makeWorld();
@@ -211,7 +237,9 @@ describe("surface placements", () => {
     const data = surfaceData(result);
     expect(data.surface).toEqual({
       backend: "orca",
-      project: null,
+      // Reported even though nothing was ensured: the repo is a fact about
+      // where the run lives, not about what this Placement created (ADR 0028).
+      project: { name: "proj", path: world.workspace, created: false },
       workspace: {
         name: "main",
         path: world.workspace,
@@ -236,9 +264,12 @@ describe("surface placements", () => {
     const calls = orcaCalls(world);
     expect(calls[0]).toBe("status --json");
     expect(calls[1]).toBe(`worktree show --worktree path:${world.workspace} --json`);
+    // The worktree names its repo only by id, so placing in one that already
+    // exists costs one lookup to record where the run came from (ADR 0028).
+    expect(calls[2]).toBe("repo list --json");
     // The sentinel rides an `env` prefix so PATH shims exec the real binary
     // whether or not Orca runs the command through a shell.
-    expect(calls[2]).toBe(
+    expect(calls[3]).toBe(
       `terminal create --worktree id:repo1::${world.workspace} --command env AGENTSURFACE_LAUNCH=1 claude --model 'opus[1m]' --effort medium hi --title claude --json`,
     );
     // --x-json without --x-dry-run is legal here: the command returned.
@@ -295,7 +326,7 @@ describe("surface placements", () => {
     );
     expect(result.code).toBe(0);
     const data = surfaceData(result);
-    expect(data.surface.project).toEqual({ name: "fresh-repo", created: true });
+    expect(data.surface.project).toEqual({ name: "fresh-repo", path: repo, created: true });
     expect(data.surface.workspace).toEqual({
       name: "fix-things",
       path: created,
@@ -328,7 +359,11 @@ describe("surface placements", () => {
       "--x-json",
     ]);
     expect(result.code).toBe(0);
-    expect(surfaceData(result).surface.project).toEqual({ name: "proj", created: false });
+    expect(surfaceData(result).surface.project).toEqual({
+      name: "proj",
+      path: world.workspace,
+      created: false,
+    });
     expect(orcaCalls(world).some((call) => call.startsWith("repo add"))).toBe(false);
   });
 
@@ -669,21 +704,6 @@ describe("run records", () => {
 });
 
 describe("run names", () => {
-  function placeNamed(world: World, name: string, args: string[] = []): string {
-    const result = run(world, [
-      "--x-harness",
-      "codex",
-      "--x-surface",
-      "--x-name",
-      name,
-      "--x-no-yolo",
-      "--x-json",
-      ...args,
-    ]);
-    expect(result.code).toBe(0);
-    return surfaceData(result).run_id!;
-  }
-
   test("the name titles the terminal and is written to the record", () => {
     const world = makeWorld();
     const runId = placeNamed(world, "fix the auth flow");
@@ -1019,5 +1039,125 @@ describe("run names", () => {
     expect(orcaCalls(world)).toContain(
       `worktree create --name child --repo id:repo1 --parent-worktree id:repo1::${world.workspace} --json`,
     );
+  });
+});
+
+/** Resuming what a Placement recorded (ADR 0028). The session a run owns is
+ * seeded the way discovery actually finds one — a codex rollout whose
+ * session_meta cwd is the run's workspace — and read back through x-run,
+ * which is what backfills the record. */
+describe("resuming a recorded run", () => {
+  const SESSION = "019fe905-1768-7370-af06-e8afcff04b49";
+
+  function seedSession(world: World, cwd: string, uuid = SESSION): void {
+    const day = join(world.root, "codex", "sessions", "2026", "08", "09");
+    mkdirSync(day, { recursive: true });
+    writeFileSync(
+      join(day, `rollout-2026-08-09T20-14-13-${uuid}.jsonl`),
+      `${JSON.stringify({ type: "session_meta", payload: { session_id: uuid, cwd } })}\n`,
+    );
+  }
+
+  /** Place, then discover — a record's session id arrives on first need. */
+  function placedWithSession(world: World, name: string): string {
+    const runId = placeNamed(world, name);
+    seedSession(world, world.workspace);
+    expect(run(world, ["x-run", runId, "--x-json"]).code).toBe(0);
+    expect(readRecord(world, runId).session_id).toBe(SESSION);
+    return runId;
+  }
+
+  test("a Placement records the repository its workspace was cut from", () => {
+    const world = makeWorld();
+    const runId = placeNamed(world, "with-repo");
+    expect(readRecord(world, runId).repo).toEqual({ name: "proj", path: world.workspace });
+  });
+
+  test("run:<name> resumes the recorded session, in the workspace it lived in", () => {
+    const world = makeWorld();
+    placedWithSession(world, "auth-flow");
+    const resumed = run(world, ["x-resume", "run:auth-flow", "--x-dry-run", "--x-json"]);
+    expect(resumed.code).toBe(0);
+    // The record names the harness and the session, so nothing was scanned
+    // for and nothing was guessed: the resume is codex's own spelling.
+    expect(JSON.parse(resumed.stdout).data.command).toEqual([
+      "codex",
+      "resume",
+      SESSION,
+      "--dangerously-bypass-approvals-and-sandbox",
+    ]);
+    // The narrative is silenced under --x-json (ADR 0007), so the row that
+    // states which directory the conversation is picked up in is its own run.
+    const narrated = run(world, ["x-resume", "run:auth-flow", "--x-dry-run"], world.root);
+    expect(narrated.code).toBe(0);
+    expect(narrated.stderr).toContain(`cwd`);
+    expect(narrated.stderr).toContain("the session's own directory");
+  });
+
+  test("a run reference names its own harness, so --x-harness is a fault", () => {
+    const world = makeWorld();
+    placedWithSession(world, "auth-flow");
+    const clash = run(world, ["x-resume", "run:auth-flow", "--x-harness", "claude"]);
+    expect(clash.code).toBe(2);
+    expect(clash.stderr).toContain("names its own harness");
+  });
+
+  test("a released workspace refuses, naming the repo and the session itself", () => {
+    const world = makeWorld();
+    placedWithSession(world, "auth-flow");
+    rmSync(world.workspace, { recursive: true, force: true });
+    const refused = run(world, ["x-resume", "run:auth-flow", "--x-json"], world.root);
+    expect(refused.code).toBe(1);
+    const error = (JSON.parse(refused.stdout) as AnyEnvelope).error;
+    expect(error?.code).toBe("workspace_released");
+    expect(error?.message).toContain("proj");
+    // The escape hatch is named in full, because refusing without one would
+    // take away a resume that works.
+    expect(error?.recovery).toContain(`agentsurface x-resume ${SESSION}`);
+  });
+
+  test("a run nobody ever spoke to has no session to resume", () => {
+    const world = makeWorld();
+    placeNamed(world, "silent");
+    const refused = run(world, ["x-resume", "run:silent", "--x-json"]);
+    expect(refused.code).toBe(1);
+    expect((JSON.parse(refused.stdout) as AnyEnvelope).error?.code).toBe("run_not_resumable");
+  });
+
+  test("x-runs shows open runs, closed ones behind a flag, and --x-json all of them", () => {
+    const world = makeWorld();
+    const open = placeNamed(world, "still-going");
+    const closed = placeNamed(world, "finished");
+    const path = join(runsDir(world), `${closed}.json`);
+    writeFileSync(
+      path,
+      JSON.stringify({
+        ...readRecord(world, closed),
+        closed_at: new Date().toISOString(),
+        closed_as: "landed",
+      }),
+    );
+
+    const listed = run(world, ["x-runs"]);
+    expect(listed.stdout).toContain(open);
+    expect(listed.stdout).not.toContain(closed);
+    expect(listed.stdout).toContain("1 closed run(s) not shown");
+
+    const history = run(world, ["x-runs", "--x-closed"]);
+    expect(history.stdout).toContain(closed);
+    expect(history.stdout).not.toContain(open);
+    expect(history.stdout).toContain("landed");
+
+    expect(run(world, ["x-runs", "--x-all"]).stdout).toContain(closed);
+    // The filter is the human's view; the envelope is the contract.
+    const envelope = JSON.parse(run(world, ["x-runs", "--x-json"]).stdout) as AnyEnvelope;
+    const all = (envelope.data?.["runs"] ?? []) as RunRecord[];
+    expect(all.map((entry) => entry.run_id).sort()).toEqual([open, closed].sort());
+  });
+
+  test("--x-closed and --x-all together is a usage fault", () => {
+    const world = makeWorld();
+    const clash = run(world, ["x-runs", "--x-closed", "--x-all"]);
+    expect(clash.code).toBe(2);
   });
 });

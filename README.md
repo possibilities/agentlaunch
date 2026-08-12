@@ -57,6 +57,19 @@ no injection, and resumes never do — a session continues on its own model.
 refuses with the candidates named when that is ambiguous. `--x-dry-run` prints
 the command instead of launching; add `--x-json` for the machine envelope.
 
+A resume runs **where the conversation lived** (ADR 0028) — the session's own
+recorded cwd — and the `cwd` row says which directory that is, including when
+it is gone and the resume falls back to where you stand. `run:<run-id-or-name>`
+resumes what a Placement recorded instead of a raw id:
+
+    agentsurface x-resume run:auth-flow
+    agentsurface x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
+
+A run whose workspace has since been released refuses rather than picking a
+directory for you, naming the repo it was cut from and the ways to place it
+somewhere; resuming that session by its own id still works, and the refusal
+spells it out.
+
 ## On a surface
 
     agentsurface --x-harness claude --x-surface "fix the tests"
@@ -120,9 +133,14 @@ sockets, and the old per-workspace Placement lease (ADR 0020) is retired.
 The session id is *discovered*, never assigned. A codex run's own server
 answers from the moment its TUI attaches (`codex-swap app-server threads`),
 before any turn; otherwise `x-run <run-id>` matches the store entry born in
-the run's workspace and backfills the record; `x-runs` lists every surface
-run. The record's terminal handle is the backend's address for the future
-steer verb.
+the run's workspace and backfills the record; `x-runs` lists the open runs,
+with `--x-closed`/`--x-all` for the history. The record's terminal handle is
+the backend's address for the future steer verb.
+
+Records are never removed. A closed one is what still names the session and
+the repository a finished conversation came from, which is what makes
+`x-resume run:<ref>` work long after the checkout is gone — so they are kept
+and filtered out of the default listing rather than pruned.
 
 A surface dry run resolves read-only. A refused surface (runtime unreachable,
 workspace missing) fails the launch loudly, never falling back to this

@@ -17,6 +17,11 @@ export async function launch(
   spec: LaunchSpec,
   narrator: Narrator,
   env: Environ = process.env,
+  /** Where to start the harness. Null is this process's own directory, which
+   * is every launch except a resume — one runs where its conversation lived
+   * (ADR 0028), since the harness cannot see its own working directory and
+   * the files the conversation is about are there. */
+  cwd: string | null = null,
 ): Promise<number> {
   const [bin, ...rest] = spec.command;
   if (bin === undefined) throw new CliError("empty_command", "launch spec has no command");
@@ -34,6 +39,7 @@ export async function launch(
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",
+    ...(cwd === null ? {} : { cwd }),
     // The sentinel marks every descendant as already-routed: PATH shims
     // exec the real harness instead of re-entering agentsurface (ADR 0004).
     env: { ...env, AGENTSURFACE_LAUNCH: "1" },

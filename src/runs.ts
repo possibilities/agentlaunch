@@ -56,6 +56,14 @@ export interface RunRecord {
    * reads the same as unnamed. */
   name?: string | null;
   workspace: { name: string; path: string; id: string | null };
+  /**
+   * The repository the Workspace was cut from, as the backend reported it at
+   * Placement. Stated then rather than looked up later, so a resume can name
+   * where a session came from with the backend down and the checkout gone —
+   * which is the state every closed run is in. Absent on records written
+   * before this existed, and null when the backend could not say.
+   */
+  repo?: { name: string; path: string | null } | null;
   /** Backend-issued terminal handle — an address for steering, not the
    * run's identity; its lifetime is the backend runtime's. */
   terminal: string | null;

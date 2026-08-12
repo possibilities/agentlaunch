@@ -68,7 +68,11 @@ export interface Context {
 }
 
 export type Outcome =
-  | { kind: "launch"; spec: LaunchSpec }
+  /** `cwd` is where the runner should start the harness — set only by a
+   * resume, which runs where the conversation lived (ADR 0028). Null is the
+   * invocation's own directory. A placed launch never carries one: the
+   * backend starts the terminal in the Workspace. */
+  | { kind: "launch"; spec: LaunchSpec; cwd: string | null }
   | { kind: "result"; data: unknown; human: string };
 
 /** A launch dimension as the narrative and envelope report it: what value
@@ -402,21 +406,40 @@ function modelFromArgs(args: string[]): string | undefined {
 }
 
 export async function resumeCommand(context: Context, parts: Partitioned): Promise<Outcome> {
-  const [sessionId, ...forwarded] = parts.harness;
-  if (sessionId === undefined) throw new UsageError("x-resume requires a session id");
-  assertSessionId(sessionId);
+  const [reference, ...forwarded] = parts.harness;
+  if (reference === undefined) {
+    throw new UsageError("x-resume requires a session id or run:<run-id-or-name>");
+  }
   if (parts.values["x-level"] !== undefined) {
     throw new UsageError(
       "x-resume takes no level: a session continues on the model and effort it was started with",
     );
   }
+  // A run reference resumes the conversation a Placement recorded, which is
+  // how a session stays findable once nobody remembers its uuid (ADR 0028).
+  // The same tiered vocabulary x-land and --x-from take: exact run id, then
+  // name. Anything else is a session id, so nothing about the old form moves.
   const harnessFlag = parts.values["x-harness"];
+  const byRun = reference.startsWith(RUN_REFERENCE);
+  // Judged before the registry is touched, because a usage fault exits
+  // before a command runs: the record names the harness, so the flag that
+  // exists to skip store detection has nothing to say here.
+  if (byRun && harnessFlag !== undefined) {
+    throw new UsageError("a run reference names its own harness; drop --x-harness");
+  }
+  const fromRun = byRun
+    ? await resumeSiteFromRun(context, reference.slice(RUN_REFERENCE.length))
+    : null;
+  const sessionId = fromRun?.record.session_id ?? reference;
+  if (fromRun === null) assertSessionId(sessionId);
   let harness: HarnessName;
   let sessionPath: string | null = null;
-  if (harnessFlag !== undefined) {
+  if (fromRun !== null) {
+    harness = fromRun.record.harness;
+    context.narrator.row("resume", facts(harness, sessionId, `run ${fromRun.record.run_id}`));
+  } else if (harnessFlag !== undefined) {
     harness = parseHarnessFlag(harnessFlag);
     context.narrator.row("resume", facts(harness, sessionId, "by --x-harness"));
-    context.narrator.row("cwd", tildePath(context.cwd, context.home));
   } else {
     context.narrator.detail("scan", "claude, codex, and pi session stores");
     const matches = await findSessions(sessionId, context.env, context.home);
@@ -440,23 +463,37 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
     harness = first.harness;
     sessionPath = first.path;
     context.narrator.row("resume", facts(harness, sessionId));
-    context.narrator.row("cwd", tildePath(context.cwd, context.home));
     context.narrator.detail("session", tildePath(first.path, context.home));
   }
-  // A surface resume is placed where the conversation lived: the session's own
-  // cwd (every store records it) anchors the current-workspace default and
-  // the project inference. Only looked up when a surface is asked for.
-  let anchor: string | null = null;
-  if (parts.scoped.get("x-surface") !== undefined) {
-    const path =
-      sessionPath ??
-      (await findSessions(sessionId, context.env, context.home)).find(
-        (match) => match.harness === harness,
-      )?.path ??
-      null;
-    anchor = path === null ? null : (await sessionFileFacts(harness, path)).cwd;
-    if (anchor !== null) context.narrator.detail("anchor", `${anchor} · the session's cwd`);
-  }
+  // Where the conversation lived, which is where it is picked up (ADR 0028).
+  // A run reference answers from the record — the one thing that still knows
+  // once the checkout is gone — and a bare session id from the session's own
+  // cwd, which every store carries.
+  const lived =
+    fromRun !== null
+      ? fromRun.record.workspace.path
+      : await sessionCwd(context, harness, sessionId, sessionPath);
+  // A directory that is gone is stated, never silently swapped for wherever
+  // the operator happened to be standing. Only a run reference refuses over
+  // it (that happens above), because only a run knows what it would refuse
+  // about; a bare session id has nothing better to offer than staying put.
+  const cwd = lived !== null && existsSync(lived) ? lived : null;
+  context.narrator.row(
+    "cwd",
+    cwd !== null
+      ? facts(tildePath(cwd, context.home), "the session's own directory")
+      : facts(
+          tildePath(context.cwd, context.home),
+          lived === null
+            ? "the session's own directory is unknown"
+            : `${tildePath(lived, context.home)} is gone`,
+        ),
+  );
+  // A surface resume is placed where the conversation lived: that same
+  // directory anchors the current-workspace default and the project
+  // inference, whether or not it still exists locally.
+  const anchor = parts.scoped.get("x-surface") !== undefined ? lived : null;
+  if (anchor !== null) context.narrator.detail("anchor", `${anchor} · where the session lived`);
   // A resume takes no injection ever, so a name here is purely the surface's
   // and the record's: it labels where the conversation was picked up, and
   // never renames the session the harness already knows.
@@ -484,7 +521,76 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
     NO_DIMENSION,
     NO_DIMENSION,
     surface === null ? null : { ...surface, kind: "resume", level: null },
+    cwd,
   );
+}
+
+/** What `x-resume` reads as a run rather than a session id. `run:` is the
+ * vocabulary x-land and --x-from already take, resolved in the same tiers —
+ * exact run id first, then name (ADR 0017/0019). */
+const RUN_REFERENCE = "run:";
+
+/**
+ * Resuming what a Placement recorded (ADR 0028). Two things have to be true
+ * before a run can be picked up, and each is refused in its own words: the
+ * run must have a session — a Placement nobody ever spoke to has none — and
+ * the Workspace it was placed in must still be there, because a resume runs
+ * where the conversation lived and will not invent somewhere else.
+ */
+async function resumeSiteFromRun(
+  context: Context,
+  reference: string,
+): Promise<{ record: RunRecord }> {
+  if (reference.length === 0) {
+    throw new UsageError("run: needs a run id or name — agentsurface x-runs lists them");
+  }
+  const { record, discovered } = await resolveRun(context.env, context.home, reference);
+  if (discovered) context.narrator.row("session", `${record.session_id} · discovered`);
+  if (record.session_id === null) {
+    throw new CliError(
+      "run_not_resumable",
+      `run ${record.run_id} has no session: nothing was ever discovered for it`,
+      "a harness writes its session on the first turn — if that run never took one there is nothing to resume",
+    );
+  }
+  const lived = record.workspace.path;
+  if (!existsSync(lived)) {
+    const repo = record.repo ?? null;
+    throw new CliError(
+      "workspace_released",
+      facts(
+        `run ${record.run_id} was ${record.closed_as ?? "closed"}`,
+        `${tildePath(lived, context.home)} no longer exists`,
+        repo === null ? undefined : `it was cut from ${repo.name}`,
+      ),
+      repo?.path != null
+        ? `place it somewhere: --x-surface --x-new-workspace <name> --x-project path:${repo.path}; or resume the session where you stand: agentsurface x-resume ${record.session_id}`
+        : `place it somewhere with --x-surface --x-new-workspace <name>, or resume the session where you stand: agentsurface x-resume ${record.session_id}`,
+    );
+  }
+  return { record };
+}
+
+/** The directory a session recorded for itself — every store carries one, and
+ * it is the only answer for a session no Placement ever made. */
+async function sessionCwd(
+  context: Context,
+  harness: HarnessName,
+  sessionId: string,
+  known: string | null,
+): Promise<string | null> {
+  const path =
+    known ??
+    (await findSessions(sessionId, context.env, context.home)).find(
+      (match) => match.harness === harness,
+    )?.path ??
+    null;
+  if (path === null) return null;
+  try {
+    return (await sessionFileFacts(harness, path)).cwd;
+  } catch {
+    return null;
+  }
 }
 
 /** Per-launch flags beat the config; without either, yolo is on (ADR 0009).
@@ -705,22 +811,57 @@ function catalogReport(context: Context): CatalogReport {
 
 export async function runsCommand(context: Context, parts: Partitioned): Promise<Outcome> {
   if (parts.harness.length > 0) throw new UsageError("x-runs takes no arguments");
+  const closedOnly = parts.bools.has("x-closed");
+  const all = parts.bools.has("x-all");
+  if (closedOnly && all) throw new UsageError("--x-closed narrows the listing; drop --x-all");
   const records = await listRunRecords(context.env, context.home);
-  const lines = records.map((record) =>
-    facts(
+  // Open runs are what an operator is deciding about; closed ones are the
+  // history that makes an old session findable later (ADR 0028), and they
+  // accumulate, so they do not bury the live ones by default. --x-json is
+  // unfiltered either way: the view is the human's, never the contract.
+  const shown = all
+    ? records
+    : records.filter((record) => (record.closed_at == null) !== closedOnly);
+  // The hint has to be a reference that actually resolves: a name two runs
+  // share is an ambiguous_run refusal, and closed runs are free to share one
+  // (ADR 0019), so a duplicated name falls back to the id it cannot hide.
+  const byName = new Map<string, number>();
+  for (const record of records) {
+    if (record.name !== null && record.name !== undefined) {
+      byName.set(record.name, (byName.get(record.name) ?? 0) + 1);
+    }
+  }
+  const lines = shown.map((record) => {
+    const name = record.name ?? null;
+    const reference = name !== null && byName.get(name) === 1 ? name : record.run_id;
+    return facts(
       record.run_id,
-      record.name ?? undefined,
+      name ?? undefined,
       record.backend,
       record.harness,
       record.workspace.name,
-      record.session_id ?? "session not yet discovered",
+      record.closed_as ?? "open",
+      record.session_id === null ? "no session discovered" : `resume run:${reference}`,
       record.created_at,
-    ),
-  );
+    );
+  });
+  if (shown.length === 0 && records.length > 0) {
+    lines.push(closedOnly ? "no closed runs" : "no open runs");
+  }
   // A Placement that never committed has no record to list, and hiding it
-  // would leave whatever it created unaccounted for (ADR 0027).
+  // would leave whatever it created unaccounted for (ADR 0027). Never
+  // filtered: an interrupted Placement is neither open nor closed, and it is
+  // holding things.
   const interrupted = await interruptedPlacements(context.env, context.home);
   lines.push(...interrupted.map((journal) => describeInterrupted(context, journal)));
+  const hidden = records.length - shown.length;
+  if (hidden > 0) {
+    lines.push(
+      `${hidden} ${closedOnly ? "open" : "closed"} run(s) not shown · ${
+        closedOnly ? "agentsurface x-runs" : "agentsurface x-runs --x-closed"
+      }`,
+    );
+  }
   return {
     kind: "result",
     data: { runs: records, interrupted },
@@ -1016,6 +1157,10 @@ async function finishLaunch(
   model: DimensionReport = NO_DIMENSION,
   effort: DimensionReport = NO_DIMENSION,
   surface: SurfaceLaunch | null = null,
+  /** Only a resume sets this: the directory the conversation lived in
+   * (ADR 0028). A placed launch ignores it — the backend starts the terminal
+   * in the Workspace, which is that same directory by construction. */
+  runnerCwd: string | null = null,
 ): Promise<Outcome> {
   const dryRun = parts.bools.has("x-dry-run");
   // A placed launch returns instead of becoming the harness, so its
@@ -1242,6 +1387,10 @@ async function finishLaunch(
             path: placement.workspace.path ?? context.cwd,
             id: placement.workspace.id,
           },
+          repo:
+            placement.project === null
+              ? null
+              : { name: placement.project.name, path: placement.project.path },
           terminal: placement.terminal,
           command: finalCommand,
           session_id: spec.sessionId,
@@ -1294,7 +1443,7 @@ async function finishLaunch(
 
     if (!dryRun) {
       context.narrator.row("launch", shellLine(launchSpec.command));
-      return { kind: "launch", spec: launchSpec };
+      return { kind: "launch", spec: launchSpec, cwd: runnerCwd };
     }
     context.narrator.row("dry run", "nothing launched · command on stdout");
     return { kind: "result", data, human: shellLine(launchSpec.command) };

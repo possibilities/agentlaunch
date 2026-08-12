@@ -184,6 +184,12 @@ expect_err "x-resume takes no level"
 expect_exit 1 run x-resume 99999999-9999-4999-9999-999999999999
 expect_exit 1 run x-resume 99999999-9999-4999-9999-999999999999 --x-dry-run --x-json
 expect_out '"code":"session_not_found"'
+# A run reference is its own vocabulary (ADR 0028); an unknown one refuses
+# through the registry rather than the session stores.
+expect_exit 1 run x-resume run:no-such-run --x-dry-run --x-json
+expect_out '"code":"run_not_found"'
+expect_exit 2 run x-resume run: --x-dry-run
+expect_err "run: needs a run id or name"
 
 # Balanced launches compose the swap prefix (fake stack, dry runs only)
 install_fake_balance
@@ -241,6 +247,11 @@ expect_exit 0 run_surface --x-harness claude --x-surface --x-no-yolo --x-dry-run
 expect_out "claude --model 'opus\[1m\]' --effort medium"
 expect_exit 0 run_surface x-runs
 expect_out "$RUN_ID"
+# Open by default, history behind a flag, and the two filters are exclusive.
+expect_exit 0 run_surface x-runs --x-closed
+expect_exit 0 run_surface x-runs --x-all
+expect_out "$RUN_ID"
+expect_exit 2 run_surface x-runs --x-closed --x-all
 expect_exit 0 run_surface x-run "$RUN_ID"
 expect_out "term_smoke"
 expect_exit 0 run_surface x-doctor --x-json

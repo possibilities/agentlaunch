@@ -83,8 +83,14 @@ export interface PlaceRequest {
 
 export interface Placement {
   backend: string;
-  /** The ensure outcome for the project, when the intent implied one. */
-  project: { name: string; created: boolean } | null;
+  /**
+   * The repository the workspace belongs to, whenever the backend knows it —
+   * reported for every Placement rather than only the ones that named a
+   * project, because a Run outlives its Workspace and this is the only thing
+   * that still says where the session came from once the checkout is gone.
+   * `created` is ensure's outcome (ADR 0013); a repo merely found is false.
+   */
+  project: { name: string; path: string | null; created: boolean } | null;
   /** Path and id are null only when a dry run declined to create. */
   workspace: { name: string; path: string | null; id: string | null; created: boolean };
   /** Backend-issued handle for the placed terminal; null on a dry run. */

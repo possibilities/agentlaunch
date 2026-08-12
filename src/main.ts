@@ -146,7 +146,7 @@ async function main(argv: string[]): Promise<number> {
     run = landCommand;
   } else if (first === "x-runs") {
     helpTopic = "x-runs";
-    spec = specFor({});
+    spec = specFor({ bool: ["--x-closed", "--x-all"] });
     own = argv.slice(1);
     run = runsCommand;
   } else if (first === "x-run") {
@@ -192,7 +192,9 @@ async function main(argv: string[]): Promise<number> {
 
   try {
     const outcome = await run(context, parts);
-    if (outcome.kind === "launch") return await launch(outcome.spec, context.narrator, context.env);
+    if (outcome.kind === "launch") {
+      return await launch(outcome.spec, context.narrator, context.env, outcome.cwd);
+    }
     emit(outcome, json);
     return 0;
   } catch (error) {
