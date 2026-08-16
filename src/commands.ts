@@ -415,6 +415,37 @@ function catalogReport(context: Context): CatalogReport {
   }
 }
 
+export async function catalogCommand(context: Context, parts: Partitioned): Promise<Outcome> {
+  if (parts.harness.length > 0) throw new UsageError("x-catalog takes no arguments");
+
+  const catalog = loadCatalog(context.env, context.home);
+  const harnesses = catalog.harnesses.map((entry) => ({
+    harness: entry.harness,
+    default_model: entry.model,
+    default_effort: entry.effort,
+    models: entry.models.map((model) => ({
+      model: model.model,
+      efforts: model.efforts,
+      default_effort: model.effort,
+      family: model.family,
+    })),
+  }));
+
+  const lines = [`catalog  ${catalog.source} · ${tildePath(catalog.path, context.home)}`];
+  for (const entry of catalog.harnesses) {
+    lines.push(`  ${entry.harness.padEnd(7)} default ${entry.model}:${entry.effort}`);
+    for (const model of entry.models) {
+      lines.push(`    ${model.model.padEnd(20)} ${model.efforts.join(", ")}`);
+    }
+  }
+
+  return {
+    kind: "result",
+    data: { source: catalog.source, path: catalog.path, harnesses },
+    human: lines.join("\n"),
+  };
+}
+
 async function finishLaunch(
   context: Context,
   parts: Partitioned,

@@ -7,12 +7,14 @@ Usage:
   agentlaunch --x-level <model>:<effort> [native tokens…]
   agentlaunch x-resume <native-session-id> [--x-harness <name>] [native tokens…]
   agentlaunch x-doctor [--x-json]
+  agentlaunch x-catalog [--x-json]
 
 Commands:
   launch       Any invocation not beginning with x-. Resolve the harness,
                model, effort, yolo policy, and account, then become it.
   x-resume     Detect a native session store and resume in its recorded cwd.
   x-doctor     Report harness binaries, native stores, config, and catalog.
+  x-catalog    Report the resolved catalog: models and efforts per harness.
 
 Extension flags are the reserved --x-* namespace. Every other token is
 forwarded in order and interpreted only by the native harness.
@@ -99,10 +101,19 @@ Report each native harness binary, session-store path and count, active store
 override, the strict yolo config, and the active built-in or custom catalog.
 Doctor reads only; it neither repairs nor creates state.
 `,
+  "x-catalog": `agentlaunch x-catalog [--x-json]
+
+Report the resolved catalog: each harness in priority order with its models,
+every model's allowed efforts and default effort, and the harness's default
+<model>:<effort> pair. This is the validated pair space --x-level accepts —
+tools that offer launch choices consume it at runtime instead of re-reading
+or re-resolving catalog files. A custom catalog replaces the built-in when
+present, exactly as it does for launches. Reads only.
+`,
 };
 
 export const AGENT_TEASER =
-  "Resolve, balance, launch, and resume native claude/codex/pi sessions: agentlaunch --x-harness <name> [--x-level <model>:<effort>] [native tokens…], x-resume <native-session-id>, and x-doctor.";
+  "Resolve, balance, launch, and resume native claude/codex/pi sessions: agentlaunch --x-harness <name> [--x-level <model>:<effort>] [native tokens…], x-resume <native-session-id>, x-doctor, and x-catalog.";
 
 export const AGENT_HELP = `agentlaunch agent runbook
 
@@ -128,4 +139,5 @@ Examples
   agentlaunch --x-harness codex --x-dry-run --x-json
   agentlaunch --x-level gpt-5.6-sol:ultra "hard problem"
   agentlaunch x-resume <native-session-id> --x-dry-run --x-json
+  agentlaunch x-catalog --x-json
 `;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import type { Context, Outcome } from "./commands.ts";
-import { doctorCommand, launchCommand, resumeCommand } from "./commands.ts";
+import { catalogCommand, doctorCommand, launchCommand, resumeCommand } from "./commands.ts";
 import { failure, success } from "./envelope.ts";
 import { CliError, UsageError } from "./errors.ts";
 import { HARNESS_NAMES } from "./harness.ts";
@@ -92,6 +92,11 @@ async function main(argv: string[]): Promise<number> {
     spec = specFor({});
     own = argv.slice(1);
     run = doctorCommand;
+  } else if (first === "x-catalog") {
+    helpTopic = "x-catalog";
+    spec = specFor({});
+    own = argv.slice(1);
+    run = catalogCommand;
   } else if (first.startsWith("x-")) {
     console.error(`unknown x command "${first}"`);
     console.error(TOP_HELP);

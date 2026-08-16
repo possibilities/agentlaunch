@@ -105,6 +105,7 @@ prints a schema-versioned envelope with the exact argv and decisions.
 agentlaunch --x-harness codex --x-dry-run --x-json
 agentlaunch x-resume <id> --x-dry-run --x-json
 agentlaunch x-doctor --x-json
+agentlaunch x-catalog --x-json
 ```
 
 `--x-json` requires `--x-dry-run` for interactive launches. Real launches
@@ -113,6 +114,11 @@ exit 2.
 
 `x-doctor` reports native binaries, store paths/counts and overrides, config,
 and catalog health. It is read-only.
+
+`x-catalog` reports the resolved catalog — each harness's models, allowed
+efforts, and defaults: the validated pair space `--x-level` accepts. Tools
+that offer launch choices (AgentSurface's launcher, for one) consume it at
+runtime instead of re-reading catalog files. It is read-only.
 
 ## Configuration and catalog
 
