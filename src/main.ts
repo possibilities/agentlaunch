@@ -30,7 +30,7 @@ const YOLO_SCOPES: Array<[string, readonly string[]]> = [
 ];
 
 const LAUNCH_FLAGS: RouteFlags = {
-  value: ["--x-harness", "--x-level", "--x-account"],
+  value: ["--x-harness", "--x-level", "--x-account", "--x-prompt-file"],
   bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
   scoped: YOLO_SCOPES,
 };

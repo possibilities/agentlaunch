@@ -138,10 +138,11 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
 
   const yolo = resolveYolo(context, parts, harness);
   const applied = applyYolo(harness, stream, yolo, utility);
+  const prompt = await promptFileTokens(context, parts.values["x-prompt-file"], utility, head);
   return finishLaunch(
     context,
     parts,
-    buildOpen(harness, applied.tokens),
+    buildOpen(harness, [...applied.tokens, ...prompt]),
     model.value ?? undefined,
     yolo,
     applied,
@@ -150,6 +151,41 @@ export async function launchCommand(context: Context, parts: Partitioned): Promi
     effort,
     null,
   );
+}
+
+/** The prompt file's text becomes the final native token, appended only
+ * after every dimension and yolo decision has read the stream — prompt text
+ * is never scanned for model, effort, cwd, or yolo spellings. The text
+ * arrives as a path because some callers cannot carry it on argv: herdr
+ * types an agent launch into an interactive shell and refuses control
+ * characters, so a multi-line prompt travels as a control-char-free path
+ * (ADR 0029). */
+async function promptFileTokens(
+  context: Context,
+  path: string | undefined,
+  utility: boolean,
+  head: string | undefined,
+): Promise<string[]> {
+  if (path === undefined) return [];
+  if (utility) {
+    throw new UsageError(
+      `"${head}" is a utility invocation; a prompt does not apply — drop --x-prompt-file`,
+    );
+  }
+  let text: string;
+  try {
+    text = await Bun.file(path).text();
+  } catch {
+    throw new CliError("prompt_file_unreadable", `cannot read prompt file ${path}`);
+  }
+  if (text === "") {
+    throw new CliError("prompt_file_empty", `prompt file ${path} is empty`);
+  }
+  context.narrator.detail(
+    "prompt",
+    facts(`${text.length} characters`, tildePath(path, context.home)),
+  );
+  return [text];
 }
 
 function modelFromArgs(args: string[]): string | undefined {

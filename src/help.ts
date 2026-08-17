@@ -24,6 +24,7 @@ Common:
   --x-level <m>:<e>      Resolve and inject one catalog model/effort pair
   --x-account <selector> Pin a balanced launch to an eligible account
   --x-no-balance         Run the native harness without the account stack
+  --x-prompt-file <path> Append the file's text as the final native token
   --x-yolo [harness]     Enable the harness's unattended permission setting
   --x-no-yolo [harness]  Disable it; removes a forwarded positive spelling
   --x-dry-run            Print the resolved command instead of launching
@@ -64,6 +65,11 @@ resolved native spelling. A forwarded native model or effort wins unless
 --x-level was explicit, in which case the duplicate decision is a usage fault.
 Native tokens such as --name are opaque: AgentLaunch forwards them unchanged
 and neither interprets nor records them.
+
+--x-prompt-file <path> reads the file (UTF-8) and appends its exact text as
+one final native token — for callers whose own argv cannot carry the text,
+such as a shell-typed line that refuses control characters. The file is read
+once at launch and never deleted; an unreadable or empty file is an error.
 
 Management invocations such as codex login, claude doctor, pi auth, and bare
 --version pass through unbalanced and receive no yolo injection.

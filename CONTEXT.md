@@ -15,6 +15,12 @@ usage errors. _Avoid_: wrapper flag.
 **Level** — One catalog pair, `<model>:<effort>`, requested by `--x-level`.
 The catalog validates the pair and resolves the harness and native spellings.
 
+**Prompt file** — A path passed as `--x-prompt-file` whose UTF-8 text becomes
+the final native token of a launch, appended after every dimension and yolo
+decision. For callers whose own argv cannot carry the text (herdr refuses
+control characters in a shell-typed line). AgentLaunch reads it once and never
+deletes it. _Avoid_: intent file (intent is AgentSurface's word).
+
 **Launch spec** — The resolved native launch: harness, exact command argv, and
 native session ID for a resume. `--x-dry-run --x-json` exposes it with the
 associated decisions. _Avoid_: run (there is no AgentLaunch run lifecycle).
