@@ -219,6 +219,51 @@ describe("loadCatalog", () => {
     );
   });
 
+  test("the built-in carries a metadata level per harness", () => {
+    const { env, home } = emptyHome();
+    const catalog = loadCatalog(env, home);
+    expect(catalog.harnesses[0]?.metadata).toEqual({ model: "haiku", effort: "low" });
+    expect(catalog.harnesses[1]?.metadata).toEqual({ model: "gpt-5.4-mini", effort: "low" });
+    expect(catalog.harnesses[2]?.metadata).toEqual({ model: "gpt-5.4-mini", effort: "low" });
+  });
+
+  test("metadata levels are validated where they land; absence is null", () => {
+    const absent = structuredClone(CUSTOM);
+    const { env: env0, home: home0 } = writeCatalog(JSON.stringify(absent));
+    expect(loadCatalog(env0, home0).harnesses[0]?.metadata).toBeNull();
+
+    const carried = structuredClone(CUSTOM);
+    carried.harnesses[0] = {
+      ...carried.harnesses[0],
+      metadata: { model: "gpt-b", effort: "high" },
+    } as never;
+    const { env: env1, home: home1 } = writeCatalog(JSON.stringify(carried));
+    expect(loadCatalog(env1, home1).harnesses[0]?.metadata).toEqual({
+      model: "gpt-b",
+      effort: "high",
+    });
+
+    const modelUnknown = structuredClone(CUSTOM);
+    modelUnknown.harnesses[0] = {
+      ...modelUnknown.harnesses[0],
+      metadata: { model: "ghost", effort: "high" },
+    } as never;
+    const { env: env2, home: home2 } = writeCatalog(JSON.stringify(modelUnknown));
+    expect(() => loadCatalog(env2, home2)).toThrow(
+      /metadata model "ghost" is not among its models/,
+    );
+
+    const effortOutside = structuredClone(CUSTOM);
+    effortOutside.harnesses[0] = {
+      ...effortOutside.harnesses[0],
+      metadata: { model: "gpt-b", effort: "max" },
+    } as never;
+    const { env: env3, home: home3 } = writeCatalog(JSON.stringify(effortOutside));
+    expect(() => loadCatalog(env3, home3)).toThrow(
+      /metadata effort "max" is not allowed by model "gpt-b"/,
+    );
+  });
+
   test("a model's own default effort wins for the name route", () => {
     const owned = structuredClone(CUSTOM);
     owned.families.gpt.models[0] = { model: "gpt-a", defaults: { effort: "max" } } as never;

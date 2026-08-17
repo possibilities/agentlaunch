@@ -152,6 +152,21 @@ const harnessDefaultsSchema = z
     "This harness's own defaults. Optional when exactly one included family carries defaults — the family's then apply — and required otherwise.",
   );
 
+const metadataLevelSchema = z
+  .strictObject({
+    model: z
+      .string()
+      .regex(NAME_PATTERN)
+      .describe("The metadata model; must be one this harness offers, families included."),
+    effort: z
+      .string()
+      .regex(NAME_PATTERN)
+      .describe("The metadata effort; must be allowed by the metadata model."),
+  })
+  .describe(
+    "The harness's level for metadata completions — deriving a slug, title, or summary about a session rather than working in one. Small and fast by intent. Consumers read it from x-catalog as one metadata_level value and pass it back as one --x-level value; a harness without one offers no metadata level.",
+  );
+
 const harnessEntrySchema = z
   .strictObject({
     harness: z
@@ -173,6 +188,7 @@ const harnessEntrySchema = z
       .describe("Families this harness includes, unioned into its offering.")
       .optional(),
     defaults: harnessDefaultsSchema.optional(),
+    metadata: metadataLevelSchema.optional(),
   })
   .describe(
     "One harness's offering. The array order of these entries is load-bearing: a model:effort request resolves to the earliest harness offering that combination.",

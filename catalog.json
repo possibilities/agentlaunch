@@ -28,8 +28,20 @@
     }
   },
   "harnesses": [
-    { "harness": "claude", "families": [{ "family": "claude" }] },
-    { "harness": "codex", "families": [{ "family": "gpt" }] },
-    { "harness": "pi", "families": [{ "family": "gpt", "provider": "openai-codex" }] }
+    {
+      "harness": "claude",
+      "families": [{ "family": "claude" }],
+      "metadata": { "model": "haiku", "effort": "low" }
+    },
+    {
+      "harness": "codex",
+      "families": [{ "family": "gpt" }],
+      "metadata": { "model": "gpt-5.4-mini", "effort": "low" }
+    },
+    {
+      "harness": "pi",
+      "families": [{ "family": "gpt", "provider": "openai-codex" }],
+      "metadata": { "model": "gpt-5.4-mini", "effort": "low" }
+    }
   ]
 }

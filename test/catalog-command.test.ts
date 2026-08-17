@@ -38,6 +38,7 @@ interface CatalogData {
     harness: string;
     default_model: string;
     default_effort: string;
+    metadata_level: string | null;
     models: Array<{
       model: string;
       efforts: readonly string[];
@@ -60,6 +61,8 @@ describe("catalogCommand", () => {
     const claude = data.harnesses[0]!;
     expect(claude.default_model).toBe("opus-1m");
     expect(claude.default_effort).toBe("medium");
+    expect(claude.metadata_level).toBe("haiku:low");
+    expect(data.harnesses[1]?.metadata_level).toBe("gpt-5.4-mini:low");
     const fable = claude.models.find((model) => model.model === "fable");
     expect(fable).toBeDefined();
     expect(fable?.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
@@ -78,7 +81,7 @@ describe("catalogCommand", () => {
     const outcome = await catalogCommand(contextFor(env, home), partition([], SPEC));
     if (outcome.kind !== "result") throw new Error("expected a result outcome");
     expect(outcome.human).toContain("catalog  built-in");
-    expect(outcome.human).toContain("claude  default opus-1m:medium");
+    expect(outcome.human).toContain("claude  default opus-1m:medium · metadata haiku:low");
     expect(outcome.human).toContain("gpt-5.3-codex-spark");
   });
 

@@ -45,6 +45,10 @@ export interface CatalogHarness {
   model: string;
   /** Resolved default effort, same source as the default model. */
   effort: string;
+  /** The harness's level for metadata completions — deriving a slug,
+   * title, or summary about a session rather than working in one. Null
+   * when the harness declares none. */
+  metadata: { model: string; effort: string } | null;
 }
 
 export interface Catalog {
@@ -238,7 +242,29 @@ function expandHarness(
       `harness "${entry.harness}" default effort "${defaultEffort}" is not allowed by its default model "${defaultModel.model}" (${defaultModel.efforts.join(", ")})`,
     );
   }
-  return { harness: entry.harness, models, model: defaults.model, effort: defaults.effort };
+  const metadata = entry.metadata ?? null;
+  if (metadata !== null) {
+    const metadataModel = models.find((model) => model.model === metadata.model);
+    if (metadataModel === undefined) {
+      throw fault(
+        `harness "${entry.harness}" metadata model "${metadata.model}" is not among its models (${
+          models.map((model) => model.model).join(", ") || "none"
+        })`,
+      );
+    }
+    if (!metadataModel.efforts.includes(metadata.effort)) {
+      throw fault(
+        `harness "${entry.harness}" metadata effort "${metadata.effort}" is not allowed by model "${metadata.model}" (${metadataModel.efforts.join(", ")})`,
+      );
+    }
+  }
+  return {
+    harness: entry.harness,
+    models,
+    model: defaults.model,
+    effort: defaults.effort,
+    metadata,
+  };
 }
 
 export interface ModelRequest {

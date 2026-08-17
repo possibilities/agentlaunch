@@ -423,6 +423,8 @@ export async function catalogCommand(context: Context, parts: Partitioned): Prom
     harness: entry.harness,
     default_model: entry.model,
     default_effort: entry.effort,
+    metadata_level:
+      entry.metadata === null ? null : `${entry.metadata.model}:${entry.metadata.effort}`,
     models: entry.models.map((model) => ({
       model: model.model,
       efforts: model.efforts,
@@ -433,7 +435,9 @@ export async function catalogCommand(context: Context, parts: Partitioned): Prom
 
   const lines = [`catalog  ${catalog.source} · ${tildePath(catalog.path, context.home)}`];
   for (const entry of catalog.harnesses) {
-    lines.push(`  ${entry.harness.padEnd(7)} default ${entry.model}:${entry.effort}`);
+    const metadata =
+      entry.metadata === null ? "" : ` · metadata ${entry.metadata.model}:${entry.metadata.effort}`;
+    lines.push(`  ${entry.harness.padEnd(7)} default ${entry.model}:${entry.effort}${metadata}`);
     for (const model of entry.models) {
       lines.push(`    ${model.model.padEnd(20)} ${model.efforts.join(", ")}`);
     }

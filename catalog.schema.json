@@ -201,6 +201,24 @@
             "required": ["model", "effort"],
             "additionalProperties": false,
             "description": "This harness's own defaults. Optional when exactly one included family carries defaults — the family's then apply — and required otherwise."
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                "description": "The metadata model; must be one this harness offers, families included."
+              },
+              "effort": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+                "description": "The metadata effort; must be allowed by the metadata model."
+              }
+            },
+            "required": ["model", "effort"],
+            "additionalProperties": false,
+            "description": "The harness's level for metadata completions — deriving a slug, title, or summary about a session rather than working in one. Small and fast by intent. Consumers read it from x-catalog as one metadata_level value and pass it back as one --x-level value; a harness without one offers no metadata level."
           }
         },
         "required": ["harness"],
