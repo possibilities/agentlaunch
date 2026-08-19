@@ -15,11 +15,18 @@ import { configDirectory } from "./paths.ts";
  * against the operator's wishes — it must fail the launch instead. */
 export interface Config {
   yolo: Record<HarnessName, boolean>;
+  /** Project roots the interactive form scans; the personal defaults apply
+   * when the file omits them. */
+  roots: string[];
+  /** Priming choices the form offers beside "none", in configured order. */
+  priming: string[];
   path: string;
   exists: boolean;
 }
 
 const ALL_YOLO: Record<HarnessName, boolean> = { claude: true, codex: true, pi: true };
+
+export const DEFAULT_ROOTS = ["~/code", "~/src"] as const;
 
 export function configPath(env: Environ, home: string): string {
   return join(configDirectory(env, home, "agentlaunch"), "config.json");
@@ -27,7 +34,9 @@ export function configPath(env: Environ, home: string): string {
 
 export function loadConfig(env: Environ, home: string): Config {
   const path = configPath(env, home);
-  if (!existsSync(path)) return { yolo: { ...ALL_YOLO }, path, exists: false };
+  if (!existsSync(path)) {
+    return { yolo: { ...ALL_YOLO }, roots: [...DEFAULT_ROOTS], priming: [], path, exists: false };
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8"));
@@ -46,7 +55,13 @@ export function loadConfig(env: Environ, home: string): Config {
     );
   }
   const values = parseConfig(parsed as Record<string, unknown>, path);
-  return { yolo: resolveYolo(values.yolo), path, exists: true };
+  return {
+    yolo: resolveYolo(values.yolo),
+    roots: values.roots ?? [...DEFAULT_ROOTS],
+    priming: values.priming ?? [],
+    path,
+    exists: true,
+  };
 }
 
 /** The defaults live here rather than in the schema: an omitted key must

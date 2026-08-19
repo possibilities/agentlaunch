@@ -27,3 +27,9 @@ export function expandTilde(path: string, home: string): string {
   if (path.startsWith("~/")) return join(home, path.slice(2));
   return path;
 }
+
+export function tildePath(path: string, home: string): string {
+  if (home === "" || home === "/") return path;
+  if (path === home) return "~";
+  return path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
+}

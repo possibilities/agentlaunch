@@ -19,7 +19,24 @@ The catalog validates the pair and resolves the harness and native spellings.
 the final native token of a launch, appended after every dimension and yolo
 decision. For callers whose own argv cannot carry the text (herdr refuses
 control characters in a shell-typed line). AgentLaunch reads it once and never
-deletes it. _Avoid_: intent file (intent is AgentSurface's word).
+deletes it. _Avoid_: intent file (the intent is the surface form's word for
+what the operator typed; a surface host spools it into a prompt file when it
+realizes a directive).
+
+**Surface form** — The interactive one-screen launcher `--x-surface` opens:
+intent first, then project, worktree, and the harness → model → effort cascade
+from the catalog. It emits session directives instead of becoming a harness.
+_Avoid_: launcher popup (the popup is the host's chrome, not this form).
+
+**Session directive** — One schema-versioned JSON line describing a session
+for a surface host to realize: cwd, worktree, focus, the agent kind with its
+launch arguments, the composed intent, and opaque record extras. The
+`surface-handoff-protocol` wiki page is the contract. _Avoid_: launch plan
+(the plan is form state; the directive is what leaves).
+
+**Directive sink** — The append-only file named by `AGENTSURFACE_DIRECTIVES`,
+created and tailed by the surface host. The form appends one directive per
+committed launch and owns nothing past the append.
 
 **Launch spec** — The resolved native launch: harness, exact command argv, and
 native session ID for a resume. `--x-dry-run --x-json` exposes it with the

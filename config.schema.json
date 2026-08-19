@@ -35,6 +35,25 @@
           "description": "Per-harness answers. Only claude, codex, and pi are accepted — an unknown harness name is a config_invalid error rather than a silently ignored line, so that a misspelling can never read as the default when the operator meant to disable. Any harness left out stays on."
         }
       ]
+    },
+    "roots": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One project root; ~ and ~/ expand to the operator's home directory."
+      },
+      "description": "Parent directories the interactive form (--x-surface) scans one level deep for project directories, in scan order. Omitted entirely: ~/code and ~/src."
+    },
+    "priming": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]*$",
+        "description": "One priming choice: a skill name the form prefixes onto the intent — /name for claude and pi, $name for codex."
+      },
+      "description": "Primings the interactive form offers beside \"none\", in order; the first is the default. Omitted: none are offered."
     }
   },
   "additionalProperties": false

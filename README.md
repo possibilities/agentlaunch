@@ -50,6 +50,23 @@ everything else belongs to the harness and remains in order. Unknown
 `--x-*` flags fail. Unknown native flags—including `--name` or `-n`—are
 forwarded without inspection.
 
+## Surface form
+
+```sh
+agentlaunch --x-surface
+```
+
+The one-screen interactive launcher: intent first, then project, worktree,
+and the harness → model → effort cascade from the catalog. It runs under a
+surface host (agentsurface hosts it in a herdr popup) and, instead of
+launching, appends one session directive per submitted launch to the file
+named by `AGENTSURFACE_DIRECTIVES`; the host realizes each directive as a
+herdr session. The form takes no other arguments, needs a terminal, and
+refuses to run without a sink. Project roots and priming choices come from
+the config (`roots`, `priming`); an interrupted form is restored from its
+draft on the next open. The `surface-handoff-protocol` wiki page documents
+the directive contract.
+
 ## Resume
 
 ```sh
@@ -127,7 +144,9 @@ The optional strict config is `~/.config/agentlaunch/config.json`:
 ```json
 {
   "$schema": "/path/to/config.schema.json",
-  "yolo": { "claude": true, "codex": false, "pi": true }
+  "yolo": { "claude": true, "codex": false, "pi": true },
+  "roots": ["~/code", "~/src"],
+  "priming": ["collab", "build"]
 }
 ```
 

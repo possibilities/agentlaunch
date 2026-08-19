@@ -120,6 +120,39 @@ describe("loadConfig", () => {
     const { env, home } = writeConfig('{"$schema":7,"yolo":{"pi":false}}');
     expect(loadConfig(env, home).yolo).toEqual({ claude: true, codex: true, pi: false });
   });
+
+  test("missing roots and priming mean the personal defaults", () => {
+    const root = mkdtempSync(join(tmpdir(), "agentlaunch-config-"));
+    roots.push(root);
+    const absent = loadConfig({}, join(root, "home"));
+    expect(absent.roots).toEqual(["~/code", "~/src"]);
+    expect(absent.priming).toEqual([]);
+    const { env, home } = writeConfig(JSON.stringify({}));
+    const empty = loadConfig(env, home);
+    expect(empty.roots).toEqual(["~/code", "~/src"]);
+    expect(empty.priming).toEqual([]);
+  });
+
+  test("configured roots and priming win, beside an untouched yolo", () => {
+    const { env, home } = writeConfig(
+      JSON.stringify({ roots: ["~/work"], priming: ["collab", "build"] }),
+    );
+    const config = loadConfig(env, home);
+    expect(config.roots).toEqual(["~/work"]);
+    expect(config.priming).toEqual(["collab", "build"]);
+    expect(config.yolo).toEqual({ claude: true, codex: true, pi: true });
+  });
+
+  test("empty roots and malformed priming names refuse loudly", () => {
+    for (const bad of [
+      JSON.stringify({ roots: [] }),
+      JSON.stringify({ roots: "~/code" }),
+      JSON.stringify({ priming: ["Not A Skill"] }),
+      JSON.stringify({ priming: "collab" }),
+    ]) {
+      expect(faultOf(bad).code).toBe("config_invalid");
+    }
+  });
 });
 
 /** These pin how a fault is reported: which key it names, in which order

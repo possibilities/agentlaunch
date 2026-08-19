@@ -4,11 +4,16 @@ AgentLaunch is the fleet's public pre-launch resolver for Claude Code, Codex,
 and Pi. It chooses a harness/model/effort, applies yolo policy, balances an
 account, composes the native command, and executes it. `x-resume` reads native
 session stores to detect the harness and recover the session's cwd.
+`--x-surface` opens the interactive launch form, which emits session
+directives for a surface host instead of executing anything.
 
 The boundary is strict: native harness behavior begins where AgentLaunch ends.
 This repository owns no agent names, identities, workspaces, panes, presence,
 steering, run registry, placement lifecycle, or app-server topology. Anything
 outside `--x-*` is a native token and stays opaque, including `--name`/`-n`.
+The surface form does not soften this: it describes sessions declaratively
+(the directive's worktree/focus/cwd vocabulary) and never calls herdr or
+agentsurface — realizing a directive is entirely the host's.
 
 ## Commands
 
@@ -21,7 +26,13 @@ outside `--x-*` is a native token and stays opaque, including `--name`/`-n`.
 ## Architecture
 
 - `main.ts` owns top-level routing, strict per-route `--x-*` grammar, envelope
-  rendering, and exit semantics. Routes are launch, `x-resume`, and `x-doctor`.
+  rendering, and exit semantics. Routes are launch, `x-resume`, `x-doctor`,
+  and the `--x-surface` form.
+- `surface/` is the interactive launch form and its handoff: a pure form
+  model (`model.ts`), the OpenTUI shell (`app.ts`), Signal Room theme,
+  overlay, kill ring, project scan, form-side state, and `directive.ts` —
+  session directives appended to the sink named by `AGENTSURFACE_DIRECTIVES`.
+  The `surface-handoff-protocol` wiki page is the protocol contract.
 - `commands.ts` resolves launch/resume decisions and produces either a native
   launch spec or a result. Keep it free of post-launch state.
 - `partition.ts` claims known `--x-*` tokens anywhere and forwards every other
@@ -43,8 +54,11 @@ outside `--x-*` is a native token and stays opaque, including `--name`/`-n`.
 
 ## Invariants
 
-- No compatibility shims for AgentSurface. Product paths and environment
-  variables are `agentlaunch` / `AGENTLAUNCH_*` only.
+- No AgentSurface runtime coupling: never spawn agentsurface or herdr, and
+  never read surface state. Product paths and environment variables are
+  `agentlaunch` / `AGENTLAUNCH_*` only, with one deliberate exception —
+  `AGENTSURFACE_DIRECTIVES` is read as the surface host's contract variable,
+  and only by the `--x-surface` form.
 - A native `--name` is forwarded untouched. Do not parse, inject, deduplicate,
   narrate, persist, or assign meaning to it.
 - `x-resume` accepts a native session ID only. No `run:` references or local
@@ -74,7 +88,9 @@ bash scripts/smoke.sh
 
 Also grep tracked current files for removed product terms. Historical Git
 commits retain the AgentSurface lineage by design; the current tree must not
-contain its runtime or documentation concepts.
+contain its runtime concepts — herdr calls, agent names, workspaces, panes.
+The directive vocabulary (`AGENTSURFACE_DIRECTIVES`, worktree/focus fields,
+the surface form) is legitimate handoff language, not a regression.
 
 ## The fleet
 

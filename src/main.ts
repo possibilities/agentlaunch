@@ -9,6 +9,7 @@ import { launch } from "./launch.ts";
 import { createNarrator } from "./narrate.ts";
 import type { Partitioned, XSpec } from "./partition.ts";
 import { partition } from "./partition.ts";
+import { runSurfaceForm } from "./surface/app.ts";
 
 const SCHEMA_VERSION = 1;
 
@@ -76,6 +77,34 @@ async function main(argv: string[]): Promise<number> {
   if (first === "--agent-teaser") {
     console.log(AGENT_TEASER);
     return 0;
+  }
+  // The surface form is its own modality — an interactive TUI that emits
+  // session directives instead of becoming a harness — so it routes before
+  // the launch grammar and shares nothing with it.
+  if (argv.includes("--x-surface")) {
+    if (argv.length > 1) {
+      console.error("--x-surface takes no other arguments");
+      console.error(TOP_HELP);
+      return 2;
+    }
+    if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
+      console.error("error: --x-surface opens an interactive form and needs a terminal");
+      return 1;
+    }
+    try {
+      return await runSurfaceForm(process.env, process.env["HOME"] ?? "");
+    } catch (error) {
+      const domain =
+        error instanceof CliError
+          ? error
+          : new CliError("internal_error", (error as Error).message || String(error));
+      console.error(`error: ${domain.message}`);
+      if (domain.recovery !== undefined) console.error(domain.recovery);
+      if (process.env["AGENTLAUNCH_DEBUG"] !== undefined && error instanceof Error) {
+        console.error(error.stack ?? "");
+      }
+      return 1;
+    }
   }
 
   let helpTopic: string;

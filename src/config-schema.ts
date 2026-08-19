@@ -62,8 +62,38 @@ const yoloSchema = z
     "Whether a launch stands each harness's own interactive permission gates down by injecting that harness's documented flag into the launch spec: --permission-mode auto for claude, --dangerously-bypass-approvals-and-sandbox for codex, --approve for pi. Omit the key (or the whole file) and every harness is ON. A bare boolean sets all three at once; an object sets them individually and leaves the unnamed ones on. Utility invocations never receive the flag, a spelling the caller already forwarded is not duplicated (claude's --dangerously-skip-permissions counts as one), and pi's own --no-approve — or any other --permission-mode the caller chose — is never overridden. `--x-yolo` and `--x-no-yolo` (optionally scoped to a harness, repeatable) override this per launch; an explicit --x-no-yolo also removes a yolo flag that was explicitly forwarded, narrated on stderr.",
   );
 
+const rootsSchema = z
+  .array(
+    z
+      .string()
+      .min(1)
+      .describe("One project root; ~ and ~/ expand to the operator's home directory."),
+  )
+  .min(1)
+  .describe(
+    "Parent directories the interactive form (--x-surface) scans one level deep for project directories, in scan order. Omitted entirely: ~/code and ~/src.",
+  );
+
+const primingSchema = z
+  .array(
+    z
+      .string()
+      .regex(
+        /^[a-z0-9][a-z0-9-]*$/,
+        "a priming is a bare skill name: lowercase letters, digits, hyphens",
+      )
+      .describe(
+        "One priming choice: a skill name the form prefixes onto the intent — /name for claude and pi, $name for codex.",
+      ),
+  )
+  .describe(
+    'Primings the interactive form offers beside "none", in order; the first is the default. Omitted: none are offered.',
+  );
+
 const configShape = {
   yolo: yoloSchema.optional(),
+  roots: rootsSchema.optional(),
+  priming: primingSchema.optional(),
 };
 
 /** What the loader validates: config contents with `$schema` already

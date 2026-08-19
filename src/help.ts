@@ -5,6 +5,7 @@ export const TOP_HELP = `agentlaunch — resolve, balance, and launch claude, co
 Usage:
   agentlaunch --x-harness <claude|codex|pi> [--x-level <model>:<effort>] [native tokens…]
   agentlaunch --x-level <model>:<effort> [native tokens…]
+  agentlaunch --x-surface
   agentlaunch x-resume <native-session-id> [--x-harness <name>] [native tokens…]
   agentlaunch x-doctor [--x-json]
   agentlaunch x-catalog [--x-json]
@@ -12,6 +13,10 @@ Usage:
 Commands:
   launch       Any invocation not beginning with x-. Resolve the harness,
                model, effort, yolo policy, and account, then become it.
+  --x-surface  One-screen interactive launch form. Instead of launching, each
+               submit emits a session directive to the file named by
+               AGENTSURFACE_DIRECTIVES, for a surface host (agentsurface) to
+               realize as a herdr session. Takes no other arguments.
   x-resume     Detect a native session store and resume in its recorded cwd.
   x-doctor     Report harness binaries, native stores, config, and catalog.
   x-catalog    Report the resolved catalog: models and efforts per harness.
@@ -140,6 +145,8 @@ Machine use
   - --x-json without --x-dry-run is a usage fault for interactive launches.
   - Domain failures are ok:false envelopes with exit 1; usage faults are help
     on stderr with exit 2; real launches adopt the native harness exit code.
+  - --x-surface is the operator's interactive form for a surface host; it
+    needs a TTY and AGENTSURFACE_DIRECTIVES, so agents should not run it.
 
 Examples
   agentlaunch --x-harness codex --x-dry-run --x-json
