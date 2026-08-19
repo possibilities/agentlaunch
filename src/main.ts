@@ -31,7 +31,10 @@ const YOLO_SCOPES: Array<[string, readonly string[]]> = [
 ];
 
 const LAUNCH_FLAGS: RouteFlags = {
-  value: ["--x-harness", "--x-level", "--x-account", "--x-prompt-file"],
+  // --x-resume is x-resume's flag spelling, for invokers that can only
+  // append arguments to the bare kind command (a herdr pane typing
+  // `claude --x-resume <id>` through the shim).
+  value: ["--x-harness", "--x-level", "--x-account", "--x-prompt-file", "--x-resume"],
   bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
   scoped: YOLO_SCOPES,
 };
@@ -150,7 +153,7 @@ async function main(argv: string[]): Promise<number> {
     own = argv;
     run = launchCommand;
   }
-  const helpText = HELP[helpTopic] ?? TOP_HELP;
+  let helpText = HELP[helpTopic] ?? TOP_HELP;
 
   let parts: Partitioned;
   try {
@@ -160,6 +163,21 @@ async function main(argv: string[]): Promise<number> {
     console.error(error.message);
     console.error(helpText);
     return 2;
+  }
+  // The launch route reroutes to resume when --x-resume names a session:
+  // the same resume as the x-resume command, reachable where only flags can
+  // ride. The session id moves to command position; a prompt file is
+  // refused, not ignored — a resumed session has no launch intent.
+  if (run === launchCommand && parts.values["x-resume"] !== undefined) {
+    if (parts.values["x-prompt-file"] !== undefined) {
+      console.error("--x-resume takes no --x-prompt-file: a resumed session has no launch intent");
+      console.error(HELP["x-resume"] ?? TOP_HELP);
+      return 2;
+    }
+    const { "x-resume": sessionId, ...values } = parts.values;
+    parts = { ...parts, values, harness: [sessionId, ...parts.harness] };
+    run = resumeCommand;
+    helpText = HELP["x-resume"] ?? TOP_HELP;
   }
   if (parts.bools.has("x-help")) {
     console.log(helpText);

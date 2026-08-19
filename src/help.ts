@@ -31,6 +31,7 @@ Common:
   --x-account <selector> Pin a balanced launch to an eligible account
   --x-no-balance         Run the native harness without the account stack
   --x-prompt-file <path> Append the file's text as the final native token
+  --x-resume <id>        x-resume as a flag, for arguments-only invokers
   --x-yolo [harness]     Enable the harness's unattended permission setting
   --x-no-yolo [harness]  Disable it; removes a forwarded positive spelling
   --x-dry-run            Print the resolved command instead of launching
@@ -106,6 +107,11 @@ Stores (environment overrides honored):
   pi      $PI_CODING_AGENT_DIR|~/.pi/agent/sessions/*/*_<id>.jsonl
 
 Pi resumes with --session <id>; its native --resume is a picker.
+
+--x-resume <id> on a launch invocation is the same resume as a flag, for
+invokers that can only append arguments to a bare kind command (a herdr
+pane typing through the fleet shim). It refuses --x-prompt-file: a resumed
+session has no launch intent.
 `,
   "x-surface": `agentlaunch --x-surface
 
