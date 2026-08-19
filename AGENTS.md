@@ -4,9 +4,11 @@ AgentLaunch is the fleet's public pre-launch resolver for Claude Code, Codex,
 and Pi. It chooses a harness/model/effort, applies yolo policy, balances an
 account, composes the native command, and executes it. `x-resume` reads native
 session stores to detect the harness and recover the session's cwd.
-`x-surface` opens the interactive launch form, which renders on stderr and
-writes session directives to stdout for a surface host instead of
-executing anything.
+`--x-surface` opens the interactive launch form: the same launch, spoken to
+a surface instead of executed — it renders on stderr and writes session
+directives to stdout for a surface host. Launching is the one job either
+way; the flag only redirects the outcome, and keeping the two outcomes
+consistent is this repository's responsibility.
 
 The boundary is strict: native harness behavior begins where AgentLaunch ends.
 This repository owns no agent names, identities, workspaces, panes, presence,
@@ -28,7 +30,8 @@ agentsurface — realizing a directive is entirely the host's.
 
 - `main.ts` owns top-level routing, strict per-route `--x-*` grammar, envelope
   rendering, and exit semantics. Routes are launch, `x-resume`, `x-doctor`,
-  `x-catalog`, and the `x-surface` form.
+  `x-catalog`, and the `--x-surface` form — a launch-modality flag, not a
+  command.
 - `surface/` is the interactive launch form and its handoff: a pure form
   model (`model.ts`), the OpenTUI shell (`app.ts`, rendering on stderr so
   stdout stays the host's), Signal Room theme, overlay, kill ring, project
@@ -72,7 +75,7 @@ agentsurface — realizing a directive is entirely the host's.
 - Dry-run balance must not claim capacity. Real Codex/Pi balance consumes the
   AgentUsage claim and passes it to codex-swap.
 - JSON is a single schema-versioned envelope on stdout. Narration is stderr;
-  usage faults are stderr/help and exit 2, never envelopes. The `x-surface`
+  usage faults are stderr/help and exit 2, never envelopes. The `--x-surface`
   directive stream is the one stated exception: schema-versioned directive
   lines for the host's pipe, never an envelope.
 - Installers refuse foreign files, unsafe paths, mismatched origins, and

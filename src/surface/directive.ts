@@ -2,7 +2,7 @@ import { CliError } from "../errors.ts";
 import type { LaunchPlan } from "./model.ts";
 
 /**
- * The surface handoff: under `x-surface`, a committed launch leaves as one
+ * The surface handoff: under `--x-surface`, a committed launch leaves as one
  * session directive — a JSON line written to stdout, which the host holds
  * as a pipe while the form renders on stderr — and the host realizes it on
  * the surface. AgentLaunch never calls herdr or agentsurface; the directive
@@ -62,8 +62,8 @@ export function assertHostedStdout(stdout: { isTTY?: boolean | undefined }): voi
   if (stdout.isTTY === true) {
     throw new CliError(
       "surface_host_missing",
-      "x-surface writes session directives to stdout, and stdout is a terminal",
-      "run the form under a surface host (agentsurface host -- agentlaunch x-surface)",
+      "--x-surface writes session directives to stdout, and stdout is a terminal",
+      "run the form under a surface host (agentsurface host -- agentlaunch --x-surface)",
     );
   }
 }

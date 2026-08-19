@@ -53,7 +53,7 @@ forwarded without inspection.
 ## Surface form
 
 ```sh
-agentlaunch x-surface
+agentlaunch --x-surface
 ```
 
 The one-screen interactive launcher: intent first, then project, worktree,
@@ -61,7 +61,7 @@ and the harness → model → effort cascade from the catalog. It runs under a
 surface host (agentsurface hosts it in a herdr popup) and never launches
 anything itself: the form renders on stderr, and each submitted launch is
 written to stdout as one session-directive JSON line for the host to
-realize as a herdr session. The form takes no arguments, needs a terminal
+realize as a herdr session. The form takes no other arguments, needs a terminal
 on stdin and stderr, and refuses a stdout that is a terminal — that means
 no host is reading. Project roots and priming choices come from the config
 (`roots`, `priming`); an interrupted form is restored from its draft on the

@@ -78,18 +78,22 @@ async function main(argv: string[]): Promise<number> {
     console.log(AGENT_TEASER);
     return 0;
   }
-  // The surface form is its own modality — an interactive TUI that emits
-  // session directives on stdout instead of becoming a harness — so it
-  // routes as its own x-command and shares nothing with the launch grammar.
-  if (first === "x-surface") {
+  // --x-surface is a launch modality, not a command: AgentLaunch does one
+  // thing — launch agents — and this flag redirects the outcome from
+  // becoming the harness to describing the session for a surface host as
+  // directives on stdout. The same launch, spoken in the surface's
+  // language; keeping the two outcomes consistent is this repository's
+  // responsibility, which is why the spelling stays a flag rather than a
+  // second command.
+  if (argv.includes("--x-surface")) {
     const helpText = HELP["x-surface"] ?? TOP_HELP;
-    const rest = argv.slice(1);
+    const rest = argv.filter((token) => token !== "--x-surface");
     if (rest.length === 1 && rest[0] === "--x-help") {
       console.log(helpText);
       return 0;
     }
     if (rest.length > 0) {
-      console.error("x-surface takes no arguments");
+      console.error("--x-surface takes no other arguments");
       console.error(helpText);
       return 2;
     }
@@ -97,7 +101,7 @@ async function main(argv: string[]): Promise<number> {
     // host's, checked as the surface contract inside the form itself.
     if (process.stdin.isTTY !== true || process.stderr.isTTY !== true) {
       console.error(
-        "error: x-surface opens an interactive form and needs a terminal on stdin and stderr",
+        "error: --x-surface opens an interactive form and needs a terminal on stdin and stderr",
       );
       return 1;
     }

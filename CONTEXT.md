@@ -23,11 +23,12 @@ deletes it. _Avoid_: intent file (the intent is the surface form's word for
 what the operator typed; a surface host spools it into a prompt file when it
 realizes a directive).
 
-**Surface form** — The interactive one-screen launcher `x-surface` opens:
+**Surface form** — The interactive one-screen launcher `--x-surface` opens:
 intent first, then project, worktree, and the harness → model → effort cascade
 from the catalog. It renders on stderr and emits session directives on stdout
-instead of becoming a harness. _Avoid_: launcher popup (the popup is the
-host's chrome, not this form).
+instead of becoming a harness — the same launch with a different outcome,
+which is why the activator is a flag and not a command. _Avoid_: launcher
+popup (the popup is the host's chrome, not this form).
 
 **Session directive** — One schema-versioned JSON line describing a session
 for a surface host to realize: cwd, worktree, focus, the agent kind with its
@@ -35,7 +36,7 @@ launch arguments, the composed intent, and opaque record extras. The
 `surface-handoff-protocol` wiki page is the contract. _Avoid_: launch plan
 (the plan is form state; the directive is what leaves).
 
-**Directive stream** — stdout under `x-surface`: the host holds it as a pipe
+**Directive stream** — stdout under `--x-surface`: the host holds it as a pipe
 while the form renders on stderr, and the form writes one directive line per
 committed launch, owning nothing past the write. A stdout that is a terminal
 means no host is reading, and the form refuses to open. _Avoid_: sink file
