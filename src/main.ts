@@ -79,16 +79,26 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
   // The surface form is its own modality — an interactive TUI that emits
-  // session directives instead of becoming a harness — so it routes before
-  // the launch grammar and shares nothing with it.
-  if (argv.includes("--x-surface")) {
-    if (argv.length > 1) {
-      console.error("--x-surface takes no other arguments");
-      console.error(TOP_HELP);
+  // session directives on stdout instead of becoming a harness — so it
+  // routes as its own x-command and shares nothing with the launch grammar.
+  if (first === "x-surface") {
+    const helpText = HELP["x-surface"] ?? TOP_HELP;
+    const rest = argv.slice(1);
+    if (rest.length === 1 && rest[0] === "--x-help") {
+      console.log(helpText);
+      return 0;
+    }
+    if (rest.length > 0) {
+      console.error("x-surface takes no arguments");
+      console.error(helpText);
       return 2;
     }
-    if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
-      console.error("error: --x-surface opens an interactive form and needs a terminal");
+    // The form renders on stderr and reads keys from stdin; stdout is the
+    // host's, checked as the surface contract inside the form itself.
+    if (process.stdin.isTTY !== true || process.stderr.isTTY !== true) {
+      console.error(
+        "error: x-surface opens an interactive form and needs a terminal on stdin and stderr",
+      );
       return 1;
     }
     try {

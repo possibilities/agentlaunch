@@ -4,8 +4,9 @@ AgentLaunch is the fleet's public pre-launch resolver for Claude Code, Codex,
 and Pi. It chooses a harness/model/effort, applies yolo policy, balances an
 account, composes the native command, and executes it. `x-resume` reads native
 session stores to detect the harness and recover the session's cwd.
-`--x-surface` opens the interactive launch form, which emits session
-directives for a surface host instead of executing anything.
+`x-surface` opens the interactive launch form, which renders on stderr and
+writes session directives to stdout for a surface host instead of
+executing anything.
 
 The boundary is strict: native harness behavior begins where AgentLaunch ends.
 This repository owns no agent names, identities, workspaces, panes, presence,
@@ -27,12 +28,14 @@ agentsurface — realizing a directive is entirely the host's.
 
 - `main.ts` owns top-level routing, strict per-route `--x-*` grammar, envelope
   rendering, and exit semantics. Routes are launch, `x-resume`, `x-doctor`,
-  and the `--x-surface` form.
+  `x-catalog`, and the `x-surface` form.
 - `surface/` is the interactive launch form and its handoff: a pure form
-  model (`model.ts`), the OpenTUI shell (`app.ts`), Signal Room theme,
-  overlay, kill ring, project scan, form-side state, and `directive.ts` —
-  session directives appended to the sink named by `AGENTSURFACE_DIRECTIVES`.
-  The `surface-handoff-protocol` wiki page is the protocol contract.
+  model (`model.ts`), the OpenTUI shell (`app.ts`, rendering on stderr so
+  stdout stays the host's), Signal Room theme, overlay, kill ring, project
+  scan, form-side state, and `directive.ts` — session directives written to
+  stdout as JSON lines, refused when stdout is a terminal (no host is
+  reading). The `surface-handoff-protocol` wiki page is the protocol
+  contract.
 - `commands.ts` resolves launch/resume decisions and produces either a native
   launch spec or a result. Keep it free of post-launch state.
 - `partition.ts` claims known `--x-*` tokens anywhere and forwards every other
@@ -56,9 +59,8 @@ agentsurface — realizing a directive is entirely the host's.
 
 - No AgentSurface runtime coupling: never spawn agentsurface or herdr, and
   never read surface state. Product paths and environment variables are
-  `agentlaunch` / `AGENTLAUNCH_*` only, with one deliberate exception —
-  `AGENTSURFACE_DIRECTIVES` is read as the surface host's contract variable,
-  and only by the `--x-surface` form.
+  `agentlaunch` / `AGENTLAUNCH_*` only; the surface handoff is exactly the
+  stdout directive stream, nothing environmental.
 - A native `--name` is forwarded untouched. Do not parse, inject, deduplicate,
   narrate, persist, or assign meaning to it.
 - `x-resume` accepts a native session ID only. No `run:` references or local
@@ -70,7 +72,9 @@ agentsurface — realizing a directive is entirely the host's.
 - Dry-run balance must not claim capacity. Real Codex/Pi balance consumes the
   AgentUsage claim and passes it to codex-swap.
 - JSON is a single schema-versioned envelope on stdout. Narration is stderr;
-  usage faults are stderr/help and exit 2, never envelopes.
+  usage faults are stderr/help and exit 2, never envelopes. The `x-surface`
+  directive stream is the one stated exception: schema-versioned directive
+  lines for the host's pipe, never an envelope.
 - Installers refuse foreign files, unsafe paths, mismatched origins, and
   uncorroborated receipts. Tests use temporary roots only.
 
@@ -89,8 +93,8 @@ bash scripts/smoke.sh
 Also grep tracked current files for removed product terms. Historical Git
 commits retain the AgentSurface lineage by design; the current tree must not
 contain its runtime concepts — herdr calls, agent names, workspaces, panes.
-The directive vocabulary (`AGENTSURFACE_DIRECTIVES`, worktree/focus fields,
-the surface form) is legitimate handoff language, not a regression.
+The directive vocabulary (worktree/focus fields, the surface form) is
+legitimate handoff language, not a regression.
 
 ## The fleet
 

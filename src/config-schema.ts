@@ -71,7 +71,7 @@ const rootsSchema = z
   )
   .min(1)
   .describe(
-    "Parent directories the interactive form (--x-surface) scans one level deep for project directories, in scan order. Omitted entirely: ~/code and ~/src.",
+    "Parent directories the interactive form (x-surface) scans one level deep for project directories, in scan order. Omitted entirely: ~/code and ~/src.",
   );
 
 const primingSchema = z

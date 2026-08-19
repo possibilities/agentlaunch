@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { type Catalog, loadCatalog } from "../catalog.ts";
 import { loadConfig } from "../config.ts";
 import type { Environ } from "../paths.ts";
-import { appendDirective, buildDirective, directiveSink } from "./directive.ts";
+import { assertHostedStdout, buildDirective, directiveLine } from "./directive.ts";
 import { createKillRing, killDirectionFor, pushKill, removedText, ringEntry } from "./killring.ts";
 import {
   buildFormLines,
@@ -47,9 +47,11 @@ import { GLYPHS, type Line, SIGNAL_ROOM } from "./theme.ts";
 
 /**
  * The form shell: gathers inputs, runs the form on the alternate screen,
- * and appends a session directive per committed launch — the host tailing
- * the sink owns everything after that, so a focused submit closes at once.
- * Everything decidable without a terminal lives in model.ts.
+ * and writes a session directive line to stdout per committed launch — the
+ * host reading the pipe owns everything after that, so a focused submit
+ * closes at once. The renderer draws on stderr (the popup tty the host
+ * inherits), which is what leaves stdout free for the directive stream;
+ * everything decidable without a terminal lives in model.ts.
  */
 interface IntentBinding {
   name: string;
@@ -123,7 +125,7 @@ export function formHarnesses(catalog: Catalog): FormHarness[] {
 export async function runSurfaceForm(env: Environ, home: string): Promise<number> {
   // Everything fallible happens before the alternate screen, so a failure
   // prints plainly where the host can hold it on screen.
-  const sink = directiveSink(env);
+  assertHostedStdout(process.stdout);
   const config = loadConfig(env, home);
   const harnesses = formHarnesses(loadCatalog(env, home));
   const submittedPath = submittedLogPath(env, home);
@@ -148,7 +150,12 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
   // @opentui/core is imported dynamically only — its platform-native package
   // top-level-awaits and races under parallel test isolation.
   const core = await import("@opentui/core");
+  // The renderer draws on stderr: stdout is the host's directive channel.
+  // Console capture stays off so nothing else can reach stdout either —
+  // which also means no stray console.log may ever appear in this module.
   const renderer = await core.createCliRenderer({
+    stdout: process.stderr as unknown as NodeJS.WriteStream,
+    consoleMode: "disabled",
     exitOnCtrlC: false,
     screenMode: "alternate-screen",
     targetFps: 30,
@@ -156,6 +163,13 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
     exitSignals: ["SIGTERM", "SIGHUP", "SIGQUIT"],
     backgroundColor: SIGNAL_ROOM.canvas,
   });
+  // Off process.stdout, the renderer does not watch SIGWINCH itself; its
+  // resize() is documented for exactly this externally-driven case. The
+  // listener registers beside the paint loop, once paint exists.
+  const onResize = (): void => {
+    renderer.resize(process.stderr.columns ?? 80, process.stderr.rows ?? 24);
+    paint();
+  };
 
   const root = new core.BoxRenderable(renderer, {
     id: "launch-root",
@@ -376,6 +390,7 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
     if (closed) return;
     closed = true;
     if (interval !== null) clearInterval(interval);
+    process.removeListener("SIGWINCH", onResize);
     renderer.destroy();
     done(code);
   };
@@ -490,7 +505,7 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
     // The wrap width is set explicitly to the padded content box minus the
     // rail: left to flex, the field measures against the frame's full
     // width and wraps columns past the popup's edge before snapping back.
-    intent.width = Math.max(8, (process.stdout.columns ?? 80) - 6);
+    intent.width = Math.max(8, (process.stderr.columns ?? 80) - 6);
     // lineInfo reports the native wrap layout independent of the current
     // height (virtualLineCount is viewport-capped and cannot grow it).
     const intentRows = Math.max(1, Math.min(8, intent.lineInfo.lineWraps.length));
@@ -524,8 +539,8 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
   };
 
   const paint = (): void => {
-    const columns = process.stdout.columns ?? 80;
-    const rows = renderer.height || process.stdout.rows || 24;
+    const columns = process.stderr.columns ?? 80;
+    const rows = renderer.height || process.stderr.rows || 24;
     const width = Math.max(36, columns - 4);
     syncIntent();
     paintBody(buildFormLines(state, width));
@@ -666,7 +681,7 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
     }
     submitting = true;
     try {
-      appendDirective(sink, buildDirective(plan, focus));
+      process.stdout.write(directiveLine(buildDirective(plan, focus)));
     } catch (error) {
       submitting = false;
       failRun(state, error instanceof Error ? error.message : String(error));
@@ -814,6 +829,7 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
     }
   });
 
+  process.on("SIGWINCH", onResize);
   interval = setInterval(paint, 500);
   paint();
   return await finished;

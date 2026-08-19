@@ -1,30 +1,13 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { describe, expect, test } from "bun:test";
 import type { CliError } from "../src/errors.ts";
 import {
-  appendDirective,
+  assertHostedStdout,
   buildDirective,
   DIRECTIVE_SCHEMA_VERSION,
-  DIRECTIVE_SINK_ENV,
-  directiveSink,
+  directiveLine,
   primedIntent,
 } from "../src/surface/directive.ts";
 import type { LaunchPlan } from "../src/surface/model.ts";
-
-let temps: string[] = [];
-
-afterEach(() => {
-  for (const temp of temps) rmSync(temp, { recursive: true, force: true });
-  temps = [];
-});
-
-function sinkPath(): string {
-  const temp = mkdtempSync(join(tmpdir(), "agentlaunch-directive-"));
-  temps.push(temp);
-  return join(temp, "spool", "directives.jsonl");
-}
 
 const PLAN: LaunchPlan = {
   project: { path: "/code/alpha", display: "~/code/alpha", count: 0 },
@@ -78,29 +61,30 @@ describe("buildDirective", () => {
   });
 });
 
-describe("directiveSink", () => {
-  test("names the host's sink and refuses to run without one", () => {
-    expect(directiveSink({ [DIRECTIVE_SINK_ENV]: "/tmp/sink.jsonl" })).toBe("/tmp/sink.jsonl");
-    for (const env of [{}, { [DIRECTIVE_SINK_ENV]: "" }]) {
-      let caught: unknown;
-      try {
-        directiveSink(env);
-      } catch (error) {
-        caught = error;
-      }
-      expect((caught as CliError).code).toBe("surface_host_missing");
-    }
+describe("directiveLine", () => {
+  test("one directive, one newline-terminated JSON line, whatever the intent holds", () => {
+    const wild = buildDirective(
+      { ...PLAN, prompt: "line one\nline two\ttabbed", priming: "collab" },
+      false,
+    );
+    const line = directiveLine(wild);
+    expect(line.endsWith("\n")).toBe(true);
+    expect(line.slice(0, -1)).not.toContain("\n");
+    expect(JSON.parse(line)).toEqual(wild);
   });
 });
 
-describe("appendDirective", () => {
-  test("appends one JSON line per directive, in order", () => {
-    const path = sinkPath();
-    appendDirective(path, buildDirective(PLAN, false));
-    appendDirective(path, buildDirective({ ...PLAN, worktree: true }, true));
-    const lines = readFileSync(path, "utf8").trim().split("\n");
-    expect(lines).toHaveLength(2);
-    expect(JSON.parse(lines[0] ?? "").worktree).toBe(false);
-    expect(JSON.parse(lines[1] ?? "")).toMatchObject({ worktree: true, focus: true });
+describe("assertHostedStdout", () => {
+  test("a piped stdout passes; a terminal stdout refuses with the host recovery", () => {
+    expect(() => assertHostedStdout({ isTTY: undefined })).not.toThrow();
+    expect(() => assertHostedStdout({ isTTY: false })).not.toThrow();
+    let caught: unknown;
+    try {
+      assertHostedStdout({ isTTY: true });
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as CliError).code).toBe("surface_host_missing");
+    expect((caught as CliError).recovery).toContain("agentsurface host");
   });
 });

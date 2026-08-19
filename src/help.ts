@@ -5,7 +5,7 @@ export const TOP_HELP = `agentlaunch — resolve, balance, and launch claude, co
 Usage:
   agentlaunch --x-harness <claude|codex|pi> [--x-level <model>:<effort>] [native tokens…]
   agentlaunch --x-level <model>:<effort> [native tokens…]
-  agentlaunch --x-surface
+  agentlaunch x-surface
   agentlaunch x-resume <native-session-id> [--x-harness <name>] [native tokens…]
   agentlaunch x-doctor [--x-json]
   agentlaunch x-catalog [--x-json]
@@ -13,10 +13,10 @@ Usage:
 Commands:
   launch       Any invocation not beginning with x-. Resolve the harness,
                model, effort, yolo policy, and account, then become it.
-  --x-surface  One-screen interactive launch form. Instead of launching, each
-               submit emits a session directive to the file named by
-               AGENTSURFACE_DIRECTIVES, for a surface host (agentsurface) to
-               realize as a herdr session. Takes no other arguments.
+  x-surface    One-screen interactive launch form. Renders on stderr and,
+               instead of launching, writes one session-directive JSON line
+               to stdout per submit, for a surface host (agentsurface) to
+               realize as a herdr session. Takes no arguments.
   x-resume     Detect a native session store and resume in its recorded cwd.
   x-doctor     Report harness binaries, native stores, config, and catalog.
   x-catalog    Report the resolved catalog: models and efforts per harness.
@@ -106,6 +106,22 @@ Stores (environment overrides honored):
 
 Pi resumes with --session <id>; its native --resume is a picker.
 `,
+  "x-surface": `agentlaunch x-surface
+
+The one-screen interactive launch form: intent first, then project,
+worktree, and the harness → model → effort cascade from the catalog. It
+runs under a surface host — agentsurface hosts it in a herdr popup — and
+never launches anything itself: the form renders on stderr, and each
+submitted launch is written to stdout as one session-directive JSON line
+(the checked-in schema is agentsurface's directive.schema.json; the
+surface-handoff-protocol wiki page is the contract). The host reads the
+pipe and realizes each directive as a herdr session.
+
+Takes no arguments. Needs a terminal on stdin and stderr, and refuses a
+stdout that is a terminal — that means no host is reading. Project roots
+and priming choices come from the config ("roots", "priming"); an
+interrupted form is restored from its draft on the next open.
+`,
   "x-doctor": `agentlaunch x-doctor [--x-json]
 
 Report each native harness binary, session-store path and count, active store
@@ -145,8 +161,9 @@ Machine use
   - --x-json without --x-dry-run is a usage fault for interactive launches.
   - Domain failures are ok:false envelopes with exit 1; usage faults are help
     on stderr with exit 2; real launches adopt the native harness exit code.
-  - --x-surface is the operator's interactive form for a surface host; it
-    needs a TTY and AGENTSURFACE_DIRECTIVES, so agents should not run it.
+  - x-surface is the operator's interactive form for a surface host; it
+    needs a TTY on stdin/stderr and a host reading stdout, so agents should
+    not run it.
 
 Examples
   agentlaunch --x-harness codex --x-dry-run --x-json
