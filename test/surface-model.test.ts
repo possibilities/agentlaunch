@@ -149,16 +149,18 @@ describe("the cascade", () => {
     expect(currentEffort(state)).toBe("low");
   });
 
-  test("arrows clamp at the list's ends, matching the menus", () => {
+  test("arrows wrap at the list's ends, matching the menus", () => {
     const state = form();
     state.focus = "project";
     handleFormKey(state, key("left"));
+    expect(state.projectIndex).toBe(state.projects.length - 1);
+    handleFormKey(state, key("right"));
     expect(state.projectIndex).toBe(0);
     state.focus = "effort";
     setEffort(state, 4);
     expect(currentEffort(state)).toBe("max");
     handleFormKey(state, key("right"));
-    expect(currentEffort(state)).toBe("max");
+    expect(currentEffort(state)).toBe(currentModel(state).efforts[0]!);
   });
 });
 

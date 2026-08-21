@@ -218,12 +218,16 @@ function moveFocus(state: FormState, delta: number): void {
 
 function step(index: number, delta: number, length: number): number {
   if (length === 0) return 0;
-  return Math.max(0, Math.min(length - 1, index + delta));
+  const next = index + delta;
+  if (next < 0) return index === 0 ? length - 1 : 0;
+  if (next >= length) return index === length - 1 ? 0 : length - 1;
+  return next;
 }
 
 /** Step the focused row's value — the arrows' and the wheel's shared verb.
- * Clamped at the ends like the chooser menus, never wrapping: an edge
- * press stays put instead of teleporting across the list. */
+ * Wraps at the ends like the chooser menus: a step past the last option
+ * cycles to the first and back. Only an exact edge press wraps — a larger
+ * jump clamps to the end first. */
 export function stepValue(state: FormState, delta: number): void {
   switch (state.focus) {
     case "project":
