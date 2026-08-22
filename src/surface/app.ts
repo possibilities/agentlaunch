@@ -611,7 +611,10 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
 
   /** The way the harnesses do it: suspend the TUI, hand the intent to
    * $EDITOR (VISUAL first, its arguments honored through the shell), and
-   * read the answer back on exit. */
+   * read the answer back on exit. The editor draws where the form draws:
+   * stdout is the host's directive pipe, never a terminal, so an inherited
+   * stdout would send the editor's screen down the pipe and leave the
+   * terminal blank. */
   let editing = false;
   const editIntent = async (): Promise<void> => {
     if (editing || state.phase.kind !== "form") return;
@@ -625,7 +628,7 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
       try {
         const proc = Bun.spawn(["/bin/sh", "-c", `${editor} "$1"`, "sh", file], {
           stdin: "inherit",
-          stdout: "inherit",
+          stdout: process.stderr.fd,
           stderr: "inherit",
           env: env as Record<string, string>,
         });
