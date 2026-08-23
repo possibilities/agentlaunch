@@ -140,6 +140,7 @@ describe("capability selection and projection", () => {
       harness,
       command: [harness, "prompt"],
       sessionId: null,
+      transport: harness === "codex" ? "codex-remote" : "native",
     });
     expect(set.claudePluginDir).not.toBeNull();
     expect(set.guidanceFile).not.toBeNull();
@@ -151,6 +152,24 @@ describe("capability selection and projection", () => {
       set.guidanceFile as string,
     ]);
     expect(applyCapabilityArguments(open("codex"), set)).toEqual(open("codex"));
+    const codexExec = applyCapabilityArguments(
+      {
+        harness: "codex",
+        command: ["codex", "--model", "gpt-x", "exec", "prompt"],
+        sessionId: null,
+        transport: "native",
+      },
+      set,
+    ).command;
+    expect(codexExec.slice(0, 4)).toEqual(["codex", "--model", "gpt-x", "exec"]);
+    expect(codexExec).toContain('plugins."agent@agentstart-managed".enabled=false');
+    expect(codexExec).toContain(
+      `skills.config=[{"path":${JSON.stringify(
+        join(set.root, "skills", "collab", "SKILL.md"),
+      )},"enabled":true}]`,
+    );
+    expect(codexExec).toContain('developer_instructions="<!-- capability:common -->\\nguide\\n"');
+    expect(codexExec[codexExec.length - 1]).toBe("prompt");
     const pi = applyCapabilityArguments(open("pi"), set).command;
     expect(pi.slice(0, 4)).toEqual([
       "pi",

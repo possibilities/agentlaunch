@@ -1,11 +1,12 @@
 # 0030: Compose capabilities around native stores
 
 AgentLaunch renders AgentStart capability packs through each harness's
-session-native surface: a synthetic Claude `agent` plugin, process-local Codex
-skill roots set on an ephemeral account-bound App Server, and explicit Pi
-resource paths. It stores only pack receipts beside its own state; Claude,
-Codex, and Pi keep their canonical history stores so native resume,
-cross-account resume, and external indexing remain one merged history.
+session-native surface: a synthetic Claude `agent` plugin, process-local skill
+roots on an ephemeral account-bound App Server for interactive Codex, exact
+command-local config for non-interactive Codex, and explicit Pi resource
+paths. It stores only pack receipts beside its own state; Claude, Codex, and Pi
+keep their canonical history stores so native resume, cross-account resume,
+and external indexing remain one merged history.
 
 The Codex server is a caller-owned foreground invocation over codex-swap's
 public `run` contract: codex-swap pins the selected account and heartbeats the
@@ -15,6 +16,14 @@ registry, or attach lifecycle is introduced. After setting extra roots,
 AgentLaunch also supplies session-flag `skills.config` entries for the exact
 selected `SKILL.md` paths, so those skills win over lower-layer user disable
 rules without globally installing them.
+
+The App Server transport is exclusive to Codex's interactive TUI. Codex
+`exec` (including `e`) and `review` are account-bound model sessions but their
+CLI rejects `--remote`; AgentLaunch therefore keeps those commands inside the
+ordinary codex-swap `run` pin and injects the same exact `skills.config`,
+compatibility-plugin disable, and merged guidance directly into the native
+non-interactive command. Session classification still controls balancing and
+receipts; transport classification only decides whether an App Server exists.
 
 The account-bound App Server spawn also removes the retired sidecar
 environment's runtime-proxy kill switches. Long-lived parent sessions may

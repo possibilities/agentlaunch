@@ -1,6 +1,10 @@
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { type CapabilitySet, writeCapabilityReceipt } from "./capabilities.ts";
+import {
+  type CapabilitySet,
+  codexSkillPolicyArguments,
+  writeCapabilityReceipt,
+} from "./capabilities.ts";
 import { type CodexAppServerClient, connectCodexAppServer } from "./codex-app-server.ts";
 import { CliError } from "./errors.ts";
 import { type HarnessName, type LaunchSpec, sessionFileFacts, sessionStore } from "./harness.ts";
@@ -15,7 +19,6 @@ const SIGNAL_EXIT: Record<string, number> = {
   SIGTERM: 143,
 };
 
-const DISABLE_COMPATIBILITY_PLUGIN = 'plugins."agent@agentstart-managed".enabled=false';
 const REMOTE_CLIENT_PROVIDER = [
   "-c",
   'model_provider="agentlaunch-remote"',
@@ -37,7 +40,7 @@ export async function launch(
   home = env["HOME"] ?? "",
   capabilities: CapabilitySet | null = null,
 ): Promise<number> {
-  if (spec.harness === "codex" && capabilities !== null) {
+  if (spec.harness === "codex" && spec.transport === "codex-remote" && capabilities !== null) {
     return launchCodex(spec, capabilities, narrator, env, cwd, home);
   }
 
@@ -160,23 +163,7 @@ export function codexAppServerCommand(
   endpoint: string,
   skills: CapabilitySet["skills"],
 ): string[] {
-  const skillPolicy =
-    skills.length === 0
-      ? []
-      : [
-          "-c",
-          `skills.config=${JSON.stringify(
-            skills.map((skill) => ({ path: join(skill.path, "SKILL.md"), enabled: true })),
-          )}`,
-        ];
-  const serverArgs = [
-    "-c",
-    DISABLE_COMPATIBILITY_PLUGIN,
-    ...skillPolicy,
-    "app-server",
-    "--listen",
-    endpoint,
-  ];
+  const serverArgs = [...codexSkillPolicyArguments(skills), "app-server", "--listen", endpoint];
   const command = spec.command;
   if (command[0] === "codex") return ["codex", ...serverArgs];
   if (command[0] !== "codex-swap") {

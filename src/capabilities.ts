@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { CliError, UsageError } from "./errors.ts";
-import type { HarnessName, LaunchSpec } from "./harness.ts";
+import { codexNonInteractiveCommandIndex, type HarnessName, type LaunchSpec } from "./harness.ts";
 import type { Partitioned } from "./partition.ts";
 import { dataDirectory, type Environ, stateDirectory } from "./paths.ts";
 
@@ -60,6 +60,22 @@ export interface CapabilitySet {
   piExtensions: string[];
   piPromptTemplates: string[];
   receiptRequired: boolean;
+}
+
+export const CODEX_DISABLE_COMPATIBILITY_PLUGIN =
+  'plugins."agent@agentstart-managed".enabled=false';
+
+export function codexSkillPolicyArguments(skills: CapabilitySet["skills"]): string[] {
+  const args = ["-c", CODEX_DISABLE_COMPATIBILITY_PLUGIN];
+  if (skills.length > 0) {
+    args.push(
+      "-c",
+      `skills.config=${JSON.stringify(
+        skills.map((skill) => ({ path: join(skill.path, "SKILL.md"), enabled: true })),
+      )}`,
+    );
+  }
+  return args;
 }
 
 interface Receipt {
@@ -158,10 +174,32 @@ export function resolveCapabilities(
 }
 
 export function applyCapabilityArguments(spec: LaunchSpec, set: CapabilitySet): LaunchSpec {
-  if (spec.harness === "codex") return spec;
   const [bin, ...native] = spec.command;
   if (bin === undefined) return spec;
   const args: string[] = [];
+  if (spec.harness === "codex") {
+    if (spec.transport === "codex-remote") return spec;
+    const commandIndex = codexNonInteractiveCommandIndex(native);
+    if (commandIndex === null) {
+      throw new CliError(
+        "codex_launch_shape",
+        `native Codex capability launch has no exec, e, or review command: ${spec.command.join(" ")}`,
+      );
+    }
+    args.push(...codexSkillPolicyArguments(set.skills));
+    if (set.guidance !== "") {
+      args.push("-c", `developer_instructions=${JSON.stringify(set.guidance)}`);
+    }
+    return {
+      ...spec,
+      command: [
+        bin,
+        ...native.slice(0, commandIndex + 1),
+        ...args,
+        ...native.slice(commandIndex + 1),
+      ],
+    };
+  }
   if (spec.harness === "claude") {
     if (set.claudePluginDir !== null) args.push("--plugin-dir", set.claudePluginDir);
     if (set.guidanceFile !== null) args.push("--append-system-prompt-file", set.guidanceFile);

@@ -156,10 +156,15 @@ export function effortDimensionToken(
 }
 
 /** The native command AgentLaunch will execute. */
+export type LaunchTransport = "native" | "codex-remote";
+
 export interface LaunchSpec {
   harness: HarnessName;
   command: string[];
   sessionId: string | null;
+  /** Only an interactive Codex TUI can attach to the managed App Server.
+   * Non-interactive Codex sessions keep the native process transport. */
+  transport: LaunchTransport;
 }
 
 /**
@@ -300,8 +305,61 @@ export function applyYolo(
   };
 }
 
+const CODEX_NON_INTERACTIVE_COMMANDS = new Set(["exec", "e", "review"]);
+const CODEX_GLOBAL_VALUE_FLAGS = new Set([
+  "-c",
+  "--config",
+  "--enable",
+  "--disable",
+  "--remote",
+  "--remote-auth-token-env",
+  "-i",
+  "--image",
+  "-m",
+  "--model",
+  "--local-provider",
+  "-p",
+  "--profile",
+  "-s",
+  "--sandbox",
+  "-C",
+  "--cd",
+  "--add-dir",
+  "-a",
+  "--ask-for-approval",
+]);
+const CODEX_ATTACHED_VALUE_FLAGS = ["-c", "-i", "-m", "-p", "-s", "-C", "-a"];
+
+/** Index of Codex's non-interactive top-level command after global options.
+ * The launcher calls this both before and after its own global injections, so
+ * `codex exec`, `codex -m gpt-x exec`, and the fully resolved command agree. */
+export function codexNonInteractiveCommandIndex(tokens: readonly string[]): number | null {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token === "--") return null;
+    if (CODEX_GLOBAL_VALUE_FLAGS.has(token)) {
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--") || token === "-V" || token === "-h") continue;
+    if (
+      CODEX_ATTACHED_VALUE_FLAGS.some(
+        (flag) => token.startsWith(flag) && token.length > flag.length,
+      )
+    ) {
+      continue;
+    }
+    return CODEX_NON_INTERACTIVE_COMMANDS.has(token) ? index : null;
+  }
+  return null;
+}
+
 export function buildOpen(harness: HarnessName, tokens: string[]): LaunchSpec {
-  return { harness, command: [harness, ...tokens], sessionId: null };
+  const transport =
+    harness === "codex" && codexNonInteractiveCommandIndex(tokens) === null
+      ? "codex-remote"
+      : "native";
+  return { harness, command: [harness, ...tokens], sessionId: null, transport };
 }
 
 /**
@@ -388,7 +446,12 @@ export function buildResume(harness: HarnessName, sessionId: string, tokens: str
       : harness === "codex"
         ? ["codex", "resume", sessionId]
         : ["pi", "--session", sessionId];
-  return { harness, command: [...base, ...tokens], sessionId };
+  return {
+    harness,
+    command: [...base, ...tokens],
+    sessionId,
+    transport: harness === "codex" ? "codex-remote" : "native",
+  };
 }
 
 export interface SessionFileFacts {

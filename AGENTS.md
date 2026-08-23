@@ -61,9 +61,11 @@ agentsurface — realizing a directive is entirely the host's.
   projections, injects harness-native resources, and owns capability receipts.
 - `launch.ts` resolves final executables, supervises the per-launch Codex App
   Server through codex-swap's foreground account-pin contract when needed,
-  sets exact skill policy, sets `AGENTLAUNCH_LAUNCH=1`, connects the terminal,
-  and adopts native exit status/signal semantics. `codex-app-server.ts` and
-  `unix-websocket.ts` are its owner-only control connection.
+  sets exact skill policy, keeps Codex `exec`/`e`/`review` on their native
+  non-interactive transport, sets `AGENTLAUNCH_LAUNCH=1`, connects the
+  terminal, and adopts native exit status/signal semantics.
+  `codex-app-server.ts` and `unix-websocket.ts` are its owner-only control
+  connection.
 - `help.ts`, `README.md`, and `CONTEXT.md` are product contract, operator guide,
   and vocabulary. Removed AgentSurface concepts must not reappear there.
 
@@ -82,6 +84,10 @@ agentsurface — realizing a directive is entirely the host's.
 - Every managed session includes `common` unless `--x-no-common` is explicit.
   Claude projects it as `/agent:<skill>`, Codex as bare `$skill`, and Pi as
   bare `/skill`. Utility invocations receive no capability arguments.
+- Codex's managed App Server is a TUI transport only. `exec`, its `e` alias,
+  and `review` remain account-balanced sessions and receive the same exact
+  skill/guidance config on their native non-interactive invocation; they must
+  never receive `--remote`.
 - A real launch always either balances successfully or fails; never silently
   fall back to unbalanced. Utility invocations and explicit no-balance are the
   stated exceptions.

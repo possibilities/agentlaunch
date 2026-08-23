@@ -54,8 +54,9 @@ plugin), global skill.
 
 **Session projection** — The immutable, content-addressed rendering of one
 resolved capability set for one harness launch. Claude receives an `agent`
-plugin, Codex receives standalone skill roots through its App Server, and Pi
-receives explicit resource paths with ambient discovery disabled. _Avoid_:
+plugin, interactive Codex receives standalone skill roots through its App
+Server, non-interactive Codex receives exact command-local skill config, and
+Pi receives explicit resource paths with ambient discovery disabled. _Avoid_:
 install (a projection is selected, not globally registered).
 
 **Capability receipt** — AgentLaunch bookkeeping keyed by a native session ID,
@@ -68,8 +69,9 @@ supervises for one interactive Codex TUI so it can set process-local skill
 roots before the native client connects. The TUI remains native and connects
 with `codex --remote`; codex-swap pins the foreground server through its
 ordinary `run`/lease contract, while AgentLaunch owns the listener, client,
-and lifetime. _Avoid_: embedded Codex, resident server, alternate session
-store.
+and lifetime. It is never used for `codex exec`, `codex e`, or `codex review`,
+whose CLI contract rejects `--remote`. _Avoid_: embedded Codex, resident
+server, alternate session store.
 
 **Native session** — A conversation owned and persisted by the harness. Its ID,
 metadata, name (if any), and lifecycle are native state. AgentLaunch only reads

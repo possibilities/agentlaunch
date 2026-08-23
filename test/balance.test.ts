@@ -230,6 +230,44 @@ describe("balanced launch", () => {
     expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-x"]);
   });
 
+  test("codex exec stays native while capabilities and balance compose", () => {
+    const world = makeWorld();
+    const result = run(world, [
+      "--x-harness",
+      "codex",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
+      "exec",
+      "hello",
+    ]);
+    expect(result.code).toBe(0);
+    const data = (JSON.parse(result.stdout) as AnyEnvelope).data as {
+      command: string[];
+      balance: { accountKey: string };
+    };
+    expect(data.command).toEqual([
+      "codex-swap",
+      "run",
+      "--account",
+      "account:org-test",
+      "--",
+      "--cd",
+      realpathSync(world.root),
+      "--model",
+      "gpt-5.6-sol",
+      "-c",
+      'model_reasoning_effort="high"',
+      "exec",
+      "-c",
+      'plugins."agent@agentstart-managed".enabled=false',
+      "hello",
+    ]);
+    expect(data.command).not.toContain("--remote");
+    expect(data.balance.accountKey).toBe("account:org-test");
+    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-sol"]);
+  });
+
   test("pi injects the provider spelling and routes on the family name", () => {
     const world = makeWorld();
     const result = run(world, ["--x-harness", "pi", "--x-no-yolo", "--x-dry-run", "--x-json"]);
@@ -488,10 +526,15 @@ describe("balanced resume", () => {
 describe("compose units", () => {
   test("claimed codex launches use --claim", () => {
     expect(
-      composeCodexFamily({ harness: "codex", command: ["codex", "-p", "x"], sessionId: null }, [
-        "--claim",
-        "lease-1",
-      ]),
+      composeCodexFamily(
+        {
+          harness: "codex",
+          command: ["codex", "-p", "x"],
+          sessionId: null,
+          transport: "codex-remote",
+        },
+        ["--claim", "lease-1"],
+      ),
     ).toEqual(["codex-swap", "run", "--claim", "lease-1", "--", "-p", "x"]);
     expect(
       composeCodexFamily(
@@ -499,13 +542,19 @@ describe("compose units", () => {
           harness: "codex",
           command: ["codex", "resume", SESSION_ID, "--search"],
           sessionId: SESSION_ID,
+          transport: "codex-remote",
         },
         ["--claim", "lease-1"],
       ),
     ).toEqual(["codex-swap", "resume", SESSION_ID, "--claim", "lease-1", "--", "--search"]);
     expect(
       composeCodexFamily(
-        { harness: "pi", command: ["pi", "--session", SESSION_ID], sessionId: SESSION_ID },
+        {
+          harness: "pi",
+          command: ["pi", "--session", SESSION_ID],
+          sessionId: SESSION_ID,
+          transport: "native",
+        },
         ["--claim", "lease-1"],
       ),
     ).toEqual(["codex-swap", "pi", "run", "--claim", "lease-1", "--", "--session", SESSION_ID]);

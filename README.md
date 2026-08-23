@@ -1,8 +1,8 @@
 # AgentLaunch
 
-AgentLaunch resolves, balances, and starts interactive Claude Code, Codex, and
-Pi sessions. It can also find a native session by ID and resume it in the
-directory recorded by that harness.
+AgentLaunch resolves, balances, and starts native Claude Code, Codex, and Pi
+sessions, including Codex's non-interactive session commands. It can also find
+a native session by ID and resume it in the directory recorded by that harness.
 
 Its boundary ends at the native session: AgentLaunch has no workspace, pane,
 agent identity, naming, presence, steering, or conversation registry. It does
@@ -67,10 +67,13 @@ session projection:
 
 - Claude receives `--plugin-dir` for one synthetic plugin named `agent`, so
   skills are `/agent:<skill>`.
-- Codex runs an account-bound App Server through codex-swap's foreground
-  launch contract, receives `skills/extraRoots/set` plus exact
+- Interactive Codex runs an account-bound App Server through codex-swap's
+  foreground launch contract, receives `skills/extraRoots/set` plus exact
   session-flag `skills.config` entries, and connects its native TUI with
-  `codex --remote`; skills stay bare `$<skill>`.
+  `codex --remote`; skills stay bare `$<skill>`. Non-interactive `exec`/`e`
+  and `review` launches stay on their native command transport and receive
+  the exact `skills.config` and merged guidance as command-local config while
+  retaining the same codex-swap account pin.
 - Pi disables ambient skill/extension/template discovery and receives
   explicit paths; skills stay bare `/<skill>`.
 

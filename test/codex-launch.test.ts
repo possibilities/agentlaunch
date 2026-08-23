@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { CapabilitySet } from "../src/capabilities.ts";
 import type { LaunchSpec } from "../src/harness.ts";
 import {
   codexAppServerCommand,
   codexAppServerEnvironment,
   codexRemoteCommand,
+  launch,
 } from "../src/launch.ts";
+import { createNarrator } from "../src/narrate.ts";
 
 let roots: string[] = [];
 afterEach(() => {
@@ -27,11 +30,56 @@ function codexPath(): { root: string; bin: string } {
 }
 
 describe("Codex App Server supervision", () => {
+  test("a capability-bearing Codex exec bypasses the remote App Server", async () => {
+    const world = codexPath();
+    const record = join(world.root, "argv");
+    const swap = join(world.bin, "codex-swap");
+    writeFileSync(swap, '#!/bin/sh\nprintf "%s\\n" "$@" > "$AGENTLAUNCH_TEST_RECORD"\n');
+    chmodSync(swap, 0o755);
+    const capabilities: CapabilitySet = {
+      ids: ["common"],
+      digest: "test-digest",
+      root: join(world.root, "projection"),
+      claudePluginDir: null,
+      skillRoots: [],
+      skills: [],
+      guidance: "",
+      guidanceFile: null,
+      piExtensions: [],
+      piPromptTemplates: [],
+      receiptRequired: false,
+    };
+    const spec: LaunchSpec = {
+      harness: "codex",
+      command: ["codex-swap", "run", "--claim", "lease-1", "--", "exec", "hello"],
+      sessionId: null,
+      transport: "native",
+    };
+    const code = await launch(
+      spec,
+      createNarrator({ silent: true, verbose: false }),
+      { PATH: world.bin, AGENTLAUNCH_TEST_RECORD: record },
+      null,
+      world.root,
+      capabilities,
+    );
+    expect(code).toBe(0);
+    expect(readFileSync(record, "utf8").trim().split("\n")).toEqual([
+      "run",
+      "--claim",
+      "lease-1",
+      "--",
+      "exec",
+      "hello",
+    ]);
+  });
+
   test("replaces an unbalanced native launch with a disabled-compatibility App Server", () => {
     const spec: LaunchSpec = {
       harness: "codex",
       command: ["codex", "--model", "gpt-x"],
       sessionId: null,
+      transport: "codex-remote",
     };
     expect(
       codexAppServerCommand(spec, "unix:///tmp/c.sock", [
@@ -54,6 +102,7 @@ describe("Codex App Server supervision", () => {
       harness: "codex",
       command: ["codex-swap", "resume", "thread-1", "--claim", "lease-1", "--", "--search"],
       sessionId: "thread-1",
+      transport: "codex-remote",
     };
     expect(codexAppServerCommand(spec, "unix:///tmp/c.sock", []).slice(0, 6)).toEqual([
       "codex-swap",
@@ -81,6 +130,7 @@ describe("Codex App Server supervision", () => {
       harness: "codex",
       command: ["codex-swap", "resume", "thread-1", "--account", "work", "--", "--search"],
       sessionId: "thread-1",
+      transport: "codex-remote",
     };
     const command = codexRemoteCommand(spec, "unix:///tmp/c.sock", "line one\nline two", {
       PATH: world.bin,
@@ -113,6 +163,7 @@ describe("Codex App Server supervision", () => {
       harness: "codex",
       command: ["codex", "--search", "line one\nline two"],
       sessionId: null,
+      transport: "codex-remote",
     };
     expect(codexRemoteCommand(spec, "unix:///tmp/c.sock", "", { PATH: world.bin })).toEqual([
       join(world.bin, "codex"),
