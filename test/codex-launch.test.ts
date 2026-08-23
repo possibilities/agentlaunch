@@ -90,7 +90,7 @@ describe("Codex App Server supervision", () => {
       "-c",
       'plugins."agent@agentstart-managed".enabled=false',
       "-c",
-      'skills.config=[{"path":"/capabilities/build/SKILL.md","enabled":true}]',
+      'skills.config=[{path="/capabilities/build/SKILL.md",enabled=true}]',
       "app-server",
       "--listen",
       "unix:///tmp/c.sock",

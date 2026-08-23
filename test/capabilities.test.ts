@@ -164,10 +164,11 @@ describe("capability selection and projection", () => {
     expect(codexExec.slice(0, 4)).toEqual(["codex", "--model", "gpt-x", "exec"]);
     expect(codexExec).toContain('plugins."agent@agentstart-managed".enabled=false');
     expect(codexExec).toContain(
-      `skills.config=[{"path":${JSON.stringify(
+      `skills.config=[{path=${JSON.stringify(
         join(set.root, "skills", "collab", "SKILL.md"),
-      )},"enabled":true}]`,
+      )},enabled=true}]`,
     );
+    expect(codexExec.join(" ")).not.toContain('{"path":');
     expect(codexExec).toContain('developer_instructions="<!-- capability:common -->\\nguide\\n"');
     expect(codexExec[codexExec.length - 1]).toBe("prompt");
     const pi = applyCapabilityArguments(open("pi"), set).command;

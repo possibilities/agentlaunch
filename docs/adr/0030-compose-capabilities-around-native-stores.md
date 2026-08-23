@@ -24,6 +24,8 @@ ordinary codex-swap `run` pin and injects the same exact `skills.config`,
 compatibility-plugin disable, and merged guidance directly into the native
 non-interactive command. Session classification still controls balancing and
 receipts; transport classification only decides whether an App Server exists.
+Codex parses every `-c` value as TOML, so the generated `skills.config` is an
+array of TOML inline tables (`[{path="…",enabled=true}]`), never JSON objects.
 
 The account-bound App Server spawn also removes the retired sidecar
 environment's runtime-proxy kill switches. Long-lived parent sessions may

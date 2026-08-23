@@ -68,12 +68,10 @@ export const CODEX_DISABLE_COMPATIBILITY_PLUGIN =
 export function codexSkillPolicyArguments(skills: CapabilitySet["skills"]): string[] {
   const args = ["-c", CODEX_DISABLE_COMPATIBILITY_PLUGIN];
   if (skills.length > 0) {
-    args.push(
-      "-c",
-      `skills.config=${JSON.stringify(
-        skills.map((skill) => ({ path: join(skill.path, "SKILL.md"), enabled: true })),
-      )}`,
-    );
+    const config = skills
+      .map((skill) => `{path=${JSON.stringify(join(skill.path, "SKILL.md"))},enabled=true}`)
+      .join(",");
+    args.push("-c", `skills.config=[${config}]`);
   }
   return args;
 }
