@@ -2,6 +2,7 @@ import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   type CapabilitySet,
+  CODEX_DISABLE_COMPATIBILITY_PLUGIN,
   codexSkillPolicyArguments,
   writeCapabilityReceipt,
 } from "./capabilities.ts";
@@ -221,7 +222,19 @@ export function codexRemoteCommand(
   // proxy instead. A remote TUI still evaluates its local provider before it
   // connects, so give only that client a no-auth placeholder. Remote thread
   // params omit model_provider; the server retains its pinned runtime proxy.
-  return [codex, "--remote", endpoint, ...REMOTE_CLIENT_PROVIDER, ...config, ...native];
+  // The TUI also resolves local plugins independently of the server. Suppress
+  // the desktop compatibility plugin here while keeping projected skill config
+  // on the server that owns those session-local skills.
+  return [
+    codex,
+    "--remote",
+    endpoint,
+    ...REMOTE_CLIENT_PROVIDER,
+    "-c",
+    CODEX_DISABLE_COMPATIBILITY_PLUGIN,
+    ...config,
+    ...native,
+  ];
 }
 
 function spawnInteractive(command: string[], narrator: Narrator, env: Environ, cwd: string | null) {

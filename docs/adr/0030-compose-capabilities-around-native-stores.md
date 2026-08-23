@@ -15,7 +15,10 @@ connection, remote TUI, and termination. No resident server, endpoint
 registry, or attach lifecycle is introduced. After setting extra roots,
 AgentLaunch also supplies session-flag `skills.config` entries for the exact
 selected `SKILL.md` paths, so those skills win over lower-layer user disable
-rules without globally installing them.
+rules without globally installing them. Both the App Server and its remote TUI
+receive the desktop compatibility-plugin disable: the TUI resolves local
+plugins independently before connecting, while `skills.config` remains solely
+on the server that owns the session projection.
 
 The App Server transport is exclusive to Codex's interactive TUI. Codex
 `exec` (including `e`) and `review` are account-bound model sessions but their
