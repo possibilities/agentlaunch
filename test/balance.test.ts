@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { composeCodexFamily, normalizePiModel } from "../src/balance.ts";
 import type { Envelope } from "../src/envelope.ts";
+import { seedCommonCapability } from "./capability-fixture.ts";
 
 type AnyEnvelope = Envelope<Record<string, unknown>>;
 
@@ -46,6 +47,7 @@ function makeWorld(): World {
   const root = mkdtempSync(join(tmpdir(), "agentlaunch-balance-"));
   roots.push(root);
   const binDir = join(root, "bin");
+  seedCommonCapability(join(root, "home"));
   mkdirSync(binDir, { recursive: true });
   const recordPath = join(root, "balance-argv.jsonl");
   const fake = join(binDir, "agentusage");
@@ -240,6 +242,9 @@ describe("balanced launch", () => {
       "--account",
       "account:org-test",
       "--",
+      "--no-skills",
+      "--no-extensions",
+      "--no-prompt-templates",
       "--model",
       "openai-codex/gpt-5.6-sol",
       "--thinking",
@@ -471,6 +476,9 @@ describe("balanced resume", () => {
       "--account",
       "account:org-test",
       "--",
+      "--no-skills",
+      "--no-extensions",
+      "--no-prompt-templates",
       "--session",
       SESSION_ID,
     ]);

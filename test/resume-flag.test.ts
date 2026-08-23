@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { seedCommonCapability } from "./capability-fixture.ts";
 
 // Black-box coverage of --x-resume, x-resume's flag spelling on the launch
 // route: the path a herdr pane reaches through the fleet shim, which can
@@ -33,6 +34,7 @@ function seedClaudeStore(root: string): { configDir: string; cwd: string } {
 }
 
 function run(root: string, configDir: string, args: string[]) {
+  seedCommonCapability(join(root, "home"));
   return Bun.spawnSync([process.execPath, "src/main.ts", ...args], {
     cwd: join(import.meta.dir, ".."),
     env: {

@@ -23,7 +23,7 @@ const PLAN: LaunchPlan = {
 describe("primedIntent", () => {
   test("each harness spells its own skill prefix; empty intents prime alone", () => {
     expect(primedIntent({ harness: "claude", prompt: "fix it", priming: "collab" })).toBe(
-      "/collab fix it",
+      "/agent:collab fix it",
     );
     expect(primedIntent({ harness: "pi", prompt: "fix it", priming: "build" })).toBe(
       "/build fix it",

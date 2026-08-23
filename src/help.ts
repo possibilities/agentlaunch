@@ -30,6 +30,8 @@ Common:
   --x-level <m>:<e>      Resolve and inject one catalog model/effort pair
   --x-account <selector> Pin a balanced launch to an eligible account
   --x-no-balance         Run the native harness without the account stack
+  --x-capability <name>  Add a capability pack for this session (repeatable)
+  --x-no-common          Suppress the default common capability pack
   --x-prompt-file <path> Append the file's text as the final native token
   --x-resume <id>        x-resume as a flag, for arguments-only invokers
   --x-yolo [harness]     Enable the harness's unattended permission setting
@@ -51,6 +53,7 @@ Config and catalog:
 Environment:
   AGENTLAUNCH_NO_BALANCE=1   Default launches to unbalanced
   AGENTLAUNCH_LAUNCH=1       Recursion sentinel used by bare harness shims
+  AGENTSTART_CAPABILITIES_ROOT  Override the AgentStart capability root
 
 Examples:
   agentlaunch --x-harness claude "fix the failing tests"
@@ -80,6 +83,13 @@ once at launch and never deleted; an unreadable or empty file is an error.
 
 Management invocations such as codex login, claude doctor, pi auth, and bare
 --version pass through unbalanced and receive no yolo injection.
+
+Every session includes AgentStart's common capability pack. Repeat
+--x-capability <name> to add session-specific packs, or pass --x-no-common to
+suppress the default. Claude receives one session plugin named agent
+(/agent:<skill>), Codex receives standalone extra skill roots ($<skill>)
+through a supervised App Server, and Pi receives explicit resource paths
+(/<skill>). Non-default selections are restored on native resume by receipt.
 
 Launches balance by default through agentusage, then compose cswap for Claude
 or codex-swap for Codex/Pi. --x-account pins the selection while retaining the
@@ -128,6 +138,7 @@ Takes no other arguments. Needs a terminal on stdin and stderr, and refuses
 a stdout that is a terminal — that means no host is reading. Project roots
 and priming choices come from the config ("roots", "priming"); an
 interrupted form is restored from its draft on the next open.
+Priming emits /agent:<skill> for Claude, $<skill> for Codex, and /<skill> for Pi.
 `,
   "x-doctor": `agentlaunch x-doctor [--x-json]
 
@@ -152,8 +163,9 @@ export const AGENT_TEASER =
 export const AGENT_HELP = `agentlaunch agent runbook
 
 Use AgentLaunch when starting or resuming an interactive Claude, Codex, or Pi
-session. It owns only pre-launch resolution: harness/model/effort, yolo policy,
-account balancing, native session-store detection, and resume cwd recovery.
+session. It owns launch resolution: harness/model/effort, capability packs,
+yolo policy, account balancing, native session-store detection, and resume cwd
+recovery.
 
 Grammar
   - Every --x-* token is AgentLaunch's and is never forwarded.

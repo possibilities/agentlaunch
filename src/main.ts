@@ -16,12 +16,14 @@ const SCHEMA_VERSION = 1;
 const GLOBAL: XSpec = {
   value: new Set<string>([]),
   bool: new Set(["--x-json", "--x-help"]),
+  repeatable: new Set<string>([]),
   scoped: new Map<string, readonly string[]>(),
 };
 
 interface RouteFlags {
   value?: string[];
   bool?: string[];
+  repeatable?: string[];
   scoped?: Array<[string, readonly string[]]>;
 }
 
@@ -35,7 +37,8 @@ const LAUNCH_FLAGS: RouteFlags = {
   // append arguments to the bare kind command (a herdr pane typing
   // `claude --x-resume <id>` through the shim).
   value: ["--x-harness", "--x-level", "--x-account", "--x-prompt-file", "--x-resume"],
-  bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
+  bool: ["--x-dry-run", "--x-no-balance", "--x-no-common", "--x-verbose"],
+  repeatable: ["--x-capability"],
   scoped: YOLO_SCOPES,
 };
 
@@ -43,7 +46,8 @@ const RESUME_FLAGS: RouteFlags = {
   // --x-level is accepted by the partition only so resume can explain why it
   // is invalid in its own terms.
   value: ["--x-account", "--x-harness", "--x-level"],
-  bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
+  bool: ["--x-dry-run", "--x-no-balance", "--x-no-common", "--x-verbose"],
+  repeatable: ["--x-capability"],
   scoped: YOLO_SCOPES,
 };
 
@@ -51,6 +55,7 @@ function specFor(flags: RouteFlags): XSpec {
   return {
     value: new Set([...GLOBAL.value, ...(flags.value ?? [])]),
     bool: new Set([...GLOBAL.bool, ...(flags.bool ?? [])]),
+    repeatable: new Set([...GLOBAL.repeatable, ...(flags.repeatable ?? [])]),
     scoped: new Map([...GLOBAL.scoped, ...(flags.scoped ?? [])]),
   };
 }
@@ -195,7 +200,14 @@ async function main(argv: string[]): Promise<number> {
   try {
     const outcome = await run(context, parts);
     if (outcome.kind === "launch") {
-      return await launch(outcome.spec, context.narrator, context.env, outcome.cwd);
+      return await launch(
+        outcome.spec,
+        context.narrator,
+        context.env,
+        outcome.cwd,
+        context.home,
+        outcome.capabilities,
+      );
     }
     emit(outcome, json);
     return 0;

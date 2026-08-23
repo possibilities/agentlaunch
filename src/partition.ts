@@ -14,6 +14,8 @@ export interface XSpec {
   value: Set<string>;
   /** Boolean x-flags; a value or a repeat is a usage fault. */
   bool: Set<string>;
+  /** Value flags that may appear more than once, preserving occurrence order. */
+  repeatable: Set<string>;
   /** Repeatable x-flags with an optional scope from a per-flag vocabulary
    * (harness names for yolo): bare covers "all",
    * and a following vocabulary word (or `=word`) narrows one occurrence. */
@@ -22,6 +24,7 @@ export interface XSpec {
 
 export interface Partitioned {
   values: Record<string, string>;
+  lists: Record<string, string[]>;
   bools: Set<string>;
   /** Occurrence scopes per flag, "all" for a bare occurrence. */
   scoped: Map<string, string[]>;
@@ -32,6 +35,7 @@ export interface Partitioned {
 export function partition(argv: string[], spec: XSpec): Partitioned {
   const seen = new Set<string>();
   const values: Record<string, string> = {};
+  const lists: Record<string, string[]> = {};
   const bools = new Set<string>();
   const scoped = new Map<string, string[]>();
   const harness: string[] = [];
@@ -69,10 +73,10 @@ export function partition(argv: string[], spec: XSpec): Partitioned {
       scoped.set(flag.slice(2), list);
       continue;
     }
-    if (!spec.value.has(flag) && !spec.bool.has(flag)) {
+    if (!spec.value.has(flag) && !spec.bool.has(flag) && !spec.repeatable.has(flag)) {
       throw new UsageError(`unknown option "${flag}"`);
     }
-    if (seen.has(flag)) {
+    if (!spec.repeatable.has(flag) && seen.has(flag)) {
       throw new UsageError(`option "${flag}" given more than once`);
     }
     seen.add(flag);
@@ -90,8 +94,15 @@ export function partition(argv: string[], spec: XSpec): Partitioned {
       value = next;
       i++;
     }
-    values[flag.slice(2)] = value;
+    if (spec.repeatable.has(flag)) {
+      const key = flag.slice(2);
+      const list = lists[key] ?? [];
+      list.push(value);
+      lists[key] = list;
+    } else {
+      values[flag.slice(2)] = value;
+    }
   }
 
-  return { values, bools, scoped, harness };
+  return { values, lists, bools, scoped, harness };
 }

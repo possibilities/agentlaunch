@@ -4,10 +4,14 @@ AgentLaunch resolves, balances, and starts interactive Claude Code, Codex, and
 Pi sessions. It can also find a native session by ID and resume it in the
 directory recorded by that harness.
 
-Its boundary ends when the native process starts. AgentLaunch has no workspace,
-pane, agent identity, naming, presence, steering, or post-launch registry. A
-native flag such as Claude's `--name` is forwarded unchanged and is never
-interpreted or persisted here.
+Its boundary ends at the native session: AgentLaunch has no workspace, pane,
+agent identity, naming, presence, steering, or conversation registry. It does
+supervise one ephemeral Codex App Server per interactive Codex launch so
+session-specific skills can be installed before the native remote TUI
+connects. The server is a caller-owned foreground invocation through
+codex-swap's ordinary `run`/lease contract, never a resident service. A native
+flag such as Claude's `--name` is forwarded unchanged and
+is never interpreted or persisted here.
 
 ## Install
 
@@ -50,6 +54,32 @@ everything else belongs to the harness and remains in order. Unknown
 `--x-*` flags fail. Unknown native flags—including `--name` or `-n`—are
 forwarded without inspection.
 
+## Capabilities
+
+Every managed session includes AgentStart's `common` capability pack from
+`~/.local/share/agentstart/capabilities/packs/common`. Add repeatable
+session-specific packs with `--x-capability <name>`, or use `--x-no-common`
+for a deliberately isolated session. Conflicting skill or Claude resource
+names fail before launch.
+
+AgentLaunch content-addresses the selected packs and renders an immutable
+session projection:
+
+- Claude receives `--plugin-dir` for one synthetic plugin named `agent`, so
+  skills are `/agent:<skill>`.
+- Codex runs an account-bound App Server through codex-swap's foreground
+  launch contract, receives `skills/extraRoots/set` plus exact
+  session-flag `skills.config` entries, and connects its native TUI with
+  `codex --remote`; skills stay bare `$<skill>`.
+- Pi disables ambient skill/extension/template discovery and receives
+  explicit paths; skills stay bare `/<skill>`.
+
+Non-default selections write a small receipt keyed by the native session ID,
+so `x-resume` restores the pack IDs. The native stores do not move: Claude
+continues through `cswap --share-history`, Codex uses `~/.codex/sessions`, and
+Pi uses `~/.pi/agent/sessions`, preserving native resume and history indexing.
+Utility invocations such as `codex login` receive no packs.
+
 ## Surface form
 
 ```sh
@@ -65,8 +95,9 @@ realize as a herdr session. The form takes no other arguments, needs a terminal
 on stdin and stderr, and refuses a stdout that is a terminal — that means
 no host is reading. Project roots and priming choices come from the config
 (`roots`, `priming`); an interrupted form is restored from its draft on the
-next open. The `surface-handoff-protocol` wiki page documents the directive
-contract.
+next open. Priming spells Claude skills as `/agent:<skill>`, Codex as
+`$<skill>`, and Pi as `/<skill>`. The `surface-handoff-protocol` wiki page
+documents the directive contract.
 
 ## Resume
 

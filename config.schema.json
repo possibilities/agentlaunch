@@ -51,7 +51,7 @@
       "items": {
         "type": "string",
         "pattern": "^[a-z0-9][a-z0-9-]*$",
-        "description": "One priming choice: a skill name the form prefixes onto the intent — /name for claude and pi, $name for codex."
+        "description": "One priming choice: a skill name the form prefixes onto the intent — /agent:name for Claude, /name for Pi, $name for Codex."
       },
       "description": "Primings the interactive form offers beside \"none\", in order; the first is the default. Omitted: none are offered."
     }

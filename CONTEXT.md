@@ -46,6 +46,31 @@ means no host is reading, and the form refuses to open. _Avoid_: sink file
 native session ID for a resume. `--x-dry-run --x-json` exposes it with the
 associated decisions. _Avoid_: run (there is no AgentLaunch run lifecycle).
 
+**Capability pack** — An AgentStart-installed bundle of skills, guidance, and
+harness resources under `~/.local/share/agentstart/capabilities/packs`.
+`common` is the default; `--x-capability` adds a pack and `--x-no-common`
+suppresses the default. _Avoid_: plugin (only Claude's projection is a
+plugin), global skill.
+
+**Session projection** — The immutable, content-addressed rendering of one
+resolved capability set for one harness launch. Claude receives an `agent`
+plugin, Codex receives standalone skill roots through its App Server, and Pi
+receives explicit resource paths with ambient discovery disabled. _Avoid_:
+install (a projection is selected, not globally registered).
+
+**Capability receipt** — AgentLaunch bookkeeping keyed by a native session ID,
+containing only non-default pack IDs and their digest so a resume restores the
+same selection. It is not conversation history; native stores remain the sole
+history authority. _Avoid_: session registry.
+
+**Managed Codex App Server** — The ephemeral account-bound server AgentLaunch
+supervises for one interactive Codex TUI so it can set process-local skill
+roots before the native client connects. The TUI remains native and connects
+with `codex --remote`; codex-swap pins the foreground server through its
+ordinary `run`/lease contract, while AgentLaunch owns the listener, client,
+and lifetime. _Avoid_: embedded Codex, resident server, alternate session
+store.
+
 **Native session** — A conversation owned and persisted by the harness. Its ID,
 metadata, name (if any), and lifecycle are native state. AgentLaunch only reads
 the ID/store/cwd needed to resume it. _Avoid_: AgentLaunch session.

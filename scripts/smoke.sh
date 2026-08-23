@@ -8,6 +8,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+COMMON="$WORK/home/.local/share/agentstart/capabilities/packs/common"
+mkdir -p "$COMMON"
+printf '%s\n' \
+  '{"schema_version":1,"id":"common","default":true,"description":"smoke fixture","resources":{}}' \
+  >"$COMMON/capability.json"
+
 run() {
   env -i PATH="$PATH" HOME="$WORK/home" AGENTLAUNCH_NO_BALANCE=1 \
     CLAUDE_CONFIG_DIR="$WORK/claude" CODEX_HOME="$WORK/codex" \
@@ -68,7 +74,7 @@ expect_out "claude --permission-mode auto --model 'opus\[1m\]' --effort medium"
 expect_exit 0 run --x-harness codex --x-no-yolo --x-dry-run
 expect_out "codex --cd .* --model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"'"
 expect_exit 0 run --x-harness pi --x-level gpt-5.6-luna:max --x-no-yolo --x-dry-run
-expect_out "pi --model openai-codex/gpt-5.6-luna --thinking max"
+expect_out "pi --no-skills --no-extensions --no-prompt-templates --model openai-codex/gpt-5.6-luna --thinking max"
 expect_exit 0 run --x-level sonnet:high --x-no-yolo --x-dry-run
 expect_out "claude --model sonnet --effort high"
 
@@ -80,7 +86,7 @@ if grep -q '"name"' "$WORK/out"; then
   exit 1
 fi
 expect_exit 0 run --x-harness pi --x-no-yolo --x-dry-run -n native
-expect_out "pi --model openai-codex/gpt-5.6-sol --thinking high -n native"
+expect_out "pi --no-skills --no-extensions --no-prompt-templates --model openai-codex/gpt-5.6-sol --thinking high -n native"
 expect_exit 2 run --x-harness claude --x-name launcher-name --x-dry-run
 expect_err 'unknown option "--x-name"'
 
@@ -130,7 +136,7 @@ expect_exit 0 run x-resume "$SESSION_ID" --x-no-yolo --x-dry-run --x-json
 expect_out '"command":\["claude","--resume"'
 expect_out "\"cwd\":\"$SESSION_CWD\""
 expect_exit 0 run x-resume "$SESSION_ID" --x-harness pi --x-no-yolo --x-dry-run
-expect_out "pi --session $SESSION_ID"
+expect_out "pi --no-skills --no-extensions --no-prompt-templates --session $SESSION_ID"
 expect_exit 2 run x-resume "$SESSION_ID" --x-level opus:high --x-dry-run
 expect_exit 1 run x-resume 99999999-9999-4999-9999-999999999999 --x-dry-run --x-json
 expect_out '"code":"session_not_found"'

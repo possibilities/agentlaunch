@@ -83,7 +83,7 @@ const primingSchema = z
         "a priming is a bare skill name: lowercase letters, digits, hyphens",
       )
       .describe(
-        "One priming choice: a skill name the form prefixes onto the intent — /name for claude and pi, $name for codex.",
+        "One priming choice: a skill name the form prefixes onto the intent — /agent:name for Claude, /name for Pi, $name for Codex.",
       ),
   )
   .describe(

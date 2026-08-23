@@ -491,7 +491,7 @@ export interface LaunchPlan {
   level: string;
   prompt: string;
   /** A configured skill name prefixed onto the intent by the executor —
-   * /name for claude and pi, $name for codex; null when none. */
+   * /agent:name for Claude, /name for Pi, $name for Codex; null when none. */
   priming: string | null;
 }
 

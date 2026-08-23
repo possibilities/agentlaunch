@@ -26,13 +26,16 @@ export interface SessionDirective {
   record?: Record<string, unknown>;
 }
 
-/** A priming rides the intent as each harness's own skill spelling: /name
- * for claude and pi, $name for codex — the prefix alone when the intent is
- * empty, so the skill still primes the session. */
+/** A priming rides the intent as each harness's own skill spelling:
+ * /agent:name for Claude's synthetic plugin, /name for Pi, and $name for
+ * Codex — the prefix alone when the intent is empty. */
 export function primedIntent(plan: Pick<LaunchPlan, "harness" | "prompt" | "priming">): string {
   if (plan.priming === null) return plan.prompt;
-  const sigil = plan.harness === "codex" ? "$" : "/";
-  return `${sigil}${plan.priming}${plan.prompt === "" ? "" : ` ${plan.prompt}`}`;
+  const invocation =
+    plan.harness === "claude"
+      ? `/agent:${plan.priming}`
+      : `${plan.harness === "codex" ? "$" : "/"}${plan.priming}`;
+  return `${invocation}${plan.prompt === "" ? "" : ` ${plan.prompt}`}`;
 }
 
 export function buildDirective(plan: LaunchPlan, focus: boolean): SessionDirective {

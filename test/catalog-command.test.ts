@@ -28,6 +28,7 @@ function emptyHome(): { env: Environ; home: string } {
 const SPEC: XSpec = {
   value: new Set<string>(),
   bool: new Set(["--x-json", "--x-help"]),
+  repeatable: new Set<string>(),
   scoped: new Map(),
 };
 

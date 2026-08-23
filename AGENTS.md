@@ -1,8 +1,9 @@
 # AgentLaunch
 
 AgentLaunch is the fleet's public pre-launch resolver for Claude Code, Codex,
-and Pi. It chooses a harness/model/effort, applies yolo policy, balances an
-account, composes the native command, and executes it. `x-resume` reads native
+and Pi. It chooses a harness/model/effort, composes capability packs, applies
+yolo policy, balances an account, composes the native command, and executes
+it. `x-resume` reads native
 session stores to detect the harness and recover the session's cwd.
 `--x-surface` opens the interactive launch form: the same launch, spoken to
 a surface instead of executed — it renders on stderr and writes session
@@ -12,8 +13,12 @@ consistent is this repository's responsibility.
 
 The boundary is strict: native harness behavior begins where AgentLaunch ends.
 This repository owns no agent names, identities, workspaces, panes, presence,
-steering, run registry, placement lifecycle, or app-server topology. Anything
-outside `--x-*` is a native token and stays opaque, including `--name`/`-n`.
+steering, run registry, or placement lifecycle. It owns one narrow App Server
+topology: an ephemeral server supervised for an interactive Codex launch so
+process-local skill roots can be set before the native remote TUI connects.
+The server is a caller-owned foreground invocation over codex-swap's public
+`run` contract, not a resident or registered sidecar. Anything outside
+`--x-*` is a native token and stays opaque, including `--name`/`-n`.
 The surface form does not soften this: it describes sessions declaratively
 (the directive's worktree/focus/cwd vocabulary) and never calls herdr or
 agentsurface — realizing a directive is entirely the host's.
@@ -51,10 +56,14 @@ agentsurface — realizing a directive is entirely the host's.
   classification, yolo gates, session metadata, store layouts, and Codex cwd
   anchoring.
 - `balance.ts` calls AgentUsage and composes `cswap`/`codex-swap` prefixes.
-  AgentLaunch never reads provider stores or manages app servers.
-- `launch.ts` resolves the final executable against the caller's environment,
-  sets `AGENTLAUNCH_LAUNCH=1`, connects the terminal, and adopts native exit
-  status/signal semantics.
+  AgentLaunch never reads provider credential stores.
+- `capabilities.ts` strictly loads AgentStart packs, renders immutable session
+  projections, injects harness-native resources, and owns capability receipts.
+- `launch.ts` resolves final executables, supervises the per-launch Codex App
+  Server through codex-swap's foreground account-pin contract when needed,
+  sets exact skill policy, sets `AGENTLAUNCH_LAUNCH=1`, connects the terminal,
+  and adopts native exit status/signal semantics. `codex-app-server.ts` and
+  `unix-websocket.ts` are its owner-only control connection.
 - `help.ts`, `README.md`, and `CONTEXT.md` are product contract, operator guide,
   and vocabulary. Removed AgentSurface concepts must not reappear there.
 
@@ -68,7 +77,11 @@ agentsurface — realizing a directive is entirely the host's.
   narrate, persist, or assign meaning to it.
 - `x-resume` accepts a native session ID only. No `run:` references or local
   registry fallback.
-- Session stores are native and read-only. Honor their environment overrides.
+- Session stores are native and read-only. Honor their environment overrides;
+  capability receipts live separately under AgentLaunch state.
+- Every managed session includes `common` unless `--x-no-common` is explicit.
+  Claude projects it as `/agent:<skill>`, Codex as bare `$skill`, and Pi as
+  bare `/skill`. Utility invocations receive no capability arguments.
 - A real launch always either balances successfully or fails; never silently
   fall back to unbalanced. Utility invocations and explicit no-balance are the
   stated exceptions.
@@ -104,15 +117,16 @@ legitimate handoff language, not a regression.
 This checkout is one of the agent* fleet under `~/code`. Shared machinery
 lives in two siblings, and some changes here must cascade:
 
-- Skills under `skills/<name>/` ship through AgentStart's private core plugin
-  (`~/code/agentstart/scripts/sync-skills`, run six-hourly by the scheduled
-  updater): Claude Code and Codex expose them under the `agentstart-core`
-  plugin namespace, while Pi uses the plain skill name. A SKILL.md edit is
-  live within six hours, or on demand by running that script. Whether a new
-  skill earns a TOOLS.md advertisement line is a deliberate decision —
+- Skills under `skills/<name>/` ship into AgentStart's default `common`
+  capability pack (`~/code/agentstart/scripts/sync-skills`, run six-hourly
+  by the scheduled updater). AgentLaunch composes the pack into managed
+  sessions: Claude Code exposes `/agent:<name>`, while Codex uses `$<name>`
+  and Pi uses `/<name>`. A SKILL.md edit is live within six hours, or on
+  demand by running that script. Whether a new skill earns a TOOLS.md
+  advertisement line is a deliberate decision —
   `agentwiki get tool-advertisement-policy`.
 - Adding or removing a call to another fleet tool changes the fleet map:
   update `~/code/agentstart/skills/fleet/MAP.md` (served by the `fleet`
   skill, every edge with evidence) in the same change.
-- General agent doctrine — collab, build, story, the resource skills — is
-  `~/code/agentguidance`; tool-specific runbooks stay here.
+- General agent doctrine — collab, build, maintain, story, the resource
+  skills — is `~/code/agentguidance`; tool-specific runbooks stay here.
