@@ -55,9 +55,11 @@ plugin), global skill.
 **Session projection** — The immutable, content-addressed rendering of one
 resolved capability set for one harness launch. Claude receives an `agent`
 plugin, interactive Codex receives standalone skill roots through its App
-Server, non-interactive Codex receives exact command-local skill config, and
-Pi receives explicit resource paths with ambient discovery disabled. _Avoid_:
-install (a projection is selected, not globally registered).
+Server, all managed Codex launches receive exact skill policy that suppresses
+the AgentStart compatibility aliases, non-interactive Codex receives that
+policy as command-local config, and Pi receives explicit resource paths with
+ambient discovery disabled. _Avoid_: install (a projection is selected, not
+globally registered).
 
 **Capability receipt** — AgentLaunch bookkeeping keyed by a native session ID,
 containing only non-default pack IDs and their digest so a resume restores the

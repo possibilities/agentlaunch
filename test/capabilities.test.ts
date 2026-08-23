@@ -71,6 +71,20 @@ function pack(
   return root;
 }
 
+function compatibilitySkill(capabilityRoot: string, name: string): void {
+  const root = join(
+    capabilityRoot,
+    "compatibility",
+    "codex-marketplace",
+    "plugins",
+    "agent",
+    "skills",
+    name,
+  );
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, "SKILL.md"), `# ${name}\n`);
+}
+
 function parts(capabilities: string[] = [], noCommon = false): Partitioned {
   return {
     values: {},
@@ -130,6 +144,7 @@ describe("capability selection and projection", () => {
       guidance: "guide\n",
       resources: true,
     });
+    compatibilitySkill(world.capabilities, "collab");
     const set = resolveCapabilities(
       ["common"],
       { AGENTSTART_CAPABILITIES_ROOT: world.capabilities },
@@ -144,6 +159,7 @@ describe("capability selection and projection", () => {
     });
     expect(set.claudePluginDir).not.toBeNull();
     expect(set.guidanceFile).not.toBeNull();
+    expect(set.codexCompatibilitySkillNames).toEqual(["agent:collab"]);
     expect(applyCapabilityArguments(open("claude"), set).command.slice(0, 5)).toEqual([
       "claude",
       "--plugin-dir",
@@ -162,9 +178,8 @@ describe("capability selection and projection", () => {
       set,
     ).command;
     expect(codexExec.slice(0, 4)).toEqual(["codex", "--model", "gpt-x", "exec"]);
-    expect(codexExec).toContain('plugins."agent@agentstart-managed".enabled=false');
     expect(codexExec).toContain(
-      `skills.config=[{path=${JSON.stringify(
+      `skills.config=[{name="agent:collab",enabled=false},{path=${JSON.stringify(
         join(set.root, "skills", "collab", "SKILL.md"),
       )},enabled=true}]`,
     );
@@ -181,6 +196,30 @@ describe("capability selection and projection", () => {
     expect(pi).toContain("--skill");
     expect(pi).toContain("--extension");
     expect(pi).toContain("--prompt-template");
+  });
+
+  test("--x-no-common still suppresses compatibility aliases", () => {
+    const world = scratch();
+    compatibilitySkill(world.capabilities, "collab");
+    const set = resolveCapabilities(
+      [],
+      { AGENTSTART_CAPABILITIES_ROOT: world.capabilities },
+      world.home,
+      true,
+    );
+    const command = applyCapabilityArguments(
+      {
+        harness: "codex",
+        command: ["codex", "exec", "prompt"],
+        sessionId: null,
+        transport: "native",
+      },
+      set,
+    ).command;
+
+    expect(set.skills).toEqual([]);
+    expect(set.codexCompatibilitySkillNames).toEqual(["agent:collab"]);
+    expect(command).toContain('skills.config=[{name="agent:collab",enabled=false}]');
   });
 
   test("duplicate skills fail before any projection is rendered", () => {

@@ -2,7 +2,6 @@ import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   type CapabilitySet,
-  CODEX_DISABLE_COMPATIBILITY_PLUGIN,
   codexSkillPolicyArguments,
   writeCapabilityReceipt,
 } from "./capabilities.ts";
@@ -80,7 +79,12 @@ async function launchCodex(
   chmodSync(temp, 0o700);
   const socketPath = join(temp, "app-server.sock");
   const endpoint = `unix://${socketPath}`;
-  const serverCommand = codexAppServerCommand(spec, endpoint, capabilities.skills);
+  const serverCommand = codexAppServerCommand(
+    spec,
+    endpoint,
+    capabilities.skills,
+    capabilities.codexCompatibilitySkillNames,
+  );
   const serverEnv = codexAppServerEnvironment(env);
   const [serverBin, ...serverArgs] = resolveCommand(serverCommand, serverEnv);
   narrator.detail("app server", serverCommand.join(" "));
@@ -163,8 +167,14 @@ export function codexAppServerCommand(
   spec: LaunchSpec,
   endpoint: string,
   skills: CapabilitySet["skills"],
+  compatibilitySkillNames: CapabilitySet["codexCompatibilitySkillNames"],
 ): string[] {
-  const serverArgs = [...codexSkillPolicyArguments(skills), "app-server", "--listen", endpoint];
+  const serverArgs = [
+    ...codexSkillPolicyArguments(skills, compatibilitySkillNames),
+    "app-server",
+    "--listen",
+    endpoint,
+  ];
   const command = spec.command;
   if (command[0] === "codex") return ["codex", ...serverArgs];
   if (command[0] !== "codex-swap") {
@@ -222,19 +232,7 @@ export function codexRemoteCommand(
   // proxy instead. A remote TUI still evaluates its local provider before it
   // connects, so give only that client a no-auth placeholder. Remote thread
   // params omit model_provider; the server retains its pinned runtime proxy.
-  // The TUI also resolves local plugins independently of the server. Suppress
-  // the desktop compatibility plugin here while keeping projected skill config
-  // on the server that owns those session-local skills.
-  return [
-    codex,
-    "--remote",
-    endpoint,
-    ...REMOTE_CLIENT_PROVIDER,
-    "-c",
-    CODEX_DISABLE_COMPATIBILITY_PLUGIN,
-    ...config,
-    ...native,
-  ];
+  return [codex, "--remote", endpoint, ...REMOTE_CLIENT_PROVIDER, ...config, ...native];
 }
 
 function spawnInteractive(command: string[], narrator: Narrator, env: Environ, cwd: string | null) {

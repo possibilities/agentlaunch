@@ -55,6 +55,7 @@ export interface CapabilitySet {
   claudePluginDir: string | null;
   skillRoots: string[];
   skills: Array<{ name: string; path: string }>;
+  codexCompatibilitySkillNames: string[];
   guidance: string;
   guidanceFile: string | null;
   piExtensions: string[];
@@ -62,18 +63,15 @@ export interface CapabilitySet {
   receiptRequired: boolean;
 }
 
-export const CODEX_DISABLE_COMPATIBILITY_PLUGIN =
-  'plugins."agent@agentstart-managed".enabled=false';
-
-export function codexSkillPolicyArguments(skills: CapabilitySet["skills"]): string[] {
-  const args = ["-c", CODEX_DISABLE_COMPATIBILITY_PLUGIN];
-  if (skills.length > 0) {
-    const config = skills
-      .map((skill) => `{path=${JSON.stringify(join(skill.path, "SKILL.md"))},enabled=true}`)
-      .join(",");
-    args.push("-c", `skills.config=[${config}]`);
-  }
-  return args;
+export function codexSkillPolicyArguments(
+  skills: CapabilitySet["skills"],
+  compatibilitySkillNames: CapabilitySet["codexCompatibilitySkillNames"],
+): string[] {
+  const config = [
+    ...compatibilitySkillNames.map((name) => `{name=${JSON.stringify(name)},enabled=false}`),
+    ...skills.map((skill) => `{path=${JSON.stringify(join(skill.path, "SKILL.md"))},enabled=true}`),
+  ].join(",");
+  return config === "" ? [] : ["-c", `skills.config=[${config}]`];
 }
 
 interface Receipt {
@@ -153,6 +151,7 @@ export function resolveCapabilities(
     claudePluginDir: hasClaudeResources ? join(projectionRoot, "claude", "agent") : null,
     skillRoots: projectedSkills.length === 0 ? [] : [join(projectionRoot, "skills")],
     skills: projectedSkills,
+    codexCompatibilitySkillNames: discoverCodexCompatibilitySkillNames(root),
     guidance,
     guidanceFile: guidance === "" ? null : join(projectionRoot, "guidance.md"),
     piExtensions: packs.flatMap((pack) =>
@@ -184,7 +183,7 @@ export function applyCapabilityArguments(spec: LaunchSpec, set: CapabilitySet): 
         `native Codex capability launch has no exec, e, or review command: ${spec.command.join(" ")}`,
       );
     }
-    args.push(...codexSkillPolicyArguments(set.skills));
+    args.push(...codexSkillPolicyArguments(set.skills, set.codexCompatibilitySkillNames));
     if (set.guidance !== "") {
       args.push("-c", `developer_instructions=${JSON.stringify(set.guidance)}`);
     }
@@ -345,6 +344,20 @@ function discoverSkills(root: string, pack: string): Array<{ name: string; path:
     .map((entry) => ({ name: entry.name, path: join(directory, entry.name) }))
     .filter((skill) => existsSync(join(skill.path, "SKILL.md")))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function discoverCodexCompatibilitySkillNames(capabilityRoot: string): string[] {
+  const root = join(
+    capabilityRoot,
+    "compatibility",
+    "codex-marketplace",
+    "plugins",
+    "agent",
+    "skills",
+  );
+  return discoverSkills(root, "Codex compatibility projection").map(
+    (skill) => `agent:${skill.name}`,
+  );
 }
 
 function discoverFiles(root: string | null, pack: string, resource: string): string[] {

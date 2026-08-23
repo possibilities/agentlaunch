@@ -69,11 +69,12 @@ session projection:
   skills are `/agent:<skill>`.
 - Interactive Codex runs an account-bound App Server through codex-swap's
   foreground launch contract, receives `skills/extraRoots/set` plus exact
-  session-flag `skills.config` entries, and connects its native TUI with
-  `codex --remote`; skills stay bare `$<skill>`. Non-interactive `exec`/`e`
-  and `review` launches stay on their native command transport and receive
-  the exact `skills.config` and merged guidance as command-local config while
-  retaining the same codex-swap account pin.
+  session-flag `skills.config` entries that enable selected bare skills and
+  suppress the compatibility plugin's `$agent:<skill>` aliases, then connects
+  its native TUI with `codex --remote`; skills stay bare `$<skill>`.
+  Non-interactive `exec`/`e` and `review` launches stay on their native command
+  transport and receive the exact `skills.config` and merged guidance as
+  command-local config while retaining the same codex-swap account pin.
 - Pi disables ambient skill/extension/template discovery and receives
   explicit paths; skills stay bare `/<skill>`.
 

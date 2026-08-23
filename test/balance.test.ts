@@ -259,8 +259,6 @@ describe("balanced launch", () => {
       "-c",
       'model_reasoning_effort="high"',
       "exec",
-      "-c",
-      'plugins."agent@agentstart-managed".enabled=false',
       "hello",
     ]);
     expect(data.command).not.toContain("--remote");

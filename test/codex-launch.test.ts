@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type CapabilitySet, CODEX_DISABLE_COMPATIBILITY_PLUGIN } from "../src/capabilities.ts";
+import type { CapabilitySet } from "../src/capabilities.ts";
 import type { LaunchSpec } from "../src/harness.ts";
 import {
   codexAppServerCommand,
@@ -43,6 +43,7 @@ describe("Codex App Server supervision", () => {
       claudePluginDir: null,
       skillRoots: [],
       skills: [],
+      codexCompatibilitySkillNames: [],
       guidance: "",
       guidanceFile: null,
       piExtensions: [],
@@ -74,31 +75,32 @@ describe("Codex App Server supervision", () => {
     ]);
   });
 
-  test("disables the compatibility plugin in both managed Codex processes", () => {
+  test("name-disables compatibility aliases only on the managed App Server", () => {
     const spec: LaunchSpec = {
       harness: "codex",
       command: ["codex", "--model", "gpt-x"],
       sessionId: null,
       transport: "codex-remote",
     };
-    const server = codexAppServerCommand(spec, "unix:///tmp/c.sock", [
-      { name: "build", path: "/capabilities/build" },
-    ]);
+    const server = codexAppServerCommand(
+      spec,
+      "unix:///tmp/c.sock",
+      [{ name: "build", path: "/capabilities/build" }],
+      ["agent:build", "agent:collab"],
+    );
     const world = codexPath();
     const client = codexRemoteCommand(spec, "unix:///tmp/c.sock", "", { PATH: world.bin });
 
     expect(server).toEqual([
       "codex",
       "-c",
-      CODEX_DISABLE_COMPATIBILITY_PLUGIN,
-      "-c",
-      'skills.config=[{path="/capabilities/build/SKILL.md",enabled=true}]',
+      'skills.config=[{name="agent:build",enabled=false},{name="agent:collab",enabled=false},{path="/capabilities/build/SKILL.md",enabled=true}]',
       "app-server",
       "--listen",
       "unix:///tmp/c.sock",
     ]);
-    expect(client).toContain(CODEX_DISABLE_COMPATIBILITY_PLUGIN);
     expect(client.join(" ")).not.toContain("skills.config");
+    expect(client.join(" ")).not.toContain("agent:build");
   });
 
   test("retains a balanced account pin but turns resume into a server run", () => {
@@ -108,13 +110,13 @@ describe("Codex App Server supervision", () => {
       sessionId: "thread-1",
       transport: "codex-remote",
     };
-    expect(codexAppServerCommand(spec, "unix:///tmp/c.sock", []).slice(0, 6)).toEqual([
+    expect(codexAppServerCommand(spec, "unix:///tmp/c.sock", [], []).slice(0, 6)).toEqual([
       "codex-swap",
       "run",
       "--claim",
       "lease-1",
       "--",
-      "-c",
+      "app-server",
     ]);
   });
 
@@ -154,8 +156,6 @@ describe("Codex App Server supervision", () => {
       "-c",
       "model_providers.agentlaunch-remote.requires_openai_auth=false",
       "-c",
-      CODEX_DISABLE_COMPATIBILITY_PLUGIN,
-      "-c",
       'developer_instructions="line one\\nline two"',
       "resume",
       "thread-1",
@@ -185,8 +185,6 @@ describe("Codex App Server supervision", () => {
       'model_providers.agentlaunch-remote.wire_api="responses"',
       "-c",
       "model_providers.agentlaunch-remote.requires_openai_auth=false",
-      "-c",
-      CODEX_DISABLE_COMPATIBILITY_PLUGIN,
       "--search",
       "line one\nline two",
     ]);

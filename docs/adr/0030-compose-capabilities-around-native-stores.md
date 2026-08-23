@@ -15,16 +15,18 @@ connection, remote TUI, and termination. No resident server, endpoint
 registry, or attach lifecycle is introduced. After setting extra roots,
 AgentLaunch also supplies session-flag `skills.config` entries for the exact
 selected `SKILL.md` paths, so those skills win over lower-layer user disable
-rules without globally installing them. Both the App Server and its remote TUI
-receive the desktop compatibility-plugin disable: the TUI resolves local
-plugins independently before connecting, while `skills.config` remains solely
-on the server that owns the session projection.
+rules without globally installing them. Codex resolves plugin enablement only
+from persistent user/profile layers, so a session flag cannot turn off the
+desktop compatibility plugin. AgentLaunch instead enumerates that projection's
+qualified skill names and name-disables every `$agent:<skill>` alias in the
+same App Server policy. The plugin stays available to desktop clients while a
+managed session exposes only its selected bare names.
 
 The App Server transport is exclusive to Codex's interactive TUI. Codex
 `exec` (including `e`) and `review` are account-bound model sessions but their
 CLI rejects `--remote`; AgentLaunch therefore keeps those commands inside the
 ordinary codex-swap `run` pin and injects the same exact `skills.config`,
-compatibility-plugin disable, and merged guidance directly into the native
+compatibility-alias suppression, and merged guidance directly into the native
 non-interactive command. Session classification still controls balancing and
 receipts; transport classification only decides whether an App Server exists.
 Codex parses every `-c` value as TOML, so the generated `skills.config` is an
