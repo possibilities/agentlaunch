@@ -30,6 +30,14 @@ instead of becoming a harness — the same launch with a different outcome,
 which is why the activator is a flag and not a command. _Avoid_: launcher
 popup (the popup is the host's chrome, not this form).
 
+**Priming** — A configured skill name the surface form prefixes onto the
+intent in the target harness's own spelling: `/agent:<skill>` for Claude,
+`$<skill>` for Codex, `/<skill>` for Pi. An intent that already leads with a
+slash command is its own invocation, so priming reads `none` and takes no
+input until it does not — suppression is derived from the intent, never
+stored, and the operator's standing choice returns with a plain intent.
+_Avoid_: preamble, prefix skill.
+
 **Session directive** — One schema-versioned JSON line describing a session
 for a surface host to realize: cwd, worktree, focus, the agent kind with its
 launch arguments, the composed intent, and opaque record extras. The

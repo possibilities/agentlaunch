@@ -100,7 +100,9 @@ on stdin and stderr, and refuses a stdout that is a terminal — that means
 no host is reading. Project roots and priming choices come from the config
 (`roots`, `priming`); an interrupted form is restored from its draft on the
 next open. Priming spells Claude skills as `/agent:<skill>`, Codex as
-`$<skill>`, and Pi as `/<skill>`. The `surface-handoff-protocol` wiki page
+`$<skill>`, and Pi as `/<skill>`. An intent that already leads with a slash
+command is its own invocation, so the priming row reads `none` and stops
+taking input until the intent does not. The `surface-handoff-protocol` wiki page
 documents the directive contract.
 
 ## Resume

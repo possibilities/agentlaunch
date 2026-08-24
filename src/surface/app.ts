@@ -10,11 +10,11 @@ import {
   buildFormLines,
   buildPlan,
   type ChooseField,
+  chosenPriming,
   createForm,
   currentEffort,
   currentHarness,
   currentModel,
-  currentPriming,
   type Field,
   type FormHarness,
   type FormRow,
@@ -23,6 +23,7 @@ import {
   handleRowPress,
   handleRowScroll,
   normalizeEditedIntent,
+  primingSuppressed,
   resetForAnother,
   setEffort,
   setHarness,
@@ -477,7 +478,11 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
     { id: "harness", key: "H", label: "choose harness", onRun: () => openChooser("harness") },
     { id: "model", key: "M", label: "choose model", onRun: () => openChooser("model") },
     { id: "effort", key: "E", label: "choose effort", onRun: () => openChooser("effort") },
-    { id: "priming", key: "I", label: "choose priming", onRun: () => openChooser("priming") },
+    ...(primingSuppressed(state)
+      ? []
+      : [
+          { id: "priming", key: "I", label: "choose priming", onRun: () => openChooser("priming") },
+        ]),
     {
       id: "worktree",
       key: "W",
@@ -519,6 +524,10 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
       intent.blur();
       intentFocused = false;
     }
+    // The intent is the textarea's, and the form reads it on every repaint —
+    // a paste and an editor's answer land here as surely as a keystroke, so
+    // whatever the prompt decides (priming's suppression) decides on time.
+    state.prompt = intent.plainText;
     // The draft file shadows the whole form on every repaint: nothing is
     // ever lost to a crash, a stray escape, or a closed popup, and capture
     // needs no dismissal hook — the current state is always already kept.
@@ -529,7 +538,7 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
       harness: currentHarness(state).harness,
       model: currentModel(state).model,
       effort: currentEffort(state),
-      priming: currentPriming(state),
+      priming: chosenPriming(state),
     };
     const serialized = JSON.stringify(draft);
     if (serialized !== lastDraftJson) {

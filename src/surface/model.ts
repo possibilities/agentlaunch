@@ -213,9 +213,17 @@ const FIELD_ORDER: readonly Field[] = [
   "priming",
 ];
 
+/** A suppressed priming row leaves the tab order with its input: focus
+ * lands only where the operator can act. */
+function focusOrder(state: FormState): Field[] {
+  const order = [...FIELD_ORDER];
+  return primingSuppressed(state) ? order.filter((field) => field !== "priming") : order;
+}
+
 function moveFocus(state: FormState, delta: number): void {
-  const at = Math.max(0, FIELD_ORDER.indexOf(state.focus));
-  state.focus = FIELD_ORDER[(at + delta + FIELD_ORDER.length) % FIELD_ORDER.length]!;
+  const order = focusOrder(state);
+  const at = Math.max(0, order.indexOf(state.focus));
+  state.focus = order[(at + delta + order.length) % order.length]!;
 }
 
 function step(index: number, delta: number, length: number): number {
@@ -280,13 +288,45 @@ export function setEffort(state: FormState, index: number): void {
 }
 
 export function setPriming(state: FormState, index: number): void {
+  if (primingSuppressed(state)) return;
   if (index < 0 || index >= state.primingOptions.length) return;
   state.focus = "priming";
   state.primingIndex = index;
 }
 
-export function currentPriming(state: FormState): string {
+/** A prompt that opens with a slash command is already an invocation, and a
+ * priming prefix in front of it would leave the harness reading the command
+ * as an argument. The first token must be a bare `/name`: a leading absolute
+ * path is prose, not a command. */
+const SLASH_COMMAND = /^\s*\/[A-Za-z0-9][^\s/]*(\s|$)/;
+
+/** Suppression is derived, never stored: the row shows "none" and refuses
+ * input while the prompt leads with a command, and the operator's own choice
+ * waits underneath for a prompt that does not. */
+export function primingSuppressed(state: FormState): boolean {
+  return SLASH_COMMAND.test(state.prompt);
+}
+
+/** The row's standing selection, suppression aside — what the draft keeps. */
+export function chosenPriming(state: FormState): string {
   return state.primingOptions[state.primingIndex] ?? PRIMING_NONE;
+}
+
+/** What a launch would actually carry. */
+export function currentPriming(state: FormState): string {
+  return primingSuppressed(state) ? PRIMING_NONE : chosenPriming(state);
+}
+
+export const PRIMING_SUPPRESSED_NOTICE = "the prompt leads with a command; priming is off";
+
+/** Every route to a chooser passes here, so a suppressed row refuses once
+ * and says why instead of opening. */
+function chooseAction(state: FormState, field: ChooseField): FormAction {
+  if (field === "priming" && primingSuppressed(state)) {
+    state.notice = { text: PRIMING_SUPPRESSED_NOTICE, tone: "warn" };
+    return { kind: "none" };
+  }
+  return { kind: "choose", field };
 }
 
 export function toggleWorktree(state: FormState): void {
@@ -378,14 +418,18 @@ export function handleRowPress(state: FormState, field: Field | null): FormActio
     toggleWorktree(state);
     return { kind: "none" };
   }
+  if (field === "priming" && primingSuppressed(state)) {
+    return chooseAction(state, field);
+  }
   state.focus = field;
-  return { kind: "choose", field };
+  return chooseAction(state, field);
 }
 
 /** A wheel gesture over a row focuses it and steps its value — the
  * arrows' verb at the pointer. */
 export function handleRowScroll(state: FormState, field: Field | null, delta: number): void {
   if (state.phase.kind !== "form" || field === null || field === "prompt") return;
+  if (field === "priming" && primingSuppressed(state)) return;
   state.focus = field;
   stepValue(state, delta);
 }
@@ -450,7 +494,7 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
       return { kind: "none" };
     }
     // Text fields consumed their space above; every other row is a chooser.
-    return { kind: "choose", field: state.focus };
+    return chooseAction(state, state.focus);
   }
   const letter = key.sequence !== undefined && key.sequence.length === 1 ? key.sequence : name;
   if (
@@ -464,15 +508,15 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
   }
   switch (letter.toLowerCase()) {
     case "p":
-      return { kind: "choose", field: "project" };
+      return chooseAction(state, "project");
     case "h":
-      return { kind: "choose", field: "harness" };
+      return chooseAction(state, "harness");
     case "m":
-      return { kind: "choose", field: "model" };
+      return chooseAction(state, "model");
     case "e":
-      return { kind: "choose", field: "effort" };
+      return chooseAction(state, "effort");
     case "i":
-      return { kind: "choose", field: "priming" };
+      return chooseAction(state, "priming");
     case "w":
       toggleWorktree(state);
       return { kind: "none" };
@@ -634,7 +678,18 @@ export function buildFormLines(state: FormState, width: number): FormRow[] {
       state,
       "priming",
       "priming",
-      selectValue(state, "priming", priming, priming === PRIMING_NONE ? "muted" : "text"),
+      primingSuppressed(state)
+        ? [
+            span(PRIMING_NONE, "faint"),
+            span(
+              fit(
+                ` ${GLYPHS.sep} slash command`,
+                Math.max(0, width - LABEL_WIDTH - 2 - PRIMING_NONE.length),
+              ),
+              "faint",
+            ),
+          ]
+        : selectValue(state, "priming", priming, priming === PRIMING_NONE ? "muted" : "text"),
     ),
   });
 

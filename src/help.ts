@@ -139,6 +139,8 @@ a stdout that is a terminal — that means no host is reading. Project roots
 and priming choices come from the config ("roots", "priming"); an
 interrupted form is restored from its draft on the next open.
 Priming emits /agent:<skill> for Claude, $<skill> for Codex, and /<skill> for Pi.
+An intent that already leads with a slash command is its own invocation: the
+priming row reads "none" and takes no input while that holds.
 `,
   "x-doctor": `agentlaunch x-doctor [--x-json]
 

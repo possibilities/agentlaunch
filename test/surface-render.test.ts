@@ -94,6 +94,25 @@ describe("buildFormLines", () => {
     expect(rows(state, 76).join("\n")).not.toContain("words that must not appear");
   });
 
+  test("a slash-command prompt shows the priming row off, within the frame", () => {
+    const state = createForm({
+      projects: [...PROJECTS],
+      harnesses: HARNESSES,
+      primings: ["collab"],
+    });
+    expect(rows(state, 76).join("\n")).toContain("collab");
+    state.prompt = "/collab ship the form";
+    const primingRow = rows(state, 76).find((row) => row.includes("priming"));
+    expect(primingRow).toContain("none");
+    expect(primingRow).toContain("slash command");
+    expect(primingRow?.startsWith("▎")).toBe(false);
+    for (const width of [36, 76, 96]) {
+      for (const row of rows(state, width)) {
+        expect(row.length).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+
   test("tags each field row for the pointer; separators and status are null", () => {
     const state = form();
     expect(buildFormLines(state, 76).map((row) => row.field)).toEqual([

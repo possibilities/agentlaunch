@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildPlan,
+  chosenPriming,
   createForm,
   currentEffort,
   currentHarness,
@@ -14,6 +15,7 @@ import {
   handleRowScroll,
   type KeyEvent,
   normalizeEditedIntent,
+  primingSuppressed,
   resetForAnother,
   setEffort,
   setHarness,
@@ -338,6 +340,66 @@ describe("priming", () => {
     expect(handleFormKey(state, key("i"))).toEqual({ kind: "choose", field: "priming" });
     setPriming(state, 2);
     expect(buildPlan(state)?.priming).toBe("build");
+  });
+
+  test("a prompt leading with a slash command forces none and disables the row", () => {
+    const state = withPrimings();
+    expect(currentPriming(state)).toBe("collab");
+    state.prompt = "/collab ship the form";
+    expect(primingSuppressed(state)).toBe(true);
+    expect(currentPriming(state)).toBe("none");
+    expect(buildPlan(state)?.priming).toBeNull();
+    // The choice waits underneath: a prompt that stops leading with a
+    // command finds the row exactly where the operator left it.
+    expect(chosenPriming(state)).toBe("collab");
+    state.prompt = "ship the form";
+    expect(currentPriming(state)).toBe("collab");
+  });
+
+  test("the disabled row refuses every route to its chooser, and says why", () => {
+    const state = withPrimings();
+    state.prompt = "/build the thing";
+    state.focus = "harness";
+    expect(handleFormKey(state, key("i"))).toEqual({ kind: "none" });
+    expect(state.notice?.text).toContain("priming is off");
+    expect(handleRowPress(state, "priming")).toEqual({ kind: "none" });
+    expect(state.focus).toBe("harness");
+    handleRowScroll(state, "priming", 1);
+    expect(state.focus).toBe("harness");
+    setPriming(state, 2);
+    expect(chosenPriming(state)).toBe("collab");
+    // Other rows still answer.
+    expect(handleFormKey(state, key("m"))).toEqual({ kind: "choose", field: "model" });
+  });
+
+  test("the disabled row leaves the tab order", () => {
+    const state = withPrimings();
+    state.prompt = "/collab";
+    state.focus = "effort";
+    handleFormKey(state, key("tab"));
+    // String() keeps the assignment above from narrowing the assertion away.
+    expect(String(state.focus)).toBe("prompt");
+    state.prompt = "just words";
+    state.focus = "effort";
+    handleFormKey(state, key("tab"));
+    expect(String(state.focus)).toBe("priming");
+  });
+
+  test("only a leading bare command suppresses; a path or a mention is prose", () => {
+    const state = withPrimings();
+    for (const prose of [
+      "/Users/u/code/alpha/main.ts is broken",
+      "run /collab when you are done",
+      "/ is the root",
+      "",
+    ]) {
+      state.prompt = prose;
+      expect(primingSuppressed(state)).toBe(false);
+    }
+    for (const command of ["/collab", "  /build ship it", "/agent:collab do the thing", "/e\n"]) {
+      state.prompt = command;
+      expect(primingSuppressed(state)).toBe(true);
+    }
   });
 
   test("launch history does not override the configured priming default", () => {
