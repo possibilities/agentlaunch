@@ -169,11 +169,16 @@ export function codexAppServerCommand(
   skills: CapabilitySet["skills"],
   compatibilitySkillNames: CapabilitySet["codexCompatibilitySkillNames"],
 ): string[] {
+  // Codex parses `-c` into two independent sets: the flags before a subcommand
+  // and the flags after it. A subcommand carrying any `-c` of its own silently
+  // discards every global one, so the skill policy belongs after `app-server`:
+  // codex-swap appends the runtime proxy's own `-c` flags to whatever we hand
+  // it, and a policy placed in front of the subcommand is dropped whole.
   const serverArgs = [
-    ...codexSkillPolicyArguments(skills, compatibilitySkillNames),
     "app-server",
     "--listen",
     endpoint,
+    ...codexSkillPolicyArguments(skills, compatibilitySkillNames),
   ];
   const command = spec.command;
   if (command[0] === "codex") return ["codex", ...serverArgs];
@@ -227,12 +232,26 @@ export function codexRemoteCommand(
   }
   const config =
     guidance === "" ? [] : ["-c", `developer_instructions=${JSON.stringify(guidance)}`];
+  // Our `-c` flags have to share a clap set with the caller's own, because a
+  // subcommand carrying any `-c` discards every global one. `resume <id>` is
+  // the only subcommand this command builds, so lift it ahead of them and let
+  // the forwarded tokens follow.
+  const [subcommand, forwarded] =
+    native[0] === "resume" ? [native.slice(0, 2), native.slice(2)] : [[], native];
   // The account-bound server intentionally exposes no local account object:
   // codex-multi-auth authenticates its upstream requests through the runtime
   // proxy instead. A remote TUI still evaluates its local provider before it
   // connects, so give only that client a no-auth placeholder. Remote thread
   // params omit model_provider; the server retains its pinned runtime proxy.
-  return [codex, "--remote", endpoint, ...REMOTE_CLIENT_PROVIDER, ...config, ...native];
+  return [
+    codex,
+    "--remote",
+    endpoint,
+    ...subcommand,
+    ...REMOTE_CLIENT_PROVIDER,
+    ...config,
+    ...forwarded,
+  ];
 }
 
 function spawnInteractive(command: string[], narrator: Narrator, env: Environ, cwd: string | null) {

@@ -31,6 +31,13 @@ non-interactive command. Session classification still controls balancing and
 receipts; transport classification only decides whether an App Server exists.
 Codex parses every `-c` value as TOML, so the generated `skills.config` is an
 array of TOML inline tables (`[{path="…",enabled=true}]`), never JSON objects.
+Codex also keeps the `-c` flags before a subcommand and the ones after it in
+separate sets, and a subcommand carrying any of its own silently discards every
+global one. Every `-c` AgentLaunch emits therefore follows the subcommand it is
+meant for — after `app-server`, and after `resume <id>` on the remote client —
+because codex-swap appends the runtime proxy's own `-c` flags to whatever it is
+handed, which would otherwise drop the whole policy and restore the duplicate
+compatibility aliases.
 
 The account-bound App Server spawn also removes the retired sidecar
 environment's runtime-proxy kill switches. Long-lived parent sessions may

@@ -91,13 +91,16 @@ describe("Codex App Server supervision", () => {
     const world = codexPath();
     const client = codexRemoteCommand(spec, "unix:///tmp/c.sock", "", { PATH: world.bin });
 
+    // The policy has to follow the subcommand: codex drops every global `-c`
+    // as soon as the subcommand carries one of its own, and codex-swap appends
+    // the runtime proxy's `-c` flags after everything we pass.
     expect(server).toEqual([
       "codex",
-      "-c",
-      'skills.config=[{name="agent:build",enabled=false},{name="agent:collab",enabled=false},{path="/capabilities/build/SKILL.md",enabled=true}]',
       "app-server",
       "--listen",
       "unix:///tmp/c.sock",
+      "-c",
+      'skills.config=[{name="agent:build",enabled=false},{name="agent:collab",enabled=false},{path="/capabilities/build/SKILL.md",enabled=true}]',
     ]);
     expect(client.join(" ")).not.toContain("skills.config");
     expect(client.join(" ")).not.toContain("agent:build");
@@ -110,13 +113,15 @@ describe("Codex App Server supervision", () => {
       sessionId: "thread-1",
       transport: "codex-remote",
     };
-    expect(codexAppServerCommand(spec, "unix:///tmp/c.sock", [], []).slice(0, 6)).toEqual([
+    expect(codexAppServerCommand(spec, "unix:///tmp/c.sock", [], [])).toEqual([
       "codex-swap",
       "run",
       "--claim",
       "lease-1",
       "--",
       "app-server",
+      "--listen",
+      "unix:///tmp/c.sock",
     ]);
   });
 
@@ -130,6 +135,47 @@ describe("Codex App Server supervision", () => {
     ).toEqual({ PATH: "/bin" });
   });
 
+  test("every emitted -c follows the subcommand that codex parses it against", () => {
+    // Codex keeps the `-c` flags before a subcommand and the ones after it in
+    // two separate sets, and a subcommand carrying any of its own drops all the
+    // global ones. codex-swap appends the runtime proxy's `-c` flags after our
+    // arguments, so a policy in front of `app-server` is silently discarded and
+    // the compatibility aliases come back — 29 duplicate skills per session.
+    const world = codexPath();
+    const skills = [{ name: "build", path: "/capabilities/build" }];
+    const aliases = ["agent:build"];
+    for (const spec of [
+      {
+        harness: "codex",
+        command: ["codex"],
+        sessionId: null,
+        transport: "codex-remote",
+      } satisfies LaunchSpec,
+      {
+        harness: "codex",
+        command: ["codex-swap", "run", "--claim", "lease-1", "--"],
+        sessionId: null,
+        transport: "codex-remote",
+      } satisfies LaunchSpec,
+      {
+        harness: "codex",
+        command: ["codex-swap", "resume", "thread-1", "--claim", "lease-1", "--"],
+        sessionId: "thread-1",
+        transport: "codex-remote",
+      } satisfies LaunchSpec,
+    ]) {
+      const server = codexAppServerCommand(spec, "unix:///tmp/c.sock", skills, aliases);
+      expect(server.indexOf("app-server")).toBeGreaterThan(-1);
+      expect(server.indexOf("-c")).toBeGreaterThan(server.indexOf("app-server"));
+
+      const client = codexRemoteCommand(spec, "unix:///tmp/c.sock", "guidance", {
+        PATH: world.bin,
+      });
+      const resume = client.indexOf("resume");
+      if (resume > -1) expect(client.indexOf("-c")).toBeGreaterThan(resume);
+    }
+  });
+
   test("the native remote TUI carries resume tokens and merged guidance", () => {
     const world = codexPath();
     const spec: LaunchSpec = {
@@ -141,10 +187,15 @@ describe("Codex App Server supervision", () => {
     const command = codexRemoteCommand(spec, "unix:///tmp/c.sock", "line one\nline two", {
       PATH: world.bin,
     });
+    // `resume` precedes the client's own `-c` flags: a subcommand that carries
+    // any `-c` discards the global ones, which would strand the no-auth
+    // placeholder provider and the rendered guidance.
     expect(command).toEqual([
       join(world.bin, "codex"),
       "--remote",
       "unix:///tmp/c.sock",
+      "resume",
+      "thread-1",
       "-c",
       'model_provider="agentlaunch-remote"',
       "-c",
@@ -157,8 +208,6 @@ describe("Codex App Server supervision", () => {
       "model_providers.agentlaunch-remote.requires_openai_auth=false",
       "-c",
       'developer_instructions="line one\\nline two"',
-      "resume",
-      "thread-1",
       "--search",
     ]);
   });
