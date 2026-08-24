@@ -26,7 +26,7 @@ const yoloShape = {
   claude: z
     .boolean()
     .describe(
-      "Inject --permission-mode auto into claude launches — claude's own auto mode, which classifies each action rather than waving all of them through. Defaults to true when omitted.",
+      "Inject --dangerously-skip-permissions --allow-dangerously-skip-permissions into claude launches — the bypass plus the flag that permits it. Defaults to true when omitted.",
     )
     .optional(),
   codex: z
@@ -59,7 +59,7 @@ const yoloSchema = z
     yoloMapSchema,
   ])
   .describe(
-    "Whether a launch stands each harness's own interactive permission gates down by injecting that harness's documented flag into the launch spec: --permission-mode auto for claude, --dangerously-bypass-approvals-and-sandbox for codex, --approve for pi. Omit the key (or the whole file) and every harness is ON. A bare boolean sets all three at once; an object sets them individually and leaves the unnamed ones on. Utility invocations never receive the flag, a spelling the caller already forwarded is not duplicated (claude's --dangerously-skip-permissions counts as one), and pi's own --no-approve — or any other --permission-mode the caller chose — is never overridden. `--x-yolo` and `--x-no-yolo` (optionally scoped to a harness, repeatable) override this per launch; an explicit --x-no-yolo also removes a yolo flag that was explicitly forwarded, narrated on stderr.",
+    "Whether a launch stands each harness's own interactive permission gates down by injecting that harness's documented flag into the launch spec: --dangerously-skip-permissions --allow-dangerously-skip-permissions for claude, --dangerously-bypass-approvals-and-sandbox for codex, --approve for pi. Omit the key (or the whole file) and every harness is ON. A bare boolean sets all three at once; an object sets them individually and leaves the unnamed ones on. Utility invocations never receive the flag, a spelling the caller already forwarded is not duplicated, and pi's own --no-approve — or any other --permission-mode the caller chose — is never overridden. `--x-yolo` and `--x-no-yolo` (optionally scoped to a harness, repeatable) override this per launch; an explicit --x-no-yolo also removes a yolo flag that was explicitly forwarded, narrated on stderr.",
   );
 
 const rootsSchema = z

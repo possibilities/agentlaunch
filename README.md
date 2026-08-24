@@ -140,7 +140,7 @@ eligibility checks. `--x-no-balance` runs the raw harness.
 
 Yolo is on by default and means each harness's own unattended setting:
 
-- Claude: `--permission-mode auto`
+- Claude: `--dangerously-skip-permissions --allow-dangerously-skip-permissions`
 - Codex: `--dangerously-bypass-approvals-and-sandbox`
 - Pi: `--approve`
 

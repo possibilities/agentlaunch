@@ -70,7 +70,7 @@ fi
 
 # Catalog resolution and native spellings.
 expect_exit 0 run --x-harness claude --x-dry-run
-expect_out "claude --permission-mode auto --model 'opus\[1m\]' --effort medium"
+expect_out "claude --dangerously-skip-permissions --allow-dangerously-skip-permissions --model 'opus\[1m\]' --effort medium"
 expect_exit 0 run --x-harness codex --x-no-yolo --x-dry-run
 expect_out "codex --cd .* --model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"'"
 expect_exit 0 run --x-harness pi --x-level gpt-5.6-luna:max --x-no-yolo --x-dry-run
@@ -111,7 +111,7 @@ expect_err "the caller's spelling wins"
 mkdir -p "$WORK/home/.config/agentlaunch"
 printf '{"yolo":false}\n' >"$WORK/home/.config/agentlaunch/config.json"
 expect_exit 0 run --x-harness claude --x-dry-run
-if grep -q -- "--permission-mode" "$WORK/out"; then
+if grep -q -- "--dangerously" "$WORK/out"; then
   echo "FAIL: disabling config still injected yolo" >&2
   exit 1
 fi

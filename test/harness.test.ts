@@ -117,8 +117,8 @@ describe("utilityInvocation", () => {
 describe("applyYolo", () => {
   test("on injects the canonical spelling at the head of the stream", () => {
     expect(applyYolo("claude", ["--model", "fable"], ON, false).tokens).toEqual([
-      "--permission-mode",
-      "auto",
+      "--dangerously-skip-permissions",
+      "--allow-dangerously-skip-permissions",
       "--model",
       "fable",
     ]);
@@ -136,13 +136,21 @@ describe("applyYolo", () => {
     const short = applyYolo("pi", ["-a"], ON, false);
     expect(short.tokens).toEqual(["-a"]);
     expect(short.injected).toBeNull();
-    const auto = applyYolo("claude", ["--permission-mode", "auto"], ON, false);
-    expect(auto.tokens).toEqual(["--permission-mode", "auto"]);
-    expect(auto.injected).toBeNull();
-    expect(auto.present).toBe("--permission-mode auto");
-    const attached = applyYolo("claude", ["--permission-mode=auto"], ON, false);
-    expect(attached.injected).toBeNull();
-    expect(attached.presentNegative).toBe(false);
+    // The permitting half alone says nothing about the gates: the missing
+    // half is injected, and only that half.
+    const permit = applyYolo("claude", ["--allow-dangerously-skip-permissions"], ON, false);
+    expect(permit.tokens).toEqual([
+      "--dangerously-skip-permissions",
+      "--allow-dangerously-skip-permissions",
+    ]);
+    expect(permit.injected).toBe("--dangerously-skip-permissions");
+    const both = applyYolo(
+      "claude",
+      ["--allow-dangerously-skip-permissions", "--dangerously-skip-permissions"],
+      ON,
+      false,
+    );
+    expect(both.injected).toBeNull();
   });
 
   test("claude's gate flag set any other way is the caller's decision", () => {
@@ -151,12 +159,18 @@ describe("applyYolo", () => {
     expect(plan.injected).toBeNull();
     expect(plan.present).toBe("--permission-mode plan");
     expect(plan.presentNegative).toBe(true);
+    // Auto is a mode the caller chose, not the spelling this launcher emits.
+    const auto = applyYolo("claude", ["--permission-mode", "auto"], ON, false);
+    expect(auto.injected).toBeNull();
+    expect(auto.presentNegative).toBe(true);
     const attached = applyYolo("claude", ["--permission-mode=plan"], ON, false);
     expect(attached.injected).toBeNull();
     expect(attached.presentNegative).toBe(true);
     // A value the caller never chose the mode for is not a mode.
     const dangling = applyYolo("claude", ["--permission-mode"], ON, false);
-    expect(dangling.injected).toBe("--permission-mode auto");
+    expect(dangling.injected).toBe(
+      "--dangerously-skip-permissions --allow-dangerously-skip-permissions",
+    );
   });
 
   test("pi's own negative wins over injection", () => {
@@ -191,16 +205,26 @@ describe("applyYolo", () => {
     const alias = applyYolo("pi", ["-a", "hello"], EXPLICIT_OFF, false);
     expect(alias.tokens).toEqual(["hello"]);
     expect(alias.redacted).toEqual(["-a"]);
-    // A valued spelling leaves with its value.
+    // A canonical pair leaves whole.
     const pair = applyYolo(
       "claude",
-      ["--permission-mode", "auto", "--model", "fable"],
+      [
+        "--dangerously-skip-permissions",
+        "--allow-dangerously-skip-permissions",
+        "--model",
+        "fable",
+      ],
       EXPLICIT_OFF,
       false,
     );
     expect(pair.tokens).toEqual(["--model", "fable"]);
-    expect(pair.redacted).toEqual(["--permission-mode auto"]);
-    // Another mode is the caller's own, not ours to remove.
+    expect(pair.redacted).toEqual([
+      "--dangerously-skip-permissions --allow-dangerously-skip-permissions",
+    ]);
+    // A mode is the caller's own, not ours to remove.
+    const mode = applyYolo("claude", ["--permission-mode", "auto"], EXPLICIT_OFF, false);
+    expect(mode.tokens).toEqual(["--permission-mode", "auto"]);
+    expect(mode.redacted).toEqual([]);
     const other = applyYolo("claude", ["--permission-mode", "plan"], EXPLICIT_OFF, false);
     expect(other.tokens).toEqual(["--permission-mode", "plan"]);
     expect(other.redacted).toEqual([]);

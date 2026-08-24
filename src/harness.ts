@@ -170,16 +170,19 @@ export interface LaunchSpec {
 /**
  * Every spelling each harness accepts for the unattended end of its own
  * permission gates; the first is canonical and is what injection emits. A
- * spelling is a token sequence because claude's is a flag with a value
- * (ADR 0028): `--permission-mode auto` runs its classifier instead of
- * dropping the gates outright, so the canonical injection is the softer
- * setting and `--dangerously-skip-permissions` is only recognized, never
- * emitted. Pi has no gates on tools at all — `--approve` (and its `-a`
- * short) only auto-trusts project-local files. Verified against claude
- * 2.1.227, codex-cli 0.147.0, pi 0.84.1; re-check on harness upgrades.
+ * spelling is a token sequence because claude's is a pair (ADR 0031):
+ * `--dangerously-skip-permissions` drops the gates and
+ * `--allow-dangerously-skip-permissions` is what lets the session offer
+ * that bypass at all, so an unattended claude needs both. Pi has no gates
+ * on tools at all — `--approve` (and its `-a` short) only auto-trusts
+ * project-local files. Verified against claude 2.1.227, codex-cli 0.147.0,
+ * pi 0.84.1; re-check on harness upgrades.
  */
 export const YOLO_SPELLINGS: Record<HarnessName, readonly (readonly string[])[]> = {
-  claude: [["--permission-mode", "auto"], ["--dangerously-skip-permissions"]],
+  claude: [
+    ["--dangerously-skip-permissions", "--allow-dangerously-skip-permissions"],
+    ["--dangerously-skip-permissions"],
+  ],
   codex: [["--dangerously-bypass-approvals-and-sandbox"]],
   pi: [["--approve"], ["-a"]],
 };
@@ -193,8 +196,9 @@ const NATIVE_NO_YOLO: Record<HarnessName, readonly string[]> = {
 };
 
 /** A flag whose *value* settles the gates, so typing it at all is the
- * caller's decision however it is set: any value but the canonical one is a
- * negative. Only claude has one. */
+ * caller's decision however it is set — including `auto`, which is a mode
+ * the caller chose rather than the one this launcher injects. Only claude
+ * has one. */
 const GATE_FLAG: Record<HarnessName, string | null> = {
   claude: "--permission-mode",
   codex: null,
@@ -233,9 +237,7 @@ function findGate(harness: HarnessName, tokens: readonly string[]): GateMatch | 
       return { at, span: 2, display: `${gateFlag} ${tokens[at + 1]}`, negative: true };
     }
     if (token.startsWith(`${gateFlag}=`)) {
-      const canonical = spellings[0]!;
-      const negative = token !== `${gateFlag}=${canonical[1] ?? ""}`;
-      return { at, span: 1, display: token, negative };
+      return { at, span: 1, display: token, negative: true };
     }
   }
   return null;
@@ -295,7 +297,12 @@ export function applyYolo(
   if (!decision.on || utility || match !== null) {
     return { tokens: kept, injected: null, redacted, present, presentNegative };
   }
-  const canonical = YOLO_SPELLINGS[harness][0]!;
+  // A canonical pair can be half-typed — claude's permitting flag says
+  // nothing about the gates on its own — so inject only what is missing.
+  const canonical = YOLO_SPELLINGS[harness][0]!.filter((word) => !kept.includes(word));
+  if (canonical.length === 0) {
+    return { tokens: kept, injected: null, redacted, present, presentNegative };
+  }
   return {
     tokens: [...canonical, ...kept],
     injected: canonical.join(" "),

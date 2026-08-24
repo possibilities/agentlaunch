@@ -1,3 +1,5 @@
+_Superseded by ADR 0031._
+
 # 0028 — Yolo is each harness's own unattended setting, not a bypass
 
 Claude's yolo spelling is `--permission-mode auto`, not
