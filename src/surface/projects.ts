@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { type Dirent, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { expandTilde, tildePath } from "../paths.ts";
@@ -7,6 +8,18 @@ export interface ProjectChoice {
   path: string;
   display: string;
   count: number;
+  /** Whether Git can create a sibling worktree from this directory. */
+  supportsWorktree: boolean;
+}
+
+/** Git itself is the authority: this recognizes ordinary checkouts, linked
+ * worktrees, and configured project directories nested within either. */
+export function supportsWorktree(path: string): boolean {
+  const result = spawnSync("git", ["-C", path, "rev-parse", "--is-inside-work-tree"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  return result.status === 0 && result.stdout.trim() === "true";
 }
 
 /** Scan each root one level deep, offering the root itself as a choice
@@ -70,8 +83,14 @@ export function orderProjects(
   paths: readonly string[],
   counts: ReadonlyMap<string, number>,
   home: string,
+  canCreateWorktree: (path: string) => boolean = supportsWorktree,
 ): ProjectChoice[] {
   return paths
-    .map((path) => ({ path, display: tildePath(path, home), count: counts.get(path) ?? 0 }))
+    .map((path) => ({
+      path,
+      display: tildePath(path, home),
+      count: counts.get(path) ?? 0,
+      supportsWorktree: canCreateWorktree(path),
+    }))
     .sort((a, b) => b.count - a.count || (a.display < b.display ? -1 : 1));
 }

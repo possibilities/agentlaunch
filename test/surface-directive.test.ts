@@ -10,7 +10,12 @@ import {
 import type { LaunchPlan } from "../src/surface/model.ts";
 
 const PLAN: LaunchPlan = {
-  project: { path: "/code/alpha", display: "~/code/alpha", count: 0 },
+  project: {
+    path: "/code/alpha",
+    display: "~/code/alpha",
+    count: 0,
+    supportsWorktree: true,
+  },
   worktree: false,
   harness: "claude",
   model: "fable",

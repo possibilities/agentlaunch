@@ -213,11 +213,14 @@ const FIELD_ORDER: readonly Field[] = [
   "priming",
 ];
 
-/** A suppressed priming row leaves the tab order with its input: focus
- * lands only where the operator can act. */
+/** Disabled rows leave the tab order with their input: focus lands only
+ * where the operator can act. */
 function focusOrder(state: FormState): Field[] {
-  const order = [...FIELD_ORDER];
-  return primingSuppressed(state) ? order.filter((field) => field !== "priming") : order;
+  return FIELD_ORDER.filter(
+    (field) =>
+      !(field === "priming" && primingSuppressed(state)) &&
+      !(field === "worktree" && !worktreeAvailable(state)),
+  );
 }
 
 function moveFocus(state: FormState, delta: number): void {
@@ -317,6 +320,17 @@ export function currentPriming(state: FormState): string {
   return primingSuppressed(state) ? PRIMING_NONE : chosenPriming(state);
 }
 
+/** Worktree creation is meaningful only from a directory Git recognizes as
+ * part of a worktree. The operator's standing toggle remains underneath so
+ * switching back to a Git project restores it. */
+export function worktreeAvailable(state: FormState): boolean {
+  return state.projects[state.projectIndex]?.supportsWorktree === true;
+}
+
+export function currentWorktree(state: FormState): boolean {
+  return worktreeAvailable(state) && state.worktree;
+}
+
 export const PRIMING_SUPPRESSED_NOTICE = "the prompt leads with a command; priming is off";
 
 /** Every route to a chooser passes here, so a suppressed row refuses once
@@ -330,11 +344,14 @@ function chooseAction(state: FormState, field: ChooseField): FormAction {
 }
 
 export function toggleWorktree(state: FormState): void {
+  if (!worktreeAvailable(state)) return;
   state.worktree = !state.worktree;
 }
 
 export function setProject(state: FormState, index: number): void {
-  if (index >= 0 && index < state.projects.length) state.projectIndex = index;
+  if (index < 0 || index >= state.projects.length) return;
+  state.focus = "project";
+  state.projectIndex = index;
 }
 
 /** First-letter jump: on a select row, a letter naming any option's first
@@ -414,6 +431,7 @@ export function handleRowPress(state: FormState, field: Field | null): FormActio
     return { kind: "none" };
   }
   if (field === "worktree") {
+    if (!worktreeAvailable(state)) return { kind: "none" };
     state.focus = "worktree";
     toggleWorktree(state);
     return { kind: "none" };
@@ -429,6 +447,7 @@ export function handleRowPress(state: FormState, field: Field | null): FormActio
  * arrows' verb at the pointer. */
 export function handleRowScroll(state: FormState, field: Field | null, delta: number): void {
   if (state.phase.kind !== "form" || field === null || field === "prompt") return;
+  if (field === "worktree" && !worktreeAvailable(state)) return;
   if (field === "priming" && primingSuppressed(state)) return;
   state.focus = field;
   stepValue(state, delta);
@@ -552,7 +571,7 @@ export function buildPlan(state: FormState): LaunchPlan | null {
   const priming = currentPriming(state);
   return {
     project: state.projects[state.projectIndex]!,
-    worktree: state.worktree,
+    worktree: currentWorktree(state),
     harness: currentHarness(state).harness,
     model: model.model,
     effort,
@@ -596,7 +615,10 @@ function centered(text: string, width: number): string {
 }
 
 function fieldRow(state: FormState, field: Field, label: string, value: Span[]): Line {
-  const focused = state.focus === field && state.phase.kind === "form";
+  const focused =
+    state.focus === field &&
+    state.phase.kind === "form" &&
+    !(field === "worktree" && !worktreeAvailable(state));
   return [
     focused ? span(`${GLYPHS.rail} `, "accent") : span("  ", "text"),
     span(label.padEnd(LABEL_WIDTH), "muted"),
@@ -639,12 +661,21 @@ export function buildFormLines(state: FormState, width: number): FormRow[] {
       : [...selectValue(state, "project", fit(project.display, width - LABEL_WIDTH - 10))];
   rows.push({ field: "project", spans: fieldRow(state, "project", "project", projectValue) });
 
+  const canCreateWorktree = worktreeAvailable(state);
   rows.push({
     field: "worktree",
     spans: fieldRow(state, "worktree", "worktree", [
-      state.worktree
-        ? span(`${GLYPHS.live} new worktree`, "ok")
-        : span(`${GLYPHS.idle} no worktree`, "muted"),
+      !canCreateWorktree
+        ? span(
+            fit(
+              `${GLYPHS.idle} unavailable ${GLYPHS.sep} not a git repository`,
+              width - LABEL_WIDTH - 2,
+            ),
+            "muted",
+          )
+        : state.worktree
+          ? span(`${GLYPHS.live} new worktree`, "ok")
+          : span(`${GLYPHS.idle} no worktree`, "muted"),
     ]),
   });
   rows.push({ field: null, spans: [] });

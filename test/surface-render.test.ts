@@ -18,11 +18,17 @@ const HARNESSES: FormHarness[] = [
 ];
 
 const PROJECTS: ProjectChoice[] = [
-  { path: "/home/u/code/alpha", display: "~/code/alpha", count: 3 },
+  {
+    path: "/home/u/code/alpha",
+    display: "~/code/alpha",
+    count: 3,
+    supportsWorktree: true,
+  },
   {
     path: "/home/u/code/a-project-with-a-very-long-name-indeed",
     display: "~/code/a-project-with-a-very-long-name-indeed",
     count: 0,
+    supportsWorktree: true,
   },
 ];
 
@@ -61,6 +67,15 @@ describe("buildFormLines", () => {
     const text = rows(state, 76).join("\n");
     expect(text).toContain("○ no worktree");
     expect(text).not.toContain("branch");
+  });
+
+  test("a non-Git project renders the worktree row as unavailable and unfocused", () => {
+    const state = form();
+    state.projects[0] = { ...state.projects[0]!, supportsWorktree: false };
+    state.focus = "worktree"; // stale focus must not make a disabled row actionable
+    const worktreeRow = rows(state, 76).find((row) => row.includes("worktree"));
+    expect(worktreeRow).toContain("○ unavailable · not a git repository");
+    expect(worktreeRow?.startsWith("▎")).toBe(false);
   });
 
   test("no row exceeds the frame at the contract widths", () => {

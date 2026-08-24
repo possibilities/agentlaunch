@@ -31,6 +31,7 @@ import {
   setPriming,
   setProject,
   toggleWorktree,
+  worktreeAvailable,
 } from "./model.ts";
 import { createListOverlay, type ListOverlay } from "./overlay.ts";
 import { orderProjects, scanProjects } from "./projects.ts";
@@ -483,15 +484,19 @@ export async function runSurfaceForm(env: Environ, home: string): Promise<number
       : [
           { id: "priming", key: "I", label: "choose priming", onRun: () => openChooser("priming") },
         ]),
-    {
-      id: "worktree",
-      key: "W",
-      label: "toggle worktree",
-      onRun: () => {
-        toggleWorktree(state);
-        paint();
-      },
-    },
+    ...(worktreeAvailable(state)
+      ? [
+          {
+            id: "worktree",
+            key: "W",
+            label: "toggle worktree",
+            onRun: () => {
+              toggleWorktree(state);
+              paint();
+            },
+          },
+        ]
+      : []),
     { id: "editor", key: "⌃G", label: "edit intent in $EDITOR", onRun: () => void editIntent() },
     { id: "quit", key: "ESC", label: "quit without launching", onRun: () => shutdown(0) },
   ];

@@ -21,6 +21,7 @@ import {
   setHarness,
   setModel,
   setPriming,
+  setProject,
 } from "../src/surface/model.ts";
 import type { ProjectChoice } from "../src/surface/projects.ts";
 
@@ -51,8 +52,8 @@ const HARNESSES: FormHarness[] = [
 ];
 
 const PROJECTS: ProjectChoice[] = [
-  { path: "/home/u/code/alpha", display: "~/code/alpha", count: 3 },
-  { path: "/home/u/code/beta", display: "~/code/beta", count: 0 },
+  { path: "/home/u/code/alpha", display: "~/code/alpha", count: 3, supportsWorktree: true },
+  { path: "/home/u/code/beta", display: "~/code/beta", count: 0, supportsWorktree: true },
 ];
 
 function form(): FormState {
@@ -116,6 +117,23 @@ describe("focus traversal", () => {
     expect(state.focus as string).toBe("project");
     handleFormKey(state, key("up"));
     expect(state.focus as string).toBe("prompt");
+  });
+
+  test("skips the worktree row when the selected project is not a Git repository", () => {
+    const state = form();
+    state.projects[0] = { ...state.projects[0]!, supportsWorktree: false };
+    handleFormKey(state, key("tab"));
+    expect(state.focus).toBe("project");
+    handleFormKey(state, key("tab"));
+    expect(state.focus).toBe("harness");
+  });
+
+  test("selecting a non-Git project leaves focus on its actionable project row", () => {
+    const state = form();
+    state.projects[1] = { ...state.projects[1]!, supportsWorktree: false };
+    state.focus = "worktree";
+    setProject(state, 1);
+    expect(state.focus as string).toBe("project");
   });
 });
 
@@ -218,6 +236,20 @@ describe("direct keys", () => {
     state.focus = "prompt";
     handleFormKey(state, key("w"));
     expect(state.worktree).toBe(false);
+  });
+
+  test("a non-Git project ignores every worktree interaction and preserves the preference", () => {
+    const state = form();
+    state.projects[0] = { ...state.projects[0]!, supportsWorktree: false };
+    state.focus = "harness";
+
+    handleFormKey(state, key("w"));
+    expect(state.worktree).toBe(true);
+    expect(handleRowPress(state, "worktree")).toEqual({ kind: "none" });
+    expect(state.focus).toBe("harness");
+    handleRowScroll(state, "worktree", 1);
+    expect(state.focus).toBe("harness");
+    expect(state.worktree).toBe(true);
   });
 });
 
@@ -431,6 +463,16 @@ describe("buildPlan", () => {
     expect(plan?.worktree).toBe(true);
   });
 
+  test("a non-Git project forces a safe launch and restores the standing choice on Git", () => {
+    const state = form();
+    state.projects[0] = { ...state.projects[0]!, supportsWorktree: false };
+    state.worktree = true;
+    expect(buildPlan(state)?.worktree).toBe(false);
+
+    setProject(state, 1);
+    expect(buildPlan(state)?.worktree).toBe(true);
+  });
+
   test("no projects refuses with a notice", () => {
     const state = createForm({ projects: [], harnesses: HARNESSES });
     expect(buildPlan(state)).toBeNull();
@@ -554,9 +596,9 @@ describe("createForm defaults", () => {
 
   test("the default project leads the list; the rest keep frequency order", () => {
     const projects: ProjectChoice[] = [
-      { path: "/home/u/code/alpha", display: "~/code/alpha", count: 3 },
-      { path: "/home/u/code/beta", display: "~/code/beta", count: 2 },
-      { path: "/home/u/code/gamma", display: "~/code/gamma", count: 1 },
+      { path: "/home/u/code/alpha", display: "~/code/alpha", count: 3, supportsWorktree: true },
+      { path: "/home/u/code/beta", display: "~/code/beta", count: 2, supportsWorktree: true },
+      { path: "/home/u/code/gamma", display: "~/code/gamma", count: 1, supportsWorktree: true },
     ];
     const state = createForm({ projects, harnesses: HARNESSES, cwd: "/home/u/code/gamma" });
     expect(state.projectIndex).toBe(0);
