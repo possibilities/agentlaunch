@@ -209,12 +209,13 @@ describe("direct keys", () => {
 
   test("w toggles the worktree from a select row, never from the prompt", () => {
     const state = form();
+    expect(state.worktree).toBe(true);
     state.focus = "harness";
     handleFormKey(state, key("w"));
-    expect(state.worktree).toBe(true);
+    expect(state.worktree).toBe(false);
     state.focus = "prompt";
     handleFormKey(state, key("w"));
-    expect(state.worktree).toBe(true);
+    expect(state.worktree).toBe(false);
   });
 });
 
@@ -266,7 +267,7 @@ describe("first-letter jump", () => {
     const state = form();
     state.focus = "worktree";
     handleFormKey(state, key("n"));
-    expect(state.worktree).toBe(false);
+    expect(state.worktree).toBe(true);
     state.focus = "prompt";
     handleFormKey(state, key("l"));
     expect(state.focus).toBe("prompt");
@@ -283,7 +284,7 @@ describe("pointer", () => {
   test("a press toggles the worktree and focuses the intent", () => {
     const state = form();
     expect(handleRowPress(state, "worktree").kind).toBe("none");
-    expect(state.worktree).toBe(true);
+    expect(state.worktree).toBe(false);
     expect(state.focus).toBe("worktree");
     expect(handleRowPress(state, "prompt").kind).toBe("none");
     expect(state.focus).toBe("prompt");

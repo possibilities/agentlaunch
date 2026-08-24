@@ -112,7 +112,9 @@ export function createForm(inputs: {
     prompt: "",
     projects: inputs.projects,
     projectIndex: 0,
-    worktree: false,
+    // A managed session works in its own worktree by default; the toggle
+    // is how an operator asks to work in the checkout itself.
+    worktree: true,
     harnesses: inputs.harnesses,
     harnessIndex: 0,
     modelIndex: 0,

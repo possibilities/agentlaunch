@@ -40,7 +40,7 @@ describe("buildFormLines", () => {
     expect(text).toContain("project");
     expect(text).toContain("~/code/alpha");
     expect(text).not.toContain("3×"); // frequency orders the list, unshown
-    expect(text).toContain("○ no worktree");
+    expect(text).toContain("● new worktree");
     expect(text).toContain("claude");
     expect(text).toContain("fable");
     expect(text).toContain("medium");
@@ -56,9 +56,10 @@ describe("buildFormLines", () => {
   test("the worktree row states itself; herdr owns the branch name", () => {
     const state = form();
     expect(rows(state, 76).some((row) => row.includes("branch"))).toBe(false);
-    state.worktree = true;
+    expect(rows(state, 76).join("\n")).toContain("● new worktree");
+    state.worktree = false;
     const text = rows(state, 76).join("\n");
-    expect(text).toContain("● new worktree");
+    expect(text).toContain("○ no worktree");
     expect(text).not.toContain("branch");
   });
 
