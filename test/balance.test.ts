@@ -444,7 +444,7 @@ describe("balanced launch", () => {
 });
 
 describe("balanced resume", () => {
-  test("claude resume routes on the session's last-used model, uninjected", () => {
+  test("claude resume leaves the session's model native and out of balance routing", () => {
     const world = makeWorld();
     const store = join(world.root, "claude", "projects", "-some-cwd");
     mkdirSync(store, { recursive: true });
@@ -452,6 +452,8 @@ describe("balanced resume", () => {
       join(store, `${SESSION_ID}.jsonl`),
       `${JSON.stringify({ cwd: "/some/cwd" })}\n${JSON.stringify({
         message: { model: "claude-fable-5" },
+      })}\n${" ".repeat(300_000)}\n${JSON.stringify({
+        message: { model: "claude-opus-5" },
       })}\n`,
     );
     const result = run(world, ["x-resume", SESSION_ID, "--x-no-yolo", "--x-dry-run", "--x-json"]);
@@ -466,7 +468,7 @@ describe("balanced resume", () => {
       "--resume",
       SESSION_ID,
     ]);
-    expect(balanceCalls(world)).toEqual(["balance claude --json --model claude-fable-5 --dry-run"]);
+    expect(balanceCalls(world)).toEqual(["balance claude --json --dry-run"]);
   });
 
   test("codex resume moves the session id into the wrapper grammar", () => {

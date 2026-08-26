@@ -265,7 +265,9 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
         ),
   );
 
-  const model = await resumeRoutingModel(context, harness, sessionId, sessionPath, forwarded);
+  // A resumed native session owns its model. Only an explicit forwarded model
+  // override is a routing dimension; transcript contents are not launch input.
+  const model = modelFromArgs(forwarded);
   if (model !== undefined) context.narrator.detail("model", `${model} · drives routing`);
   const yolo = resolveYolo(context, parts, harness);
   const applied = applyYolo(harness, forwarded, yolo, false);
@@ -297,33 +299,6 @@ async function sessionCwd(
     null;
   if (path === null) return null;
   return (await sessionFileFacts(harness, path)).cwd;
-}
-
-async function resumeRoutingModel(
-  context: Context,
-  harness: HarnessName,
-  sessionId: string,
-  sessionPath: string | null,
-  forwarded: string[],
-): Promise<string | undefined> {
-  const explicit = modelFromArgs(forwarded);
-  if (explicit !== undefined) return explicit;
-  if (harness !== "claude") return undefined;
-  const path =
-    sessionPath ??
-    (await findSessions(sessionId, context.env, context.home)).find(
-      (match) => match.harness === harness,
-    )?.path ??
-    null;
-  if (path === null) return undefined;
-  try {
-    const text = await Bun.file(path).slice(0, 262_144).text();
-    let model: string | undefined;
-    for (const match of text.matchAll(/"model"\s*:\s*"([^"]+)"/g)) model = match[1];
-    return model;
-  } catch {
-    return undefined;
-  }
 }
 
 function resolveYolo(context: Context, parts: Partitioned, harness: HarnessName): YoloDecision {
