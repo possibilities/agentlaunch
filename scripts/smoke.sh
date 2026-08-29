@@ -174,12 +174,26 @@ expect_exit 0 run --x-harness claude --x-dry-run --x-json --x-verbose
 # Hermetic installer convergence and verified uninstall.
 INSTALL_BIN="$WORK/install/bin"
 INSTALL_STATE="$WORK/install/state"
+mkdir -p "$INSTALL_STATE/capabilities/pi"
+chmod 700 "$INSTALL_STATE" "$INSTALL_STATE/capabilities" "$INSTALL_STATE/capabilities/pi"
+cat >"$INSTALL_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json" <<'EOF'
+{
+  "schema_version": 1,
+  "harness": "pi",
+  "session_id": "c9889494-8da8-4b34-9a14-c0e3c7f8b9b0",
+  "capabilities": ["common", "focus"],
+  "digest": "ae8f157f1a72a6114001d56b"
+}
+EOF
+chmod 600 "$INSTALL_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json"
 AGENTLAUNCH_INSTALL_BIN_DIR="$INSTALL_BIN" \
   AGENTLAUNCH_INSTALL_STATE_DIR="$INSTALL_STATE" \
   "$ROOT/scripts/install.sh" --install >"$WORK/install-out"
 [[ -L "$INSTALL_BIN/agentlaunch" ]]
 [[ "$(readlink "$INSTALL_BIN/agentlaunch")" == "$ROOT/src/main.ts" ]]
 [[ "$(stat -f %Lp "$INSTALL_STATE/deployed-sha" 2>/dev/null || stat -c %a "$INSTALL_STATE/deployed-sha")" == "600" ]]
+[[ ! -e "$INSTALL_STATE/capabilities" && ! -L "$INSTALL_STATE/capabilities" ]]
+grep -F 'Removed retired AgentLaunch capability receipts:' "$WORK/install-out" >/dev/null
 AGENTLAUNCH_INSTALL_BIN_DIR="$INSTALL_BIN" \
   AGENTLAUNCH_INSTALL_STATE_DIR="$INSTALL_STATE" \
   "$ROOT/scripts/install.sh" --install >>"$WORK/install-out"
@@ -187,5 +201,23 @@ AGENTLAUNCH_INSTALL_BIN_DIR="$INSTALL_BIN" \
   AGENTLAUNCH_INSTALL_STATE_DIR="$INSTALL_STATE" \
   "$ROOT/scripts/install.sh" --uninstall >>"$WORK/install-out"
 [[ ! -e "$INSTALL_BIN/agentlaunch" && ! -L "$INSTALL_BIN/agentlaunch" ]]
+
+# A lookalike is preserved and blocks installation: cleanup must prove the
+# complete retired schema before removing anything.
+REFUSE_BIN="$WORK/refuse/bin"
+REFUSE_STATE="$WORK/refuse/state"
+mkdir -p "$REFUSE_STATE/capabilities/pi"
+chmod 700 "$REFUSE_STATE" "$REFUSE_STATE/capabilities" "$REFUSE_STATE/capabilities/pi"
+printf '{}\n' >"$REFUSE_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json"
+chmod 600 "$REFUSE_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json"
+if AGENTLAUNCH_INSTALL_BIN_DIR="$REFUSE_BIN" \
+  AGENTLAUNCH_INSTALL_STATE_DIR="$REFUSE_STATE" \
+  "$ROOT/scripts/install.sh" --install >"$WORK/refuse-out" 2>"$WORK/refuse-err"; then
+  echo "FAIL: installer accepted an unrecognized retired capability receipt" >&2
+  exit 1
+fi
+grep -F 'Refusing unrecognized retired capability receipts:' "$WORK/refuse-err" >/dev/null
+[[ -f "$REFUSE_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json" ]]
+[[ ! -e "$REFUSE_BIN/agentlaunch" && ! -L "$REFUSE_BIN/agentlaunch" ]]
 
 echo "smoke: launch, resume, doctor, balance, and installer behaved"
