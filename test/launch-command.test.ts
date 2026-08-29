@@ -8,7 +8,7 @@ import { HARNESS_NAMES } from "../src/harness.ts";
 import { createNarrator } from "../src/narrate.ts";
 import { partition, type XSpec } from "../src/partition.ts";
 import type { Environ } from "../src/paths.ts";
-import { seedCommonCapability } from "./capability-fixture.ts";
+import { seedFleetResources } from "./resource-fixture.ts";
 
 let roots: string[] = [];
 
@@ -26,7 +26,7 @@ function scratch(): string {
 function contextFor(root: string): Context {
   const env: Environ = {};
   const home = join(root, "home");
-  seedCommonCapability(home);
+  seedFleetResources(home);
   return { env, home, cwd: home, narrator: createNarrator({ silent: true, verbose: false }) };
 }
 
@@ -34,7 +34,7 @@ function contextFor(root: string): Context {
 const SPEC: XSpec = {
   value: new Set(["--x-harness", "--x-level", "--x-account", "--x-prompt-file"]),
   bool: new Set(["--x-json", "--x-help", "--x-dry-run", "--x-no-balance", "--x-verbose"]),
-  repeatable: new Set(["--x-capability"]),
+  repeatable: new Set(),
   scoped: new Map<string, readonly string[]>([
     ["--x-yolo", HARNESS_NAMES],
     ["--x-no-yolo", HARNESS_NAMES],

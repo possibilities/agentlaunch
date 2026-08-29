@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { composeCodexFamily, normalizePiModel } from "../src/balance.ts";
 import type { Envelope } from "../src/envelope.ts";
-import { seedCommonCapability } from "./capability-fixture.ts";
+import { seedFleetResources } from "./resource-fixture.ts";
 
 type AnyEnvelope = Envelope<Record<string, unknown>>;
 
@@ -47,7 +47,7 @@ function makeWorld(): World {
   const root = mkdtempSync(join(tmpdir(), "agentlaunch-balance-"));
   roots.push(root);
   const binDir = join(root, "bin");
-  seedCommonCapability(join(root, "home"));
+  seedFleetResources(join(root, "home"));
   mkdirSync(binDir, { recursive: true });
   const recordPath = join(root, "balance-argv.jsonl");
   const fake = join(binDir, "agentusage");
@@ -100,11 +100,52 @@ function run(world: World, args: string[], extraEnv: Record<string, string> = {}
       ...extraEnv,
     },
   });
+  let stdout = result.stdout.toString();
+  const home = join(world.root, "home");
+  const plugin = join(home, ".local", "share", "agentstart", "resources", "claude", "agent");
+  const skill = join(home, ".local", "share", "agentstart", "resources", "skills", "collab");
+  const policy = 'skills.config=[{name="agent:collab",enabled=true}]';
+  try {
+    const envelope = JSON.parse(stdout) as AnyEnvelope;
+    const data = envelope.data as { command?: string[] } | null;
+    if (Array.isArray(data?.command)) {
+      data.command = withoutFleetResources(data.command, plugin, skill, policy);
+      stdout = `${JSON.stringify(envelope)}\n`;
+    }
+  } catch {
+    stdout = stdout
+      .replace(`--plugin-dir ${plugin} `, "")
+      .replace(`--skill ${skill} `, "")
+      .replace(`-c '${policy}' `, "");
+  }
   return {
     code: result.exitCode,
-    stdout: result.stdout.toString(),
+    stdout,
     stderr: result.stderr.toString(),
   };
+}
+
+function withoutFleetResources(
+  command: string[],
+  plugin: string,
+  skill: string,
+  policy: string,
+): string[] {
+  const result: string[] = [];
+  for (let i = 0; i < command.length; i++) {
+    const token = command[i];
+    const value = command[i + 1];
+    if (
+      (token === "--plugin-dir" && value === plugin) ||
+      (token === "--skill" && value === skill) ||
+      (token === "-c" && value === policy)
+    ) {
+      i += 1;
+      continue;
+    }
+    if (token !== undefined) result.push(token);
+  }
+  return result;
 }
 
 function balanceCalls(world: World): string[] {
@@ -116,6 +157,17 @@ function balanceCalls(world: World): string[] {
 }
 
 describe("balanced launch", () => {
+  test("retired capability flags fail before launch", () => {
+    const world = makeWorld();
+    for (const flag of ["--x-no-common", "--x-capability=extra"]) {
+      const result = run(world, ["--x-harness", "codex", flag]);
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain(`${flag} is retired`);
+      expect(result.stdout).toBe("");
+    }
+    expect(balanceCalls(world)).toEqual([]);
+  });
+
   test("claude composes the cswap prefix around the injected defaults", () => {
     const world = makeWorld();
     const result = run(world, [
@@ -230,7 +282,7 @@ describe("balanced launch", () => {
     expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-x"]);
   });
 
-  test("codex exec stays native while capabilities and balance compose", () => {
+  test("codex exec stays native while fleet resources and balance compose", () => {
     const world = makeWorld();
     const result = run(world, [
       "--x-harness",
@@ -531,7 +583,6 @@ describe("compose units", () => {
           harness: "codex",
           command: ["codex", "-p", "x"],
           sessionId: null,
-          transport: "codex-remote",
         },
         ["--claim", "lease-1"],
       ),
@@ -542,7 +593,6 @@ describe("compose units", () => {
           harness: "codex",
           command: ["codex", "resume", SESSION_ID, "--search"],
           sessionId: SESSION_ID,
-          transport: "codex-remote",
         },
         ["--claim", "lease-1"],
       ),
@@ -553,7 +603,6 @@ describe("compose units", () => {
           harness: "pi",
           command: ["pi", "--session", SESSION_ID],
           sessionId: SESSION_ID,
-          transport: "native",
         },
         ["--claim", "lease-1"],
       ),

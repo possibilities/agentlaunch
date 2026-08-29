@@ -37,8 +37,7 @@ const LAUNCH_FLAGS: RouteFlags = {
   // append arguments to the bare kind command (a herdr pane typing
   // `claude --x-resume <id>` through the shim).
   value: ["--x-harness", "--x-level", "--x-account", "--x-prompt-file", "--x-resume"],
-  bool: ["--x-dry-run", "--x-no-balance", "--x-no-common", "--x-verbose"],
-  repeatable: ["--x-capability"],
+  bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
   scoped: YOLO_SCOPES,
 };
 
@@ -46,8 +45,7 @@ const RESUME_FLAGS: RouteFlags = {
   // --x-level is accepted by the partition only so resume can explain why it
   // is invalid in its own terms.
   value: ["--x-account", "--x-harness", "--x-level"],
-  bool: ["--x-dry-run", "--x-no-balance", "--x-no-common", "--x-verbose"],
-  repeatable: ["--x-capability"],
+  bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
   scoped: YOLO_SCOPES,
 };
 
@@ -85,6 +83,15 @@ async function main(argv: string[]): Promise<number> {
   if (first === "--agent-teaser") {
     console.log(AGENT_TEASER);
     return 0;
+  }
+  const retiredResourceFlag = argv.find(
+    (token) => token === "--x-no-common" || token.startsWith("--x-capability"),
+  );
+  if (retiredResourceFlag !== undefined) {
+    console.error(
+      `${retiredResourceFlag} is retired: every managed session receives AgentStart's one fixed private fleet resource set`,
+    );
+    return 2;
   }
   // --x-surface is a launch modality, not a command: AgentLaunch does one
   // thing — launch agents — and this flag redirects the outcome from
@@ -200,14 +207,7 @@ async function main(argv: string[]): Promise<number> {
   try {
     const outcome = await run(context, parts);
     if (outcome.kind === "launch") {
-      return await launch(
-        outcome.spec,
-        context.narrator,
-        context.env,
-        outcome.cwd,
-        context.home,
-        outcome.capabilities,
-      );
+      return await launch(outcome.spec, context.narrator, context.env, outcome.cwd);
     }
     emit(outcome, json);
     return 0;

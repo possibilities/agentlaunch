@@ -47,21 +47,8 @@ describe("buildOpen", () => {
     expect(buildOpen("claude", []).sessionId).toBeNull();
   });
 
-  test("Codex exec, e, and review keep native transport", () => {
-    expect(buildOpen("codex", ["exec", "hello"]).transport).toBe("native");
-    expect(buildOpen("codex", ["e", "hello"]).transport).toBe("native");
-    expect(buildOpen("codex", ["review", "--uncommitted"]).transport).toBe("native");
-    expect(buildOpen("codex", ["--profile", "work", "exec", "hello"]).transport).toBe("native");
+  test("recognizes Codex non-interactive subcommands without changing transport", () => {
     expect(codexNonInteractiveCommandIndex(["-mgpt-x", "review"])).toBe(1);
-  });
-
-  test("interactive Codex launches and resumes keep remote transport", () => {
-    expect(buildOpen("codex", []).transport).toBe("codex-remote");
-    expect(buildOpen("codex", ["fix it"]).transport).toBe("codex-remote");
-    expect(buildOpen("codex", ["resume", "abc-123"]).transport).toBe("codex-remote");
-    expect(buildOpen("codex", ["fork", "abc-123"]).transport).toBe("codex-remote");
-    expect(buildOpen("codex", ["--", "review"]).transport).toBe("codex-remote");
-    expect(buildResume("codex", "abc-123", []).transport).toBe("codex-remote");
   });
 });
 

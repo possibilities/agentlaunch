@@ -5,13 +5,11 @@ sessions, including Codex's non-interactive session commands. It can also find
 a native session by ID and resume it in the directory recorded by that harness.
 
 Its boundary ends at the native session: AgentLaunch has no workspace, pane,
-agent identity, naming, presence, steering, or conversation registry. It does
-supervise one ephemeral Codex App Server per interactive Codex launch so
-session-specific skills can be installed before the native remote TUI
-connects. The server is a caller-owned foreground invocation through
-codex-swap's ordinary `run`/lease contract, never a resident service. A native
-flag such as Claude's `--name` is forwarded unchanged and
-is never interpreted or persisted here.
+agent identity, naming, presence, steering, conversation registry, App Server,
+socket, or remote TUI. Codex launches through codex-swap's ordinary native
+`run`/`resume` contract, so Codex itself owns linked-worktree trust, history,
+resume, and terminal behavior. A native flag such as Claude's `--name` is
+forwarded unchanged and is never interpreted or persisted here.
 
 ## Install
 
@@ -54,35 +52,25 @@ everything else belongs to the harness and remains in order. Unknown
 `--x-*` flags fail. Unknown native flags—including `--name` or `-n`—are
 forwarded without inspection.
 
-## Capabilities
+## Fleet resources
 
-Every managed session includes AgentStart's `common` capability pack from
-`~/.local/share/agentstart/capabilities/packs/common`. Add repeatable
-session-specific packs with `--x-capability <name>`, or use `--x-no-common`
-for a deliberately isolated session. Conflicting skill or Claude resource
-names fail before launch.
-
-AgentLaunch content-addresses the selected packs and renders an immutable
-session projection:
+Every managed session receives AgentStart's one fixed private resource set at
+`~/.local/share/agentstart/resources`. It is not selectable: the retired
+`--x-capability` and `--x-no-common` flags are explicit usage errors.
 
 - Claude receives `--plugin-dir` for one synthetic plugin named `agent`, so
   skills are `/agent:<skill>`.
-- Interactive Codex runs an account-bound App Server through codex-swap's
-  foreground launch contract, receives `skills/extraRoots/set` plus exact
-  session-flag `skills.config` entries that enable selected bare skills and
-  suppress the compatibility plugin's `$agent:<skill>` aliases, then connects
-  its native TUI with `codex --remote`; skills stay bare `$<skill>`.
-  Non-interactive `exec`/`e` and `review` launches stay on their native command
-  transport and receive the exact `skills.config` and merged guidance as
-  command-local config while retaining the same codex-swap account pin.
+- Codex uses the globally installed skills-only `agent@agentstart-managed`
+  plugin. Its `$agent:<skill>` names are persistently disabled outside managed
+  sessions and name-enabled through session config on native interactive,
+  resume, `exec`/`e`, and `review` launches.
 - Pi disables ambient skill/extension/template discovery and receives
   explicit paths; skills stay bare `/<skill>`.
 
-Non-default selections write a small receipt keyed by the native session ID,
-so `x-resume` restores the pack IDs. The native stores do not move: Claude
-continues through `cswap --share-history`, Codex uses `~/.codex/sessions`, and
-Pi uses `~/.pi/agent/sessions`, preserving native resume and history indexing.
-Utility invocations such as `codex login` receive no packs.
+The native stores do not move: Claude continues through `cswap --share-history`,
+Codex uses `~/.codex/sessions`, and Pi uses `~/.pi/agent/sessions`, preserving
+native resume and history indexing. Utility invocations such as `codex login`
+receive no fleet resources.
 
 ## Surface form
 
@@ -100,7 +88,7 @@ on stdin and stderr, and refuses a stdout that is a terminal — that means
 no host is reading. Project roots and priming choices come from the config
 (`roots`, `priming`); an interrupted form is restored from its draft on the
 next open. Priming spells Claude skills as `/agent:<skill>`, Codex as
-`$<skill>`, and Pi as `/<skill>`. An intent that already leads with a slash
+`$agent:<skill>`, and Pi as `/<skill>`. An intent that already leads with a slash
 command is its own invocation, so the priming row reads `none` and stops
 taking input until the intent does not. The `surface-handoff-protocol` wiki page
 documents the directive contract.

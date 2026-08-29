@@ -8,7 +8,7 @@ const HARNESSES = ["claude", "codex", "pi"] as const;
 const SPEC: XSpec = {
   value: new Set(["--x-account"]),
   bool: new Set(["--x-dry-run", "--x-json"]),
-  repeatable: new Set(["--x-capability"]),
+  repeatable: new Set(["--x-tag"]),
   scoped: new Map<string, readonly string[]>([
     ["--x-yolo", HARNESSES],
     ["--x-no-yolo", HARNESSES],

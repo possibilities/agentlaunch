@@ -155,16 +155,10 @@ export function effortDimensionToken(
   return null;
 }
 
-/** The native command AgentLaunch will execute. */
-export type LaunchTransport = "native" | "codex-remote";
-
 export interface LaunchSpec {
   harness: HarnessName;
   command: string[];
   sessionId: string | null;
-  /** Only an interactive Codex TUI can attach to the managed App Server.
-   * Non-interactive Codex sessions keep the native process transport. */
-  transport: LaunchTransport;
 }
 
 /**
@@ -362,11 +356,7 @@ export function codexNonInteractiveCommandIndex(tokens: readonly string[]): numb
 }
 
 export function buildOpen(harness: HarnessName, tokens: string[]): LaunchSpec {
-  const transport =
-    harness === "codex" && codexNonInteractiveCommandIndex(tokens) === null
-      ? "codex-remote"
-      : "native";
-  return { harness, command: [harness, ...tokens], sessionId: null, transport };
+  return { harness, command: [harness, ...tokens], sessionId: null };
 }
 
 /**
@@ -457,7 +447,6 @@ export function buildResume(harness: HarnessName, sessionId: string, tokens: str
     harness,
     command: [...base, ...tokens],
     sessionId,
-    transport: harness === "codex" ? "codex-remote" : "native",
   };
 }
 

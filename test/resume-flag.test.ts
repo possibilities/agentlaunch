@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { seedCommonCapability } from "./capability-fixture.ts";
+import { seedFleetResources } from "./resource-fixture.ts";
 
 // Black-box coverage of --x-resume, x-resume's flag spelling on the launch
 // route: the path a herdr pane reaches through the fleet shim, which can
@@ -34,7 +34,7 @@ function seedClaudeStore(root: string): { configDir: string; cwd: string } {
 }
 
 function run(root: string, configDir: string, args: string[]) {
-  seedCommonCapability(join(root, "home"));
+  seedFleetResources(join(root, "home"));
   return Bun.spawnSync([process.execPath, "src/main.ts", ...args], {
     cwd: join(import.meta.dir, ".."),
     env: {
@@ -63,7 +63,9 @@ describe("--x-resume on the launch route", () => {
     expect(envelope.ok).toBe(true);
     expect(envelope.data.session_id).toBe(SESSION_ID);
     expect(envelope.data.cwd).toBe(cwd);
-    expect(envelope.data.command.slice(0, 3)).toEqual(["claude", "--resume", SESSION_ID]);
+    expect(envelope.data.command).toContain("--plugin-dir");
+    const resume = envelope.data.command.indexOf("--resume");
+    expect(envelope.data.command.slice(resume, resume + 2)).toEqual(["--resume", SESSION_ID]);
   });
 
   test("refuses a prompt file: a resumed session has no launch intent", () => {

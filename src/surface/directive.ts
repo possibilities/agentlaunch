@@ -27,14 +27,14 @@ export interface SessionDirective {
 }
 
 /** A priming rides the intent as each harness's own skill spelling:
- * /agent:name for Claude's synthetic plugin, /name for Pi, and $name for
+ * /agent:name for Claude's synthetic plugin, /name for Pi, and $agent:name for
  * Codex — the prefix alone when the intent is empty. */
 export function primedIntent(plan: Pick<LaunchPlan, "harness" | "prompt" | "priming">): string {
   if (plan.priming === null) return plan.prompt;
   const invocation =
     plan.harness === "claude"
       ? `/agent:${plan.priming}`
-      : `${plan.harness === "codex" ? "$" : "/"}${plan.priming}`;
+      : `${plan.harness === "codex" ? "$agent:" : "/"}${plan.priming}`;
   return `${invocation}${plan.prompt === "" ? "" : ` ${plan.prompt}`}`;
 }
 

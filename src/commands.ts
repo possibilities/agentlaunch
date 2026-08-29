@@ -1,12 +1,6 @@
 import { existsSync } from "node:fs";
 import { type BalanceDecision, balanceDisabled, balanceSpec } from "./balance.ts";
 import {
-  applyCapabilityArguments,
-  type CapabilitySet,
-  requestedCapabilityIds,
-  resolveCapabilities,
-} from "./capabilities.ts";
-import {
   BUILTIN_CATALOG_PATH,
   catalogPath,
   loadCatalog,
@@ -37,6 +31,11 @@ import { facts, shellLine, tildePath } from "./narrate.ts";
 import type { Partitioned } from "./partition.ts";
 import type { Environ } from "./paths.ts";
 import { assertSessionId, countSessions, findSessions } from "./resolve.ts";
+import {
+  applyFleetResourceArguments,
+  type FleetResources,
+  loadFleetResources,
+} from "./resources.ts";
 import { whichInEnv } from "./subprocess.ts";
 
 export interface Context {
@@ -47,7 +46,7 @@ export interface Context {
 }
 
 export type Outcome =
-  | { kind: "launch"; spec: LaunchSpec; cwd: string | null; capabilities: CapabilitySet | null }
+  | { kind: "launch"; spec: LaunchSpec; cwd: string | null; resources: FleetResources | null }
   | { kind: "result"; data: unknown; human: string };
 
 interface DimensionReport {
@@ -495,32 +494,13 @@ async function finishLaunch(
       `--x-account pins a session launch; "${spec.command[1]}" is a utility invocation that passes through`,
     );
   }
-  if (
-    utility &&
-    ((parts.lists["x-capability"]?.length ?? 0) > 0 || parts.bools.has("x-no-common"))
-  ) {
-    throw new UsageError(
-      `capability packs apply to sessions; "${spec.command[1]}" is a utility invocation that passes through`,
-    );
-  }
-
   narrateYolo(context, yolo, applied, utility);
-  let capabilities: CapabilitySet | null = null;
+  let resources: FleetResources | null = null;
   let launchSpec = spec;
   if (!utility) {
-    const ids = requestedCapabilityIds(
-      parts,
-      context.env,
-      context.home,
-      spec.harness,
-      spec.sessionId,
-    );
-    capabilities = resolveCapabilities(ids, context.env, context.home, true);
-    launchSpec = applyCapabilityArguments(spec, capabilities);
-    context.narrator.row(
-      "capabilities",
-      facts(ids.length === 0 ? "none" : ids.join(", "), capabilities.digest),
-    );
+    resources = loadFleetResources(context.env, context.home);
+    launchSpec = applyFleetResourceArguments(spec, resources);
+    context.narrator.row("resources", facts("fleet", tildePath(resources.root, context.home)));
   }
   let decision: BalanceDecision | null = null;
   if (utility) {
@@ -557,15 +537,12 @@ async function finishLaunch(
     model_source: model.source,
     effort: effort.value,
     effort_source: effort.source,
-    capabilities:
-      capabilities === null
-        ? null
-        : { ids: capabilities.ids, digest: capabilities.digest, projection: capabilities.root },
+    resources: resources === null ? null : { root: resources.root },
   };
 
   if (!dryRun) {
     context.narrator.row("launch", shellLine(launchSpec.command));
-    return { kind: "launch", spec: launchSpec, cwd: launchCwd, capabilities };
+    return { kind: "launch", spec: launchSpec, cwd: launchCwd, resources };
   }
   context.narrator.row("dry run", "nothing launched · command on stdout");
   return { kind: "result", data, human: shellLine(launchSpec.command) };

@@ -34,10 +34,10 @@ describe("primedIntent", () => {
       "/build fix it",
     );
     expect(primedIntent({ harness: "codex", prompt: "fix it", priming: "collab" })).toBe(
-      "$collab fix it",
+      "$agent:collab fix it",
     );
     expect(primedIntent({ harness: "codex", prompt: "", priming: "orchestrate" })).toBe(
-      "$orchestrate",
+      "$agent:orchestrate",
     );
     expect(primedIntent({ harness: "claude", prompt: "fix it", priming: null })).toBe("fix it");
   });
@@ -60,7 +60,7 @@ describe("buildDirective", () => {
   test("an empty intent travels as null; a priming composes into it", () => {
     expect(buildDirective({ ...PLAN, prompt: "" }, false).intent).toBeNull();
     const primed = buildDirective({ ...PLAN, harness: "codex", priming: "collab" }, false);
-    expect(primed.intent).toBe("$collab fix it");
+    expect(primed.intent).toBe("$agent:collab fix it");
     expect(primed.focus).toBe(false);
     expect(primed.record).toEqual({ model: "fable", effort: "max", priming: "collab" });
   });

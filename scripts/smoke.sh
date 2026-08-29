@@ -8,11 +8,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-COMMON="$WORK/home/.local/share/agentstart/capabilities/packs/common"
-mkdir -p "$COMMON"
-printf '%s\n' \
-  '{"schema_version":1,"id":"common","default":true,"description":"smoke fixture","resources":{}}' \
-  >"$COMMON/capability.json"
+RESOURCES="$WORK/home/.local/share/agentstart/resources"
+mkdir -p "$RESOURCES/skills/collab" "$RESOURCES/claude/agent/.claude-plugin" \
+  "$RESOURCES/pi/extensions" "$RESOURCES/pi/prompt-templates"
+printf '# collab\n' >"$RESOURCES/skills/collab/SKILL.md"
+printf 'collab\n' >"$RESOURCES/managed-skills.txt"
+printf '{}\n' >"$RESOURCES/claude/agent/.claude-plugin/plugin.json"
 
 run() {
   env -i PATH="$PATH" HOME="$WORK/home" AGENTLAUNCH_NO_BALANCE=1 \
@@ -70,29 +71,29 @@ fi
 
 # Catalog resolution and native spellings.
 expect_exit 0 run --x-harness claude --x-dry-run
-expect_out "claude --dangerously-skip-permissions --allow-dangerously-skip-permissions --model 'opus\[1m\]' --effort medium"
+expect_out "--dangerously-skip-permissions --allow-dangerously-skip-permissions --model 'opus\[1m\]' --effort medium"
 expect_exit 0 run --x-harness codex --x-no-yolo --x-dry-run
-expect_out "codex --cd .* --model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"'"
+expect_out "--cd .* --model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"'"
 expect_exit 0 run --x-harness pi --x-level gpt-5.6-luna:max --x-no-yolo --x-dry-run
-expect_out "pi --no-skills --no-extensions --no-prompt-templates --model openai-codex/gpt-5.6-luna --thinking max"
+expect_out "--model openai-codex/gpt-5.6-luna --thinking max"
 expect_exit 0 run --x-level sonnet:high --x-no-yolo --x-dry-run
-expect_out "claude --model sonnet --effort high"
+expect_out "--model sonnet --effort high"
 
 # Native naming is opaque input: forwarded once and absent from launcher data.
 expect_exit 0 run --x-harness claude --x-no-yolo --x-dry-run --x-json --name "native title"
-expect_out '"command":\["claude","--model","opus\[1m\]","--effort","medium","--name","native title"\]'
+expect_out '"--name","native title"'
 if grep -q '"name"' "$WORK/out"; then
   echo "FAIL: AgentLaunch interpreted native --name as metadata" >&2
   exit 1
 fi
 expect_exit 0 run --x-harness pi --x-no-yolo --x-dry-run -n native
-expect_out "pi --no-skills --no-extensions --no-prompt-templates --model openai-codex/gpt-5.6-sol --thinking high -n native"
+expect_out "--model openai-codex/gpt-5.6-sol --thinking high -n native"
 expect_exit 2 run --x-harness claude --x-name launcher-name --x-dry-run
 expect_err 'unknown option "--x-name"'
 
 # Levels own both dimensions; ordinary launches yield to native dimensions.
 expect_exit 0 run --x-harness claude --model sonnet --x-no-yolo --x-dry-run
-expect_out "claude --effort medium --model sonnet"
+expect_out "--effort medium --model sonnet"
 expect_exit 2 run --x-harness claude --x-level opus:high --model sonnet --x-dry-run
 expect_exit 2 run --x-level opus --x-dry-run
 expect_exit 2 run --x-harness cursor --x-dry-run
@@ -133,10 +134,10 @@ SESSION_CWD="$WORK/session-cwd"
 mkdir -p "$WORK/claude/projects/-somewhere" "$SESSION_CWD"
 printf '{"cwd":"%s"}\n' "$SESSION_CWD" >"$WORK/claude/projects/-somewhere/$SESSION_ID.jsonl"
 expect_exit 0 run x-resume "$SESSION_ID" --x-no-yolo --x-dry-run --x-json
-expect_out '"command":\["claude","--resume"'
+expect_out '"--resume"'
 expect_out "\"cwd\":\"$SESSION_CWD\""
 expect_exit 0 run x-resume "$SESSION_ID" --x-harness pi --x-no-yolo --x-dry-run
-expect_out "pi --no-skills --no-extensions --no-prompt-templates --session $SESSION_ID"
+expect_out "--session $SESSION_ID"
 expect_exit 2 run x-resume "$SESSION_ID" --x-level opus:high --x-dry-run
 expect_exit 1 run x-resume 99999999-9999-4999-9999-999999999999 --x-dry-run --x-json
 expect_out '"code":"session_not_found"'
@@ -162,7 +163,7 @@ expect_out "codex-swap pi run --account account:smoke --"
 
 # Narration never contaminates stdout; JSON silences it.
 expect_exit 0 run --x-harness claude --x-no-yolo --x-dry-run
-[[ "$(cat "$WORK/out")" == "claude --model 'opus[1m]' --effort medium" ]] || {
+[[ "$(cat "$WORK/out")" == "claude --plugin-dir $RESOURCES/claude/agent --model 'opus[1m]' --effort medium" ]] || {
   echo "FAIL: narrative leaked into stdout" >&2
   exit 1
 }
