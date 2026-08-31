@@ -20,8 +20,6 @@ export interface XSpec {
    * (harness names for yolo): bare covers "all",
    * and a following vocabulary word (or `=word`) narrows one occurrence. */
   scoped: Map<string, readonly string[]>;
-  /** Removed scope words that must fail instead of becoming native input. */
-  retiredScoped?: Map<string, readonly string[]>;
 }
 
 export interface Partitioned {
@@ -53,12 +51,8 @@ export function partition(argv: string[], spec: XSpec): Partitioned {
     const inline = equals === -1 ? undefined : argument.slice(equals + 1);
     const vocabulary = spec.scoped.get(flag);
     if (vocabulary !== undefined) {
-      const retired = spec.retiredScoped?.get(flag) ?? [];
       let scope = "all";
       if (inline !== undefined) {
-        if (retired.includes(inline)) {
-          throw new UsageError(`"${flag}" scope "${inline}" names a retired harness`);
-        }
         if (!vocabulary.includes(inline)) {
           throw new UsageError(
             `"${flag}" scopes to one of ${vocabulary.join(", ")}; got "${inline}"`,
@@ -69,9 +63,6 @@ export function partition(argv: string[], spec: XSpec): Partitioned {
         // The scope is positional: the next token is consumed only when it
         // is a vocabulary word, so a prompt can still follow the bare flag.
         const next = argv[i + 1];
-        if (next !== undefined && retired.includes(next)) {
-          throw new UsageError(`"${flag}" scope "${next}" names a retired harness`);
-        }
         if (next !== undefined && vocabulary.includes(next)) {
           scope = next;
           i++;

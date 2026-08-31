@@ -229,9 +229,6 @@ install_agentlaunch() {
 
   ensure_directory "$BIN_DIR" "bin" 755
   ensure_directory "$STATE_DIR" "state" 700
-  if [[ -e "$STATE_DIR/capabilities" || -L "$STATE_DIR/capabilities" ]]; then
-    bun "$SCRIPT_DIR/retire-capability-receipts.ts" "$STATE_DIR/capabilities"
-  fi
   classify_command
   if receipt_exists; then
     [[ "$MANAGED_KIND" != "absent" ]] || die "Refusing an uncorroborated deployed receipt: $RECEIPT"
