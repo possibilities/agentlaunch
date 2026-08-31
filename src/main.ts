@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import type { Context, Outcome } from "./commands.ts";
 import { catalogCommand, doctorCommand, launchCommand, resumeCommand } from "./commands.ts";
+import { contractData } from "./contract.ts";
 import { failure, success } from "./envelope.ts";
 import { CliError, UsageError } from "./errors.ts";
 import { HARNESS_NAMES } from "./harness.ts";
@@ -83,6 +84,20 @@ async function main(argv: string[]): Promise<number> {
   if (first === "--agent-teaser") {
     console.log(AGENT_TEASER);
     return 0;
+  }
+  if (first === "guide") {
+    const rest = argv.slice(1);
+    if (rest.length === 0) {
+      console.log(HELP["guide"] ?? TOP_HELP);
+      return 0;
+    }
+    if (rest.length === 1 && (rest[0] === "--json" || rest[0] === "--x-json")) {
+      console.log(JSON.stringify(success(SCHEMA_VERSION, contractData())));
+      return 0;
+    }
+    console.error('unknown arguments for "guide" (expected --json)');
+    console.error(HELP["guide"] ?? TOP_HELP);
+    return 2;
   }
   const retiredResourceFlag = argv.find(
     (token) => token === "--x-no-common" || token.startsWith("--x-capability"),
