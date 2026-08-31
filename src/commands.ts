@@ -225,14 +225,14 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
       )?.path ?? null;
     context.narrator.row("resume", facts(harness, sessionId, "by --x-harness"));
   } else {
-    context.narrator.detail("scan", "claude, codex, and pi native session stores");
+    context.narrator.detail("scan", "claude and codex native session stores");
     const matches = await findSessions(sessionId, context.env, context.home);
     const first = matches[0];
     if (first === undefined) {
       throw new CliError(
         "session_not_found",
-        `session "${sessionId}" is not in the claude, codex, or pi session stores`,
-        "pass --x-harness claude|codex|pi to skip detection",
+        `session "${sessionId}" is not in the claude or codex session stores`,
+        "pass --x-harness claude|codex to skip detection",
       );
     }
     if (matches.length > 1) {

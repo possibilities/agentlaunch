@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { CliError } from "./errors.ts";
 import { codexNonInteractiveCommandIndex, type LaunchSpec } from "./harness.ts";
@@ -9,8 +9,6 @@ export interface FleetResources {
   claudePluginDir: string;
   skills: Array<{ name: string; path: string }>;
   codexSkillNames: string[];
-  piExtensions: string[];
-  piPromptTemplates: string[];
 }
 
 export function fleetResourcesRoot(env: Environ, home: string): string {
@@ -59,8 +57,6 @@ export function loadFleetResources(env: Environ, home: string): FleetResources {
     claudePluginDir,
     skills,
     codexSkillNames: names.map((name) => `agent:${name}`),
-    piExtensions: children(join(root, "pi", "extensions")),
-    piPromptTemplates: children(join(root, "pi", "prompt-templates")),
   };
 }
 
@@ -78,16 +74,6 @@ export function applyFleetResourceArguments(
   if (spec.harness === "claude") {
     return { ...spec, command: [bin, "--plugin-dir", resources.claudePluginDir, ...native] };
   }
-  if (spec.harness === "pi") {
-    const args = ["--no-skills", "--no-extensions", "--no-prompt-templates"];
-    for (const skill of resources.skills) args.push("--skill", skill.path);
-    for (const extension of resources.piExtensions) args.push("--extension", extension);
-    for (const template of resources.piPromptTemplates) {
-      args.push("--prompt-template", template);
-    }
-    return { ...spec, command: [bin, ...args, ...native] };
-  }
-
   const policy = codexSkillPolicyArguments(resources.codexSkillNames);
   const commandIndex = codexNonInteractiveCommandIndex(native);
   if (commandIndex !== null) {
@@ -105,13 +91,6 @@ export function applyFleetResourceArguments(
     return { ...spec, command: [bin, native[0], native[1], ...policy, ...native.slice(2)] };
   }
   return { ...spec, command: [bin, ...policy, ...native] };
-}
-
-function children(root: string): string[] {
-  if (!existsSync(root)) return [];
-  return readdirSync(root)
-    .map((name) => join(root, name))
-    .sort();
 }
 
 function missingResources(root: string, error?: unknown): CliError {

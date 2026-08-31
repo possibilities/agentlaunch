@@ -23,10 +23,9 @@ const OFF = { on: false, explicitOff: false };
 const EXPLICIT_OFF = { on: false, explicitOff: true };
 
 describe("parseHarnessName", () => {
-  test("accepts the three harnesses", () => {
+  test("accepts the two harnesses", () => {
     expect(parseHarnessName("claude")).toBe("claude");
     expect(parseHarnessName("codex")).toBe("codex");
-    expect(parseHarnessName("pi")).toBe("pi");
   });
 
   test("rejects anything else", () => {
@@ -53,10 +52,9 @@ describe("buildOpen", () => {
 });
 
 describe("buildResume", () => {
-  test("claude resumes by flag, codex by subcommand, pi by --session", () => {
+  test("claude resumes by flag and codex by subcommand", () => {
     expect(buildResume("claude", "abc-123", []).command).toEqual(["claude", "--resume", "abc-123"]);
     expect(buildResume("codex", "abc-123", []).command).toEqual(["codex", "resume", "abc-123"]);
-    expect(buildResume("pi", "abc-123", []).command).toEqual(["pi", "--session", "abc-123"]);
   });
 
   test("forwarded tokens land after the id and the spec carries the id", () => {
@@ -74,14 +72,12 @@ describe("utilityInvocation", () => {
     expect(utilityInvocation("codex", ["doctor"])).toBe(true);
     expect(utilityInvocation("claude", ["mcp", "list"])).toBe(true);
     expect(utilityInvocation("claude", ["setup-token"])).toBe(true);
-    expect(utilityInvocation("pi", ["auth", "status"])).toBe(true);
   });
 
   test("bare help and version flags pass through", () => {
     expect(utilityInvocation("codex", ["--version"])).toBe(true);
     expect(utilityInvocation("codex", ["-V"])).toBe(true);
     expect(utilityInvocation("claude", ["--help"])).toBe(true);
-    expect(utilityInvocation("pi", ["-h"])).toBe(true);
   });
 
   test("session launches balance: bare, prompts, flags, session words", () => {
@@ -93,7 +89,6 @@ describe("utilityInvocation", () => {
     expect(utilityInvocation("codex", ["resume", "abc"])).toBe(false);
     expect(utilityInvocation("codex", ["fork"])).toBe(false);
     expect(utilityInvocation("claude", ["fix the failing tests"])).toBe(false);
-    expect(utilityInvocation("pi", ["-p", "hello"])).toBe(false);
   });
 
   test("flags ahead of a subcommand classify as a session", () => {
@@ -112,7 +107,6 @@ describe("applyYolo", () => {
     expect(applyYolo("codex", [], ON, false).injected).toBe(
       "--dangerously-bypass-approvals-and-sandbox",
     );
-    expect(applyYolo("pi", [], ON, false).tokens).toEqual(["--approve"]);
   });
 
   test("a forwarded spelling is never duplicated, aliases included", () => {
@@ -120,9 +114,6 @@ describe("applyYolo", () => {
     expect(canonical.tokens).toEqual(["--dangerously-skip-permissions"]);
     expect(canonical.injected).toBeNull();
     expect(canonical.present).toBe("--dangerously-skip-permissions");
-    const short = applyYolo("pi", ["-a"], ON, false);
-    expect(short.tokens).toEqual(["-a"]);
-    expect(short.injected).toBeNull();
     // The permitting half alone says nothing about the gates: the missing
     // half is injected, and only that half.
     const permit = applyYolo("claude", ["--allow-dangerously-skip-permissions"], ON, false);
@@ -160,13 +151,6 @@ describe("applyYolo", () => {
     );
   });
 
-  test("pi's own negative wins over injection", () => {
-    const negative = applyYolo("pi", ["--no-approve"], ON, false);
-    expect(negative.tokens).toEqual(["--no-approve"]);
-    expect(negative.injected).toBeNull();
-    expect(negative.presentNegative).toBe(true);
-  });
-
   test("utility invocations never get the flag", () => {
     expect(applyYolo("codex", ["login", "--device-auth"], ON, true).tokens).toEqual([
       "login",
@@ -189,9 +173,6 @@ describe("applyYolo", () => {
     );
     expect(redacted.tokens).toEqual(["--model", "fable"]);
     expect(redacted.redacted).toEqual(["--dangerously-skip-permissions"]);
-    const alias = applyYolo("pi", ["-a", "hello"], EXPLICIT_OFF, false);
-    expect(alias.tokens).toEqual(["hello"]);
-    expect(alias.redacted).toEqual(["-a"]);
     // A canonical pair leaves whole.
     const pair = applyYolo(
       "claude",
@@ -220,16 +201,12 @@ describe("applyYolo", () => {
 
 describe("model and effort spellings", () => {
   test("model emission is --model with the resolved spelling", () => {
-    expect(modelArguments("openai-codex/gpt-5.6-sol")).toEqual([
-      "--model",
-      "openai-codex/gpt-5.6-sol",
-    ]);
+    expect(modelArguments("opus[1m]")).toEqual(["--model", "opus[1m]"]);
   });
 
   test("effort emission is per harness", () => {
     expect(effortArguments("claude", "medium")).toEqual(["--effort", "medium"]);
     expect(effortArguments("codex", "high")).toEqual(["-c", 'model_reasoning_effort="high"']);
-    expect(effortArguments("pi", "max")).toEqual(["--thinking", "max"]);
   });
 
   test("model-dimension detection sees --model, --model=, and every codex -m and config shape", () => {
@@ -248,13 +225,11 @@ describe("model and effort spellings", () => {
     expect(modelDimensionToken("codex", ["-c", "model_provider=oss"])).toBeNull();
     expect(modelDimensionToken("codex", ["-cmodel_reasoning_effort=high"])).toBeNull();
     expect(modelDimensionToken("claude", ["-m", "gpt-x"])).toBeNull();
-    expect(modelDimensionToken("pi", ["hello"])).toBeNull();
   });
 
   test("effort-dimension detection is per harness, codex via -c pairs", () => {
     expect(effortDimensionToken("claude", ["--effort", "max"])).toBe("--effort");
     expect(effortDimensionToken("claude", ["--effort=max"])).toBe("--effort=max");
-    expect(effortDimensionToken("pi", ["--thinking", "high"])).toBe("--thinking");
     expect(effortDimensionToken("codex", ["-c", 'model_reasoning_effort="low"'])).toBe(
       '-c model_reasoning_effort="low"',
     );
@@ -263,7 +238,6 @@ describe("model and effort spellings", () => {
     );
     expect(effortDimensionToken("codex", ["-c", "other=1"])).toBeNull();
     expect(effortDimensionToken("codex", ["--effort", "max"])).toBeNull();
-    expect(effortDimensionToken("claude", ["--thinking", "high"])).toBeNull();
   });
 
   test("effort-dimension detection covers split, inline, and attached codex spellings", () => {
@@ -300,7 +274,6 @@ describe("sessionStore", () => {
   test("defaults live under the home directory", () => {
     expect(sessionStore("claude", {}, home).root).toBe("/home/user/.claude/projects");
     expect(sessionStore("codex", {}, home).root).toBe("/home/user/.codex");
-    expect(sessionStore("pi", {}, home).root).toBe("/home/user/.pi/agent/sessions");
   });
 
   test("env overrides relocate the store and are reported active", () => {
@@ -311,10 +284,6 @@ describe("sessionStore", () => {
     const codex = sessionStore("codex", { CODEX_HOME: "~/codex-home" }, home);
     expect(codex.root).toBe("/home/user/codex-home");
     expect(codex.overrideActive).toBe(true);
-
-    const pi = sessionStore("pi", { PI_CODING_AGENT_DIR: "/pi/agent" }, home);
-    expect(pi.root).toBe("/pi/agent/sessions");
-    expect(pi.overrideActive).toBe(true);
   });
 
   test("empty overrides do not count as active", () => {
@@ -325,18 +294,16 @@ describe("sessionStore", () => {
 });
 
 describe("sessionFileFacts", () => {
-  test("reads native cwd and ids from claude, codex, and pi files", async () => {
+  test("reads native cwd and ids from claude and codex files", async () => {
     const root = mkdtempSync(join(tmpdir(), "agentlaunch-session-facts-"));
     try {
       const claude = join(root, "claude-id.jsonl");
       const codex = join(root, "rollout-codex-id.jsonl");
-      const pi = join(root, "pi.jsonl");
       writeFileSync(claude, `${JSON.stringify({ cwd: "/work/claude" })}\n`);
       writeFileSync(
         codex,
         `${JSON.stringify({ type: "session_meta", payload: { id: "codex-id", cwd: "/work/codex" } })}\n`,
       );
-      writeFileSync(pi, `${JSON.stringify({ id: "pi-id", cwd: "/work/pi" })}\n`);
 
       expect(await sessionFileFacts("claude", claude)).toEqual({
         cwd: "/work/claude",
@@ -346,7 +313,6 @@ describe("sessionFileFacts", () => {
         cwd: "/work/codex",
         sessionId: "codex-id",
       });
-      expect(await sessionFileFacts("pi", pi)).toEqual({ cwd: "/work/pi", sessionId: "pi-id" });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

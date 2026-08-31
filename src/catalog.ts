@@ -4,7 +4,7 @@ import type { CatalogValues, HarnessEntryValues } from "./catalog-schema.ts";
 import { catalogParseError, catalogValuesSchema } from "./catalog-schema.ts";
 import { CliError, UsageError } from "./errors.ts";
 import type { HarnessName } from "./harness.ts";
-import { isHarnessName, PROVIDER_SPELLINGS } from "./harness.ts";
+import { isHarnessName } from "./harness.ts";
 import type { Environ } from "./paths.ts";
 import { configDirectory } from "./paths.ts";
 
@@ -23,9 +23,8 @@ export interface CatalogModel {
   /** The name the operator types; identical across every harness that
    * offers the model. */
   model: string;
-  /** What the harness's native model flag receives — provider-combined for
-   * family includes, `spelling` for local models, the name itself
-   * otherwise. */
+  /** What the harness's native model flag receives — `spelling` when one is
+   * declared, the name itself otherwise. */
   spelling: string;
   /** Effective effort set: the model's own, else the family's, else the
    * harness's. */
@@ -168,12 +167,6 @@ function expandHarness(
     if (family === undefined) {
       throw fault(`harness "${entry.harness}" includes unknown family "${include.family}"`);
     }
-    const combine = PROVIDER_SPELLINGS[entry.harness];
-    if (include.provider !== undefined && combine === null) {
-      throw fault(
-        `harness "${entry.harness}" has no provider semantics; drop "provider" from its "${include.family}" include`,
-      );
-    }
     for (const member of family.models) {
       const efforts = member.efforts ?? family.efforts ?? entry.efforts;
       if (efforts === undefined) {
@@ -183,10 +176,7 @@ function expandHarness(
       }
       add({
         model: member.model,
-        spelling:
-          include.provider !== undefined && combine !== null
-            ? combine(include.provider, member.spelling ?? member.model)
-            : (member.spelling ?? member.model),
+        spelling: member.spelling ?? member.model,
         efforts,
         effort: member.defaults?.effort ?? null,
         family: include.family,
@@ -286,12 +276,17 @@ function assertNotUnionValue(value: string): void {
   );
 }
 
+const RETIRED_HARNESS = "pi";
+
 /** The --x-harness value (ADR 0018): a harness name, and nothing else — on
  * a launch and on x-resume alike. */
 export function parseHarnessFlag(value: string): HarnessName {
+  if (value === RETIRED_HARNESS || value.startsWith(`${RETIRED_HARNESS}:`)) {
+    throw new UsageError(`harness "${RETIRED_HARNESS}" is retired; choose claude or codex`);
+  }
   assertNotUnionValue(value);
   if (isHarnessName(value)) return value;
-  throw new UsageError(`"${value}" is not a harness (expected claude, codex, or pi)`);
+  throw new UsageError(`"${value}" is not a harness (expected claude or codex)`);
 }
 
 /**

@@ -3,9 +3,9 @@ import { UsageError } from "./errors.ts";
 import type { Environ } from "./paths.ts";
 import { expandTilde } from "./paths.ts";
 
-export type HarnessName = "claude" | "codex" | "pi";
+export type HarnessName = "claude" | "codex";
 
-export const HARNESS_NAMES: readonly HarnessName[] = ["claude", "codex", "pi"];
+export const HARNESS_NAMES: readonly HarnessName[] = ["claude", "codex"];
 
 export function isHarnessName(value: string): value is HarnessName {
   return (HARNESS_NAMES as readonly string[]).includes(value);
@@ -13,42 +13,21 @@ export function isHarnessName(value: string): value is HarnessName {
 
 export function parseHarnessName(value: string): HarnessName {
   if (isHarnessName(value)) return value;
-  throw new UsageError(`unknown harness "${value}" (expected claude, codex, or pi)`);
+  throw new UsageError(`unknown harness "${value}" (expected claude or codex)`);
 }
 
-/**
- * How a provider name from the catalog combines with a model name when the
- * harness emits its model argument. Null means the harness has no provider
- * semantics, and a provider on its catalog include is a catalog fault. Pi
- * spells providers as a path prefix: openai-codex + gpt-5.6 →
- * openai-codex/gpt-5.6.
- */
-export const PROVIDER_SPELLINGS: Record<
-  HarnessName,
-  ((provider: string, model: string) => string) | null
-> = {
-  claude: null,
-  codex: null,
-  pi: (provider, model) => `${provider}/${model}`,
-};
-
-/** How a resolved model is spelled at launch. One spelling everywhere;
- * the per-harness variation lives in the spelling string itself
- * (provider-combined for pi). */
+/** How a resolved model is spelled at launch. */
 export function modelArguments(spelling: string): string[] {
   return ["--model", spelling];
 }
 
-/** How a resolved effort is spelled at launch: claude and pi have flags,
- * codex only takes the TOML config override. */
+/** How a resolved effort is spelled at launch. */
 export function effortArguments(harness: HarnessName, effort: string): string[] {
   switch (harness) {
     case "claude":
       return ["--effort", effort];
     case "codex":
       return ["-c", `model_reasoning_effort="${effort}"`];
-    case "pi":
-      return ["--thinking", effort];
   }
 }
 
@@ -63,8 +42,8 @@ export function cwdDimensionToken(harness: HarnessName, tokens: readonly string[
   return null;
 }
 
-/** Explicitly anchor a new Codex native session to the launch cwd. Claude and
- * Pi inherit their process cwd and need no argument. */
+/** Explicitly anchor a new Codex native session to the launch cwd. Claude
+ * inherits its process cwd and needs no argument. */
 export function cwdArguments(harness: HarnessName, cwd: string): string[] {
   return harness === "codex" ? ["--cd", cwd] : [];
 }
@@ -111,7 +90,7 @@ export function modelDimensionToken(
 }
 
 /** The first forwarded token that natively claims the effort dimension —
- * claude `--effort`, pi `--thinking`, codex `-c|--config` whose value sets
+ * claude `--effort`, or codex `-c|--config` whose value sets
  * model_reasoning_effort — or null. */
 export function effortDimensionToken(
   harness: HarnessName,
@@ -120,9 +99,6 @@ export function effortDimensionToken(
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
     if (harness === "claude" && (token === "--effort" || token.startsWith("--effort="))) {
-      return token;
-    }
-    if (harness === "pi" && (token === "--thinking" || token.startsWith("--thinking="))) {
       return token;
     }
     if (harness === "codex") {
@@ -167,10 +143,8 @@ export interface LaunchSpec {
  * spelling is a token sequence because claude's is a pair (ADR 0031):
  * `--dangerously-skip-permissions` drops the gates and
  * `--allow-dangerously-skip-permissions` is what lets the session offer
- * that bypass at all, so an unattended claude needs both. Pi has no gates
- * on tools at all — `--approve` (and its `-a` short) only auto-trusts
- * project-local files. Verified against claude 2.1.227, codex-cli 0.147.0,
- * pi 0.84.1; re-check on harness upgrades.
+ * that bypass at all, so an unattended claude needs both. Verified against
+ * claude 2.1.227 and codex-cli 0.147.0; re-check on harness upgrades.
  */
 export const YOLO_SPELLINGS: Record<HarnessName, readonly (readonly string[])[]> = {
   claude: [
@@ -178,15 +152,13 @@ export const YOLO_SPELLINGS: Record<HarnessName, readonly (readonly string[])[]>
     ["--dangerously-skip-permissions"],
   ],
   codex: [["--dangerously-bypass-approvals-and-sandbox"]],
-  pi: [["--approve"], ["-a"]],
 };
 
 /** A harness's own negative spelling. A caller who typed it has decided, so
- * yolo never injects over it. Only pi has one. */
+ * yolo never injects over it. */
 const NATIVE_NO_YOLO: Record<HarnessName, readonly string[]> = {
   claude: [],
   codex: [],
-  pi: ["--no-approve", "-na"],
 };
 
 /** A flag whose *value* settles the gates, so typing it at all is the
@@ -196,7 +168,6 @@ const NATIVE_NO_YOLO: Record<HarnessName, readonly string[]> = {
 const GATE_FLAG: Record<HarnessName, string | null> = {
   claude: "--permission-mode",
   codex: null,
-  pi: null,
 };
 
 interface GateMatch {
@@ -369,7 +340,7 @@ export function buildOpen(harness: HarnessName, tokens: string[]): LaunchSpec {
  * prompt/flag launch. Matches each CLI's own parsing — a leading
  * subcommand word already outranks the prompt positional there, so a
  * "prompt" equal to one of these words was never going to be a prompt.
- * Verified against codex-cli 0.147.0, claude 2.x, pi; re-check on harness
+ * Verified against codex-cli 0.147.0 and claude 2.x; re-check on harness
  * upgrades.
  */
 const UTILITY_WORDS: Record<HarnessName, ReadonlySet<string>> = {
@@ -415,7 +386,6 @@ const UTILITY_WORDS: Record<HarnessName, ReadonlySet<string>> = {
     "features",
     "help",
   ]),
-  pi: new Set(["install", "remove", "uninstall", "update", "list", "config", "auth", "help"]),
 };
 
 const BARE_UTILITY_FLAGS = new Set(["-h", "--help", "-v", "-V", "--version"]);
@@ -435,14 +405,8 @@ export function utilityInvocation(harness: HarnessName, argvAfterBin: string[]):
 }
 
 export function buildResume(harness: HarnessName, sessionId: string, tokens: string[]): LaunchSpec {
-  // Pi's --resume is a boolean that opens a picker; --session is its by-id
-  // spelling. Emitting pi --resume <id> would strand the id as a prompt.
   const base =
-    harness === "claude"
-      ? ["claude", "--resume", sessionId]
-      : harness === "codex"
-        ? ["codex", "resume", sessionId]
-        : ["pi", "--session", sessionId];
+    harness === "claude" ? ["claude", "--resume", sessionId] : ["codex", "resume", sessionId];
   return {
     harness,
     command: [...base, ...tokens],
@@ -456,11 +420,10 @@ export interface SessionFileFacts {
 }
 
 /**
- * What a session file says about itself, per store layout: codex and pi
- * carry cwd and id in their first line (session_meta / session header);
- * claude files scatter cwd through the records and put the id only in the
- * filename. Read bounded — a session transcript can be huge, and these
- * facts live at the head.
+ * What a session file says about itself, per store layout: codex carries cwd
+ * and id in its first session_meta line; claude files scatter cwd through
+ * the records and put the id only in the filename. Read bounded — a session
+ * transcript can be huge, and these facts live at the head.
  */
 export async function sessionFileFacts(
   harness: HarnessName,
@@ -485,18 +448,13 @@ export async function sessionFileFacts(
   } catch {
     return { cwd: null, sessionId: null };
   }
-  if (harness === "codex") {
-    const payload = parsed["payload"];
-    const record =
-      typeof payload === "object" && payload !== null
-        ? (payload as Record<string, unknown>)
-        : parsed;
-    return {
-      cwd: stringField(record, "cwd"),
-      sessionId: stringField(record, "session_id") ?? stringField(record, "id"),
-    };
-  }
-  return { cwd: stringField(parsed, "cwd"), sessionId: stringField(parsed, "id") };
+  const payload = parsed["payload"];
+  const record =
+    typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : parsed;
+  return {
+    cwd: stringField(record, "cwd"),
+    sessionId: stringField(record, "session_id") ?? stringField(record, "id"),
+  };
 }
 
 async function readHead(path: string, bytes: number): Promise<string> {
@@ -551,18 +509,6 @@ export function sessionStore(harness: HarnessName, env: Environ, home: string): 
           `archived_sessions/rollout-*-${sessionId}.jsonl`,
           `archived_sessions/rollout-*-${sessionId}.jsonl.zst`,
         ],
-      };
-    }
-    case "pi": {
-      const value = env["PI_CODING_AGENT_DIR"];
-      const active = value !== undefined && value !== "";
-      const base = active ? expandTilde(value, home) : join(home, ".pi", "agent");
-      return {
-        harness,
-        override: "PI_CODING_AGENT_DIR",
-        overrideActive: active,
-        root: join(base, "sessions"),
-        patternsFor: (sessionId) => [`*/*_${sessionId}.jsonl`],
       };
     }
   }

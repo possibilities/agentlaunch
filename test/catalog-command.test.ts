@@ -57,7 +57,7 @@ describe("catalogCommand", () => {
     const data = outcome.data as CatalogData;
 
     expect(data.source).toBe("built-in");
-    expect(data.harnesses.map((entry) => entry.harness)).toEqual(["claude", "codex", "pi"]);
+    expect(data.harnesses.map((entry) => entry.harness)).toEqual(["claude", "codex"]);
 
     const claude = data.harnesses[0]!;
     expect(claude.default_model).toBe("opus-1m");

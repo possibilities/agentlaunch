@@ -8,8 +8,8 @@ validates. Colons claim the value strictly: both/all parts required, no
 sparse forms, no default harness — an invocation with no harness value is
 a usage fault, so a typo can never launch anything. The resolved model and
 effort are injected at the head of the forwarded stream in the harness's
-own spelling (`--model` everywhere, with pi's provider-combined form;
-`--effort` / `-c model_reasoning_effort="…"` / `--thinking`), and both are
+own spelling (`--model` everywhere; `--effort` or
+`-c model_reasoning_effort="…"`), and both are
 narrated rows and envelope fields with their source. A colon form owns
 both dimensions and hard-faults on a forwarded native counterpart —
 presence-based, because comparing values across spellings is a swamp; the

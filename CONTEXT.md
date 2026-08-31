@@ -1,6 +1,6 @@
 # Glossary
 
-**Harness** — One native interactive agent CLI: `claude`, `codex`, or `pi`.
+**Harness** — One native interactive agent CLI: `claude` or `codex`.
 AgentLaunch selects one but does not replace its behavior. _Avoid_: backend.
 
 **Native token** — Any command-line token outside the reserved `--x-*`
@@ -32,10 +32,10 @@ popup (the popup is the host's chrome, not this form).
 
 **Priming** — A configured skill name the surface form prefixes onto the
 intent in the target harness's own spelling: `/agent:<skill>` for Claude,
-`$agent:<skill>` for Codex, `/<skill>` for Pi. An intent that already leads with a
-slash command is its own invocation, so priming reads `none` and takes no
-input until it does not — suppression is derived from the intent, never
-stored, and the operator's standing choice returns with a plain intent.
+or `$agent:<skill>` for Codex. An intent that already leads with a slash command
+is its own invocation, so priming reads `none` and takes no input until it does
+not — suppression is derived from the intent, never stored, and the operator's
+standing choice returns with a plain intent.
 _Avoid_: preamble, prefix skill.
 
 **Session directive** — One schema-versioned JSON line describing a session
@@ -57,9 +57,8 @@ associated decisions. _Avoid_: run (there is no AgentLaunch run lifecycle).
 **Fleet resources** — AgentStart's one fixed private set of skills and
 harness-specific files under `~/.local/share/agentstart/resources`. Every
 managed session receives it: Claude as one `agent` plugin, Codex by
-name-enabling the globally installed skills-only plugin, and Pi through
-explicit paths with ambient discovery suppressed. _Avoid_: capability pack,
-session projection (there is no selection or per-session rendering).
+name-enabling the globally installed skills-only plugin. _Avoid_: capability
+pack, session projection (there is no selection or per-session rendering).
 
 **Codex skill policy** — The globally installed `agent@agentstart-managed`
 plugin stays skills-only and its qualified names are persistently disabled.
@@ -71,8 +70,8 @@ metadata, name (if any), and lifecycle are native state. AgentLaunch only reads
 the ID/store/cwd needed to resume it. _Avoid_: AgentLaunch session.
 
 **Session store** — The harness's own files under the native default or its
-environment override (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
-`PI_CODING_AGENT_DIR`). AgentLaunch never writes them.
+environment override (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). AgentLaunch never
+writes them.
 
 **Resume cwd** — The directory recorded in native session metadata. A resume
 starts there when it still exists; otherwise it starts in the invocation cwd
@@ -80,18 +79,17 @@ and states the missing/unknown native directory.
 
 **Anchor** — The native Codex `--cd <absolute-cwd>` AgentLaunch adds to a new
 Codex launch unless the caller already supplied `--cd`/`-C`. This ensures the
-native session records the launch directory. Claude and Pi inherit cwd.
+native session records the launch directory. Claude inherits cwd.
 
 **Utility invocation** — A harness management/service command that opens no
-account-bound model session, such as `codex login`, `claude doctor`, `pi auth`,
-or bare `--version`. It passes through unbalanced and without yolo injection.
+account-bound model session, such as `codex login`, `claude doctor`, or bare
+`--version`. It passes through unbalanced and without yolo injection.
 
 **Balance** — Choosing an eligible account through `agentusage balance`.
 AgentLaunch consumes the answer; AgentUsage owns policy and capacity facts.
 
-**Swap** — Starting under the chosen account: `cswap` for Claude,
-`codex-swap` for Codex and Pi. Choosing is balance; credential activation is
-swap.
+**Swap** — Starting under the chosen account: `cswap` for Claude and
+`codex-swap` for Codex. Choosing is balance; credential activation is swap.
 
 **Pin** — `--x-account <selector>`, which forces the candidate account while
 retaining the swap tool's eligibility gate. _Avoid_: bypass.

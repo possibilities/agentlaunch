@@ -1,9 +1,9 @@
 export const VERSION = "agentlaunch 0.1.0";
 
-export const TOP_HELP = `agentlaunch — resolve, balance, and launch claude, codex, or pi
+export const TOP_HELP = `agentlaunch — resolve, balance, and launch claude or codex
 
 Usage:
-  agentlaunch --x-harness <claude|codex|pi> [--x-level <model>:<effort>] [native tokens…]
+  agentlaunch --x-harness <claude|codex> [--x-level <model>:<effort>] [native tokens…]
   agentlaunch --x-level <model>:<effort> [native tokens…]
   agentlaunch --x-surface
   agentlaunch x-resume <native-session-id> [--x-harness <name>] [native tokens…]
@@ -26,7 +26,7 @@ Extension flags are the reserved --x-* namespace. Every other token is
 forwarded in order and interpreted only by the native harness.
 
 Common:
-  --x-harness <name>     claude|codex|pi
+  --x-harness <name>     claude|codex
   --x-level <m>:<e>      Resolve and inject one catalog model/effort pair
   --x-account <selector> Pin a balanced launch to an eligible account
   --x-no-balance         Run the native harness without the account stack
@@ -56,7 +56,7 @@ Environment:
 Examples:
   agentlaunch --x-harness claude "fix the failing tests"
   agentlaunch --x-level gpt-5.6-sol:ultra "hard problem"
-  agentlaunch --x-harness pi --x-level gpt-5.6-luna:max --x-dry-run --x-json
+  agentlaunch --x-harness codex --x-level gpt-5.6-luna:max --x-dry-run --x-json
   agentlaunch x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
 `;
 
@@ -79,17 +79,17 @@ one final native token — for callers whose own argv cannot carry the text,
 such as a shell-typed line that refuses control characters. The file is read
 once at launch and never deleted; an unreadable or empty file is an error.
 
-Management invocations such as codex login, claude doctor, pi auth, and bare
+Management invocations such as codex login, claude doctor, and bare
 --version pass through unbalanced and receive no yolo injection.
 
 Every managed session includes AgentStart's one fixed private resource set.
 Claude receives one session plugin named agent (/agent:<skill>), Codex
 name-enables the globally installed skills-only plugin ($agent:<skill>) on its
-native process, and Pi receives explicit resource paths (/<skill>). The
-retired --x-capability and --x-no-common flags are usage errors.
+native process. The retired --x-capability and --x-no-common flags are usage
+errors.
 
 Launches balance by default through agentusage, then compose cswap for Claude
-or codex-swap for Codex/Pi. --x-account pins the selection while retaining the
+or codex-swap for Codex. --x-account pins the selection while retaining the
 swap tool's eligibility gate. --x-no-balance (or AGENTLAUNCH_NO_BALANCE=1)
 executes the raw harness.
 
@@ -98,7 +98,7 @@ envelope. Real launches exit with the native harness's exit status.
 `,
   "x-resume": `agentlaunch x-resume <native-session-id> [flags] [native tokens…]
 
-Without --x-harness, AgentLaunch scans the native Claude, Codex, and Pi session
+Without --x-harness, AgentLaunch scans the native Claude and Codex session
 stores. No match and multiple matches are explicit errors. --x-harness skips
 detection and selects the native resume spelling directly.
 
@@ -111,9 +111,6 @@ effort: the native session continues with its own state. A forwarded Claude
 Stores (environment overrides honored):
   claude  $CLAUDE_CONFIG_DIR|~/.claude/projects/*/<id>.jsonl
   codex   $CODEX_HOME|~/.codex/{sessions/**,archived_sessions}/rollout-*-<id>.jsonl[.zst]
-  pi      $PI_CODING_AGENT_DIR|~/.pi/agent/sessions/*/*_<id>.jsonl
-
-Pi resumes with --session <id>; its native --resume is a picker.
 
 --x-resume <id> on a launch invocation is the same resume as a flag, for
 invokers that can only append arguments to a bare kind command (a herdr
@@ -135,7 +132,7 @@ Takes no other arguments. Needs a terminal on stdin and stderr, and refuses
 a stdout that is a terminal — that means no host is reading. Project roots
 and priming choices come from the config ("roots", "priming"); an
 interrupted form is restored from its draft on the next open.
-Priming emits /agent:<skill> for Claude, $agent:<skill> for Codex, and /<skill> for Pi.
+Priming emits /agent:<skill> for Claude and $agent:<skill> for Codex.
 An intent that already leads with a slash command is its own invocation: the
 priming row reads "none" and takes no input while that holds.
 `,
@@ -157,11 +154,11 @@ present, exactly as it does for launches. Reads only.
 };
 
 export const AGENT_TEASER =
-  "Resolve, balance, launch, and resume native claude/codex/pi sessions: agentlaunch --x-harness <name> [--x-level <model>:<effort>] [native tokens…], x-resume <native-session-id>, x-doctor, and x-catalog.";
+  "Resolve, balance, launch, and resume native Claude/Codex sessions: agentlaunch --x-harness <name> [--x-level <model>:<effort>] [native tokens…], x-resume <native-session-id>, x-doctor, and x-catalog.";
 
 export const AGENT_HELP = `agentlaunch agent runbook
 
-Use AgentLaunch when starting or resuming an interactive Claude, Codex, or Pi
+Use AgentLaunch when starting or resuming an interactive Claude or Codex
 session. It owns launch resolution: harness/model/effort, fixed fleet resources,
 yolo policy, account balancing, native session-store detection, and resume cwd
 recovery.

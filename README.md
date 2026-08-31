@@ -1,6 +1,6 @@
 # AgentLaunch
 
-AgentLaunch resolves, balances, and starts native Claude Code, Codex, and Pi
+AgentLaunch resolves, balances, and starts native Claude Code and Codex
 sessions, including Codex's non-interactive session commands. It can also find
 a native session by ID and resume it in the directory recorded by that harness.
 
@@ -31,13 +31,13 @@ unsafe paths instead of replacing them.
 ```sh
 agentlaunch --x-harness claude "fix the failing tests"
 agentlaunch --x-level gpt-5.6-sol:ultra "hard problem"
-agentlaunch --x-harness pi --x-level gpt-5.6-luna:max
+agentlaunch --x-harness codex --x-level gpt-5.6-luna:max
 agentlaunch --x-harness codex --x-dry-run --x-json
 ```
 
 A launch must name `--x-harness`, `--x-level`, or both:
 
-- `--x-harness claude|codex|pi` uses that harness's catalog defaults.
+- `--x-harness claude|codex` uses that harness's catalog defaults.
 - `--x-level <model>:<effort>` chooses the earliest catalog harness offering
   the pair.
 - Together, the flags pin and validate the full request.
@@ -64,13 +64,9 @@ Every managed session receives AgentStart's one fixed private resource set at
   plugin. Its `$agent:<skill>` names are persistently disabled outside managed
   sessions and name-enabled through session config on native interactive,
   resume, `exec`/`e`, and `review` launches.
-- Pi disables ambient skill/extension/template discovery and receives
-  explicit paths; skills stay bare `/<skill>`.
-
 The native stores do not move: Claude continues through `cswap --share-history`,
-Codex uses `~/.codex/sessions`, and Pi uses `~/.pi/agent/sessions`, preserving
-native resume and history indexing. Utility invocations such as `codex login`
-receive no fleet resources.
+and Codex uses `~/.codex/sessions`, preserving native resume and history
+indexing. Utility invocations such as `codex login` receive no fleet resources.
 
 ## Surface form
 
@@ -87,11 +83,11 @@ realize as a herdr session. The form takes no other arguments, needs a terminal
 on stdin and stderr, and refuses a stdout that is a terminal — that means
 no host is reading. Project roots and priming choices come from the config
 (`roots`, `priming`); an interrupted form is restored from its draft on the
-next open. Priming spells Claude skills as `/agent:<skill>`, Codex as
-`$agent:<skill>`, and Pi as `/<skill>`. An intent that already leads with a slash
-command is its own invocation, so the priming row reads `none` and stops
-taking input until the intent does not. The `surface-handoff-protocol` wiki page
-documents the directive contract.
+next open. Priming spells Claude skills as `/agent:<skill>` and Codex as
+`$agent:<skill>`. An intent that already leads with a slash command is its own
+invocation, so the priming row reads `none` and stops taking input until the
+intent does not. The `surface-handoff-protocol` wiki page documents the
+directive contract.
 
 ## Resume
 
@@ -100,7 +96,7 @@ agentlaunch x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60
 agentlaunch x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60 --x-harness claude
 ```
 
-Without `--x-harness`, AgentLaunch searches all three native stores. It
+Without `--x-harness`, AgentLaunch searches both native stores. It
 refuses absent or ambiguous IDs. With `--x-harness`, it skips detection and
 uses that harness's native resume spelling.
 
@@ -112,15 +108,14 @@ Resume injects no model or effort; the session continues with its native state.
 | --- | --- | --- |
 | Claude | `$CLAUDE_CONFIG_DIR` or `~/.claude/projects` | `claude --resume <id>` |
 | Codex | `$CODEX_HOME` or `~/.codex` | `codex resume <id>` |
-| Pi | `$PI_CODING_AGENT_DIR` or `~/.pi/agent/sessions` | `pi --session <id>` |
 
 ## Accounts and permissions
 
 Session launches balance by default:
 
 - Claude: `agentusage balance claude`, then `cswap run <slot> --share-history`.
-- Codex and Pi: `agentusage balance codex`, then `codex-swap run|resume` or
-  `codex-swap pi run` with the selected account/claim.
+- Codex: `agentusage balance codex`, then `codex-swap run|resume` with the
+  selected account/claim.
 
 `--x-account <selector>` pins a balanced launch but keeps the swap tool's
 eligibility checks. `--x-no-balance` runs the raw harness.
@@ -130,13 +125,11 @@ Yolo is on by default and means each harness's own unattended setting:
 
 - Claude: `--dangerously-skip-permissions --allow-dangerously-skip-permissions`
 - Codex: `--dangerously-bypass-approvals-and-sandbox`
-- Pi: `--approve`
 
 Use `--x-no-yolo`, optionally followed by a harness scope. A caller-supplied
 native gate flag wins; explicit `--x-no-yolo` removes a forwarded positive
 yolo spelling and reports that redaction. Utility invocations such as
-`codex login`, `claude doctor`, and `pi auth` pass through without balance or
-yolo injection.
+`codex login` and `claude doctor` pass through without balance or yolo injection.
 
 ## Output and machine use
 
@@ -170,7 +163,7 @@ The optional strict config is `~/.config/agentlaunch/config.json`:
 ```json
 {
   "$schema": "/path/to/config.schema.json",
-  "yolo": { "claude": true, "codex": false, "pi": true },
+  "yolo": { "claude": true, "codex": false },
   "roots": ["~/code", "~/src"],
   "priming": ["collab", "build"]
 }
@@ -183,7 +176,7 @@ checked-in JSON Schemas generated from strict Zod sources.
 
 ## Bare harness shims
 
-Fleet installations may route bare `claude`, `codex`, and `pi` through
+Fleet installations may route bare `claude` and `codex` through
 AgentLaunch. The child receives `AGENTLAUNCH_LAUNCH=1`; the shims use that
 sentinel to exec the real binary rather than recur. The shims are installed by
 the fleet owner, not this repository.

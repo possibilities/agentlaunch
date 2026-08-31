@@ -1,7 +1,7 @@
 # 0005 — Utility invocations pass through unbalanced
 
 A first forwarded token that is a management or service word (codex
-`login`/`app-server`/…, claude `doctor`/`mcp`/…, pi `auth`/…, and bare
+`login`/`app-server`/…, claude `doctor`/`mcp`/…, and bare
 `--help`/`--version`) makes the launch a utility invocation: it opens no
 account-bound model session, so balancing it spends nothing and means
 nothing, and the swap wrappers reject several outright — ndy refuses

@@ -9,7 +9,6 @@ import { assertSessionId, countSessions, findSessions } from "../src/resolve.ts"
 
 const CLAUDE_ID = "05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60";
 const CODEX_ID = "019fcb41-6f70-7283-aa42-97510cb09818";
-const PI_ID = "0198a7b2-1111-7222-8333-444455556666";
 
 let roots: string[] = [];
 
@@ -24,7 +23,7 @@ afterEach(() => {
   roots = [];
 });
 
-/** A fixture mirroring all three real store layouts under one temp root. */
+/** A fixture mirroring both real store layouts under one temp root. */
 function fixtureEnv(): { env: Environ; home: string } {
   const root = tempRoot();
   const home = join(root, "home");
@@ -39,22 +38,17 @@ function fixtureEnv(): { env: Environ; home: string } {
   const codexArchive = join(root, "codex", "archived_sessions");
   mkdirSync(codexArchive, { recursive: true });
 
-  const piSessions = join(root, "pi", "agent", "sessions", "--Users-someone-code-thing--");
-  mkdirSync(piSessions, { recursive: true });
-  writeFileSync(join(piSessions, `2026-08-09T10-00-00-000Z_${PI_ID}.jsonl`), "{}\n");
-
   return {
     env: {
       CLAUDE_CONFIG_DIR: join(root, "claude"),
       CODEX_HOME: join(root, "codex"),
-      PI_CODING_AGENT_DIR: join(root, "pi", "agent"),
     },
     home,
   };
 }
 
 describe("assertSessionId", () => {
-  test("accepts UUIDs and pi-style custom ids", () => {
+  test("accepts UUIDs and custom ids", () => {
     expect(() => assertSessionId(CLAUDE_ID)).not.toThrow();
     expect(() => assertSessionId("my_run.2")).not.toThrow();
   });
@@ -74,9 +68,6 @@ describe("findSessions", () => {
     ]);
     expect(await findSessions(CODEX_ID, env, home)).toEqual([
       { harness: "codex", path: expect.stringContaining(`${CODEX_ID}.jsonl`) },
-    ]);
-    expect(await findSessions(PI_ID, env, home)).toEqual([
-      { harness: "pi", path: expect.stringContaining(`${PI_ID}.jsonl`) },
     ]);
   });
 
@@ -110,11 +101,11 @@ describe("findSessions", () => {
     const claudeDir = join(env["CLAUDE_CONFIG_DIR"] ?? "", "projects", "-elsewhere");
     mkdirSync(claudeDir, { recursive: true });
     writeFileSync(join(claudeDir, `${shared}.jsonl`), "{}\n");
-    const piDir = join(env["PI_CODING_AGENT_DIR"] ?? "", "sessions", "--elsewhere--");
-    mkdirSync(piDir, { recursive: true });
-    writeFileSync(join(piDir, `2026-08-09T12-00-00-000Z_${shared}.jsonl`), "{}\n");
+    const codexDir = join(env["CODEX_HOME"] ?? "", "sessions", "2026", "08", "10");
+    mkdirSync(codexDir, { recursive: true });
+    writeFileSync(join(codexDir, `rollout-2026-08-10T12-00-00-${shared}.jsonl`), "{}\n");
     const matches = await findSessions(shared, env, home);
-    expect(matches.map((match) => match.harness)).toEqual(["claude", "pi"]);
+    expect(matches.map((match) => match.harness)).toEqual(["claude", "codex"]);
   });
 
   test("returns nothing when stores are absent or empty", async () => {
@@ -122,7 +113,6 @@ describe("findSessions", () => {
     const env: Environ = {
       CLAUDE_CONFIG_DIR: join(root, "nope-claude"),
       CODEX_HOME: join(root, "nope-codex"),
-      PI_CODING_AGENT_DIR: join(root, "nope-pi"),
     };
     expect(await findSessions(CLAUDE_ID, env, join(root, "home"))).toEqual([]);
   });
@@ -133,7 +123,6 @@ describe("countSessions", () => {
     const { env, home } = fixtureEnv();
     expect(await countSessions(sessionStore("claude", env, home))).toBe(1);
     expect(await countSessions(sessionStore("codex", env, home))).toBe(1);
-    expect(await countSessions(sessionStore("pi", env, home))).toBe(1);
   });
 
   test("missing store roots count zero", async () => {

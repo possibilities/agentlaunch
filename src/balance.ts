@@ -1,5 +1,5 @@
 import { CliError } from "./errors.ts";
-import type { HarnessName, LaunchSpec } from "./harness.ts";
+import type { LaunchSpec } from "./harness.ts";
 import type { Narrator } from "./narrate.ts";
 import { shellLine } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
@@ -16,7 +16,7 @@ export interface BalanceDecision {
   provider: "claude" | "codex";
   /** claude-swap route (claude launches). */
   route: { id: string; slot: number } | null;
-  /** codex-swap account key (codex and pi launches). */
+  /** codex-swap account key (codex launches). */
   accountKey: string | null;
   /** Lease consumed by the launch; null when dry-run composed unclaimed. */
   leaseId: string | null;
@@ -51,7 +51,7 @@ export async function balanceSpec(
   request: BalanceRequest,
 ): Promise<BalancedLaunch> {
   if (spec.harness === "claude") return balanceClaude(env, spec, request);
-  return balanceCodexFamily(env, spec, request);
+  return balanceCodex(env, spec, request);
 }
 
 // ---------------------------------------------------------------------------
@@ -100,9 +100,9 @@ async function balanceClaude(
 }
 
 // ---------------------------------------------------------------------------
-// codex + pi — agentusage balance codex [--claim] → codex-swap run/resume/pi run
+// codex — agentusage balance codex [--claim] → codex-swap run/resume
 
-async function balanceCodexFamily(
+async function balanceCodex(
   env: Environ,
   spec: LaunchSpec,
   request: BalanceRequest,
@@ -113,7 +113,7 @@ async function balanceCodexFamily(
     return {
       spec: {
         ...spec,
-        command: composeCodexFamily(spec, ["--account", request.account]),
+        command: composeCodex(spec, ["--account", request.account]),
       },
       decision: {
         provider: "codex",
@@ -126,8 +126,7 @@ async function balanceCodexFamily(
   }
 
   const argv = ["agentusage", "balance", "codex", "--json"];
-  const model = normalizePiModel(spec.harness, request.model);
-  if (model !== undefined) argv.push("--model", model);
+  if (request.model !== undefined) argv.push("--model", request.model);
   if (!request.dryRun) argv.push("--claim");
 
   const body = await runBalanceJson(env, argv, request.narrator);
@@ -156,7 +155,7 @@ async function balanceCodexFamily(
   // spelling — a real command a human can copy-run through the same gate.
   const pin = leaseId !== null ? ["--claim", leaseId] : ["--account", accountKey];
   return {
-    spec: { ...spec, command: composeCodexFamily(spec, pin) },
+    spec: { ...spec, command: composeCodex(spec, pin) },
     decision: {
       provider: "codex",
       route: null,
@@ -168,29 +167,15 @@ async function balanceCodexFamily(
 }
 
 /**
- * codex opens wrap as `codex-swap run`, codex resumes as
- * `codex-swap resume <id>` (the session id moves into the wrapper's
- * grammar), pi always as `codex-swap pi run` — pi's own `--session` flag
- * rides the forwarded args untouched.
+ * Codex opens wrap as `codex-swap run`; resumes use
+ * `codex-swap resume <id>`, moving the session id into the wrapper grammar.
  */
-export function composeCodexFamily(spec: LaunchSpec, pin: string[]): string[] {
-  if (spec.harness === "pi") {
-    return ["codex-swap", "pi", "run", ...pin, "--", ...spec.command.slice(1)];
-  }
+export function composeCodex(spec: LaunchSpec, pin: string[]): string[] {
   if (spec.sessionId !== null) {
     // buildResume shaped: ["codex", "resume", <id>, ...passthrough]
     return ["codex-swap", "resume", spec.sessionId, ...pin, "--", ...spec.command.slice(3)];
   }
   return ["codex-swap", "run", ...pin, "--", ...spec.command.slice(1)];
-}
-
-/** Pi model ids may carry the provider prefix; lanes match on the bare id. */
-export function normalizePiModel(
-  harness: HarnessName,
-  model: string | undefined,
-): string | undefined {
-  if (model === undefined || harness !== "pi") return model;
-  return model.startsWith("openai-codex/") ? model.slice("openai-codex/".length) : model;
 }
 
 // ---------------------------------------------------------------------------
