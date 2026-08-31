@@ -98,6 +98,19 @@ expect_exit 2 run --x-level opus --x-dry-run
 expect_exit 2 run --x-harness cursor --x-dry-run
 expect_exit 2 run --x-dry-run
 
+# Retired harness spellings fail before they can become a prompt or broaden
+# a scoped policy to every remaining harness.
+expect_exit 2 run --x-harness pi --x-dry-run
+expect_err 'harness "pi" is retired'
+expect_exit 2 run --x-harness pi:gpt-5.6-sol:high --x-dry-run
+expect_err 'harness "pi" is retired'
+for flag in --x-yolo --x-no-yolo; do
+  expect_exit 2 run --x-harness codex "$flag" pi --x-dry-run
+  expect_err 'scope "pi" names a retired harness'
+  expect_exit 2 run --x-harness codex "$flag=pi" --x-dry-run
+  expect_err 'scope "pi" names a retired harness'
+done
+
 # Yolo policy, native gate ownership, and utility passthrough.
 expect_exit 0 run --x-harness claude --dangerously-skip-permissions --x-no-yolo --x-dry-run
 if grep -q -- "--dangerously" "$WORK/out"; then

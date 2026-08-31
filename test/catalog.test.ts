@@ -52,6 +52,19 @@ describe("parseHarnessFlag", () => {
       /union value is retired: pass --x-harness <harness> --x-level gpt-5\.6-sol:high/,
     );
   });
+
+  test("the retired harness never recommends an invalid replacement", () => {
+    for (const value of ["pi", "pi:gpt-5.6-sol:high"]) {
+      try {
+        parseHarnessFlag(value);
+        throw new Error("expected a usage fault");
+      } catch (error) {
+        expect(error).toBeInstanceOf(UsageError);
+        expect((error as Error).message).toContain('harness "pi" is retired');
+        expect((error as Error).message).not.toContain("--x-harness pi");
+      }
+    }
+  });
 });
 
 describe("parseLevel", () => {
@@ -298,6 +311,21 @@ describe("loadCatalog", () => {
       const { env, home } = writeCatalog(bad);
       expect(() => loadCatalog(env, home)).toThrow(CliError);
     }
+  });
+
+  test("the retired harness is rejected by a custom catalog", () => {
+    const retired = {
+      harnesses: [
+        {
+          harness: "pi",
+          efforts: ["high"],
+          models: [{ model: "gpt-a" }],
+          defaults: { model: "gpt-a", effort: "high" },
+        },
+      ],
+    };
+    const { env, home } = writeCatalog(JSON.stringify(retired));
+    expect(() => loadCatalog(env, home)).toThrow(CliError);
   });
 
   test("unknown families, include keys, and duplicates are faults", () => {

@@ -14,6 +14,10 @@ const SPEC: XSpec = {
     ["--x-no-yolo", HARNESSES],
     ["--x-mode", ["fast"]],
   ]),
+  retiredScoped: new Map<string, readonly string[]>([
+    ["--x-yolo", ["pi"]],
+    ["--x-no-yolo", ["pi"]],
+  ]),
 };
 
 describe("partition", () => {
@@ -65,6 +69,13 @@ describe("partition", () => {
   test("the = spelling scopes too, and an off-vocabulary value is a usage fault", () => {
     expect(partition(["--x-yolo=codex"], SPEC).scoped.get("x-yolo")).toEqual(["codex"]);
     expect(() => partition(["--x-yolo=cursor"], SPEC)).toThrow(UsageError);
+  });
+
+  test("retired yolo scopes fail instead of becoming native input", () => {
+    for (const flag of ["--x-yolo", "--x-no-yolo"]) {
+      expect(() => partition([flag, "pi", "prompt"], SPEC)).toThrow(/retired harness/);
+      expect(() => partition([`${flag}=pi`, "prompt"], SPEC)).toThrow(/retired harness/);
+    }
   });
 
   test("each scoped flag has its own vocabulary", () => {

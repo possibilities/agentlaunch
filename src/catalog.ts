@@ -276,9 +276,14 @@ function assertNotUnionValue(value: string): void {
   );
 }
 
+const RETIRED_HARNESS = "pi";
+
 /** The --x-harness value (ADR 0018): a harness name, and nothing else — on
  * a launch and on x-resume alike. */
 export function parseHarnessFlag(value: string): HarnessName {
+  if (value === RETIRED_HARNESS || value.startsWith(`${RETIRED_HARNESS}:`)) {
+    throw new UsageError(`harness "${RETIRED_HARNESS}" is retired; choose claude or codex`);
+  }
   assertNotUnionValue(value);
   if (isHarnessName(value)) return value;
   throw new UsageError(`"${value}" is not a harness (expected claude or codex)`);
