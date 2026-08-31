@@ -25,18 +25,12 @@ interface RouteFlags {
   bool?: string[];
   repeatable?: string[];
   scoped?: Array<[string, readonly string[]]>;
-  retiredScoped?: Array<[string, readonly string[]]>;
 }
 
 const YOLO_SCOPES: Array<[string, readonly string[]]> = [
   ["--x-yolo", HARNESS_NAMES],
   ["--x-no-yolo", HARNESS_NAMES],
 ];
-const RETIRED_YOLO_SCOPES: Array<[string, readonly string[]]> = [
-  ["--x-yolo", ["pi"]],
-  ["--x-no-yolo", ["pi"]],
-];
-
 const LAUNCH_FLAGS: RouteFlags = {
   // --x-resume is x-resume's flag spelling, for invokers that can only
   // append arguments to the bare kind command (a herdr pane typing
@@ -44,7 +38,6 @@ const LAUNCH_FLAGS: RouteFlags = {
   value: ["--x-harness", "--x-level", "--x-account", "--x-prompt-file", "--x-resume"],
   bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
   scoped: YOLO_SCOPES,
-  retiredScoped: RETIRED_YOLO_SCOPES,
 };
 
 const RESUME_FLAGS: RouteFlags = {
@@ -53,7 +46,6 @@ const RESUME_FLAGS: RouteFlags = {
   value: ["--x-account", "--x-harness", "--x-level"],
   bool: ["--x-dry-run", "--x-no-balance", "--x-verbose"],
   scoped: YOLO_SCOPES,
-  retiredScoped: RETIRED_YOLO_SCOPES,
 };
 
 function specFor(flags: RouteFlags): XSpec {
@@ -62,7 +54,6 @@ function specFor(flags: RouteFlags): XSpec {
     bool: new Set([...GLOBAL.bool, ...(flags.bool ?? [])]),
     repeatable: new Set([...GLOBAL.repeatable, ...(flags.repeatable ?? [])]),
     scoped: new Map([...GLOBAL.scoped, ...(flags.scoped ?? [])]),
-    retiredScoped: new Map(flags.retiredScoped ?? []),
   };
 }
 

@@ -98,19 +98,6 @@ expect_exit 2 run --x-level opus --x-dry-run
 expect_exit 2 run --x-harness cursor --x-dry-run
 expect_exit 2 run --x-dry-run
 
-# Retired harness spellings fail before they can become a prompt or broaden
-# a scoped policy to every remaining harness.
-expect_exit 2 run --x-harness pi --x-dry-run
-expect_err 'harness "pi" is retired'
-expect_exit 2 run --x-harness pi:gpt-5.6-luna:max --x-dry-run
-expect_err 'harness "pi" is retired'
-for flag in --x-yolo --x-no-yolo; do
-  expect_exit 2 run --x-harness codex "$flag" pi --x-dry-run
-  expect_err 'scope "pi" names a retired harness'
-  expect_exit 2 run --x-harness codex "$flag=pi" --x-dry-run
-  expect_err 'scope "pi" names a retired harness'
-done
-
 # Yolo policy, native gate ownership, and utility passthrough.
 expect_exit 0 run --x-harness claude --dangerously-skip-permissions --x-no-yolo --x-dry-run
 if grep -q -- "--dangerously" "$WORK/out"; then
@@ -179,31 +166,15 @@ expect_err '^open      claude$'
 expect_exit 0 run --x-harness claude --x-dry-run --x-json --x-verbose
 [[ ! -s "$WORK/err" ]] || { echo "FAIL: JSON did not silence narration" >&2; exit 1; }
 
-# Hermetic installer convergence and verified uninstall. The legacy harness
-# name below is ownership evidence for the exact retired receipt schema; it is
-# not an accepted launch, catalog, or config value.
+# Hermetic installer convergence and verified uninstall.
 INSTALL_BIN="$WORK/install/bin"
 INSTALL_STATE="$WORK/install/state"
-mkdir -p "$INSTALL_STATE/capabilities/pi"
-chmod 700 "$INSTALL_STATE" "$INSTALL_STATE/capabilities" "$INSTALL_STATE/capabilities/pi"
-cat >"$INSTALL_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json" <<'EOF'
-{
-  "schema_version": 1,
-  "harness": "pi",
-  "session_id": "c9889494-8da8-4b34-9a14-c0e3c7f8b9b0",
-  "capabilities": ["common", "focus"],
-  "digest": "ae8f157f1a72a6114001d56b"
-}
-EOF
-chmod 600 "$INSTALL_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json"
 AGENTLAUNCH_INSTALL_BIN_DIR="$INSTALL_BIN" \
   AGENTLAUNCH_INSTALL_STATE_DIR="$INSTALL_STATE" \
   "$ROOT/scripts/install.sh" --install >"$WORK/install-out"
 [[ -L "$INSTALL_BIN/agentlaunch" ]]
 [[ "$(readlink "$INSTALL_BIN/agentlaunch")" == "$ROOT/src/main.ts" ]]
 [[ "$(stat -f %Lp "$INSTALL_STATE/deployed-sha" 2>/dev/null || stat -c %a "$INSTALL_STATE/deployed-sha")" == "600" ]]
-[[ ! -e "$INSTALL_STATE/capabilities" && ! -L "$INSTALL_STATE/capabilities" ]]
-grep -F 'Removed retired AgentLaunch capability receipts:' "$WORK/install-out" >/dev/null
 AGENTLAUNCH_INSTALL_BIN_DIR="$INSTALL_BIN" \
   AGENTLAUNCH_INSTALL_STATE_DIR="$INSTALL_STATE" \
   "$ROOT/scripts/install.sh" --install >>"$WORK/install-out"
@@ -211,49 +182,5 @@ AGENTLAUNCH_INSTALL_BIN_DIR="$INSTALL_BIN" \
   AGENTLAUNCH_INSTALL_STATE_DIR="$INSTALL_STATE" \
   "$ROOT/scripts/install.sh" --uninstall >>"$WORK/install-out"
 [[ ! -e "$INSTALL_BIN/agentlaunch" && ! -L "$INSTALL_BIN/agentlaunch" ]]
-
-# A lookalike is preserved and blocks installation: cleanup must prove the
-# complete retired schema before removing anything.
-REFUSE_BIN="$WORK/refuse/bin"
-REFUSE_STATE="$WORK/refuse/state"
-mkdir -p "$REFUSE_STATE/capabilities/pi"
-chmod 700 "$REFUSE_STATE" "$REFUSE_STATE/capabilities" "$REFUSE_STATE/capabilities/pi"
-printf '{}\n' >"$REFUSE_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json"
-chmod 600 "$REFUSE_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json"
-if AGENTLAUNCH_INSTALL_BIN_DIR="$REFUSE_BIN" \
-  AGENTLAUNCH_INSTALL_STATE_DIR="$REFUSE_STATE" \
-  "$ROOT/scripts/install.sh" --install >"$WORK/refuse-out" 2>"$WORK/refuse-err"; then
-  echo "FAIL: installer accepted an unrecognized retired capability receipt" >&2
-  exit 1
-fi
-grep -F 'Refusing unrecognized retired capability receipts:' "$WORK/refuse-err" >/dev/null
-[[ -f "$REFUSE_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json" ]]
-[[ ! -e "$REFUSE_BIN/agentlaunch" && ! -L "$REFUSE_BIN/agentlaunch" ]]
-
-# A shape-valid receipt under a foreign harness name is still not provenance:
-# the retired vocabulary is exact, not a lowercase-name pattern.
-FOREIGN_BIN="$WORK/foreign/bin"
-FOREIGN_STATE="$WORK/foreign/state"
-mkdir -p "$FOREIGN_STATE/capabilities/legacy"
-chmod 700 "$FOREIGN_STATE" "$FOREIGN_STATE/capabilities" "$FOREIGN_STATE/capabilities/legacy"
-cat >"$FOREIGN_STATE/capabilities/legacy/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json" <<'EOF'
-{
-  "schema_version": 1,
-  "harness": "legacy",
-  "session_id": "c9889494-8da8-4b34-9a14-c0e3c7f8b9b0",
-  "capabilities": ["common", "focus"],
-  "digest": "ae8f157f1a72a6114001d56b"
-}
-EOF
-chmod 600 "$FOREIGN_STATE/capabilities/legacy/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json"
-if AGENTLAUNCH_INSTALL_BIN_DIR="$FOREIGN_BIN" \
-  AGENTLAUNCH_INSTALL_STATE_DIR="$FOREIGN_STATE" \
-  "$ROOT/scripts/install.sh" --install >"$WORK/foreign-out" 2>"$WORK/foreign-err"; then
-  echo "FAIL: installer accepted a foreign retired harness directory" >&2
-  exit 1
-fi
-grep -F 'unknown harness directory legacy' "$WORK/foreign-err" >/dev/null
-[[ -f "$FOREIGN_STATE/capabilities/legacy/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json" ]]
-[[ ! -e "$FOREIGN_BIN/agentlaunch" && ! -L "$FOREIGN_BIN/agentlaunch" ]]
 
 echo "smoke: launch, resume, doctor, balance, and installer behaved"

@@ -191,12 +191,6 @@ describe("loadConfig faults", () => {
     expect(faultOf('{"yolo":{"cursor":true}}').message).toContain("cursor");
   });
 
-  test("the retired harness is rejected by custom config", () => {
-    const fault = faultOf('{"yolo":{"pi":false}}');
-    expect(fault.code).toBe("config_invalid");
-    expect(fault.message).toContain("pi");
-  });
-
   test("a harness flag that is not a boolean names its dotted path", () => {
     for (const bad of ['{"yolo":{"claude":"true"}}', '{"yolo":{"claude":null}}']) {
       expect(faultOf(bad).message).toContain("yolo.claude");
