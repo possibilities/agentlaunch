@@ -1,14 +1,13 @@
 {
   "name": "agentlaunch",
   "version": "0.1.0",
-  "description": "Resolve, balance, launch, and resume native Claude Code, Codex, and Pi sessions",
+  "description": "Resolve, balance, launch, and resume native Claude Code and Codex sessions",
   "private": false,
   "keywords": [
     "ai",
     "agent",
     "claude",
     "codex",
-    "pi",
     "launcher"
   ],
   "homepage": "https://github.com/possibilities/agentlaunch#readme",

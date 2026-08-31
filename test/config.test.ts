@@ -41,7 +41,7 @@ describe("loadConfig", () => {
     roots.push(root);
     const config = loadConfig({}, join(root, "home"));
     expect(config.exists).toBe(false);
-    expect(config.yolo).toEqual({ claude: true, codex: true, pi: true });
+    expect(config.yolo).toEqual({ claude: true, codex: true });
   });
 
   test("XDG_CONFIG_HOME relocates the file", () => {
@@ -54,27 +54,25 @@ describe("loadConfig", () => {
   });
 
   test("per-harness yolo map is read strictly", () => {
-    const { env, home } = writeConfig(
-      JSON.stringify({ yolo: { claude: true, codex: true, pi: false } }),
-    );
+    const { env, home } = writeConfig(JSON.stringify({ yolo: { claude: false, codex: true } }));
     const config = loadConfig(env, home);
     expect(config.exists).toBe(true);
-    expect(config.yolo).toEqual({ claude: true, codex: true, pi: false });
+    expect(config.yolo).toEqual({ claude: false, codex: true });
   });
 
   test("boolean yolo covers every harness", () => {
     const { env, home } = writeConfig(JSON.stringify({ yolo: false }));
-    expect(loadConfig(env, home).yolo).toEqual({ claude: false, codex: false, pi: false });
+    expect(loadConfig(env, home).yolo).toEqual({ claude: false, codex: false });
   });
 
   test("partial maps leave the rest on", () => {
     const { env, home } = writeConfig(JSON.stringify({ yolo: { codex: false } }));
-    expect(loadConfig(env, home).yolo).toEqual({ claude: true, codex: false, pi: true });
+    expect(loadConfig(env, home).yolo).toEqual({ claude: true, codex: false });
   });
 
   test("an empty file body defaults on", () => {
     const { env, home } = writeConfig(JSON.stringify({}));
-    expect(loadConfig(env, home).yolo).toEqual({ claude: true, codex: true, pi: true });
+    expect(loadConfig(env, home).yolo).toEqual({ claude: true, codex: true });
   });
 
   test("a $schema key is accepted and ignored", () => {
@@ -83,7 +81,7 @@ describe("loadConfig", () => {
     );
     const config = loadConfig(env, home);
     expect(config.exists).toBe(true);
-    expect(config.yolo).toEqual({ claude: false, codex: true, pi: true });
+    expect(config.yolo).toEqual({ claude: false, codex: true });
   });
 
   test("invalid shapes are config_invalid domain errors", () => {
@@ -117,8 +115,8 @@ describe("loadConfig", () => {
   test("a $schema key is ignored whatever its value", () => {
     // The loader filters by key name and never looks at the value, so a
     // mistyped $schema is inert rather than a fault.
-    const { env, home } = writeConfig('{"$schema":7,"yolo":{"pi":false}}');
-    expect(loadConfig(env, home).yolo).toEqual({ claude: true, codex: true, pi: false });
+    const { env, home } = writeConfig('{"$schema":7,"yolo":{"codex":false}}');
+    expect(loadConfig(env, home).yolo).toEqual({ claude: true, codex: false });
   });
 
   test("missing roots and priming mean the personal defaults", () => {
@@ -140,7 +138,7 @@ describe("loadConfig", () => {
     const config = loadConfig(env, home);
     expect(config.roots).toEqual(["~/work"]);
     expect(config.priming).toEqual(["collab", "build"]);
-    expect(config.yolo).toEqual({ claude: true, codex: true, pi: true });
+    expect(config.yolo).toEqual({ claude: true, codex: true });
   });
 
   test("empty roots and malformed priming names refuse loudly", () => {
@@ -191,6 +189,12 @@ describe("loadConfig faults", () => {
 
   test("an unknown harness is named", () => {
     expect(faultOf('{"yolo":{"cursor":true}}').message).toContain("cursor");
+  });
+
+  test("the retired harness is rejected by custom config", () => {
+    const fault = faultOf('{"yolo":{"pi":false}}');
+    expect(fault.code).toBe("config_invalid");
+    expect(fault.message).toContain("pi");
   });
 
   test("a harness flag that is not a boolean names its dotted path", () => {

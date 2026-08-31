@@ -9,11 +9,11 @@
       "description": "Path or URL of this schema, for editors that offer completion and validation. The loader accepts it and ignores it; it is the only key besides \"yolo\" that does not fail validation."
     },
     "yolo": {
-      "description": "Whether a launch stands each harness's own interactive permission gates down by injecting that harness's documented flag into the launch spec: --dangerously-skip-permissions --allow-dangerously-skip-permissions for claude, --dangerously-bypass-approvals-and-sandbox for codex, --approve for pi. Omit the key (or the whole file) and every harness is ON. A bare boolean sets all three at once; an object sets them individually and leaves the unnamed ones on. Utility invocations never receive the flag, a spelling the caller already forwarded is not duplicated, and pi's own --no-approve — or any other --permission-mode the caller chose — is never overridden. `--x-yolo` and `--x-no-yolo` (optionally scoped to a harness, repeatable) override this per launch; an explicit --x-no-yolo also removes a yolo flag that was explicitly forwarded, narrated on stderr.",
+      "description": "Whether a launch stands each harness's own interactive permission gates down by injecting that harness's documented flag into the launch spec: --dangerously-skip-permissions --allow-dangerously-skip-permissions for claude, and --dangerously-bypass-approvals-and-sandbox for codex. Omit the key (or the whole file) and every harness is ON. A bare boolean sets both at once; an object sets them individually and leaves the unnamed one on. Utility invocations never receive the flag, a spelling the caller already forwarded is not duplicated, and a --permission-mode the caller chose is never overridden. `--x-yolo` and `--x-no-yolo` (optionally scoped to a harness, repeatable) override this per launch; an explicit --x-no-yolo also removes a yolo flag that was explicitly forwarded, narrated on stderr.",
       "oneOf": [
         {
           "type": "boolean",
-          "description": "One answer for every harness: true (the default state) injects each harness's permission flag into claude, codex, and pi alike; false injects nothing anywhere."
+          "description": "One answer for every harness: true (the default state) injects each harness's permission flag into claude and codex alike; false injects nothing anywhere."
         },
         {
           "type": "object",
@@ -25,14 +25,10 @@
             "codex": {
               "type": "boolean",
               "description": "Inject --dangerously-bypass-approvals-and-sandbox into codex launches. Defaults to true when omitted."
-            },
-            "pi": {
-              "type": "boolean",
-              "description": "Inject --approve into pi launches. Defaults to true when omitted. Pi's tools never prompt, so this only auto-trusts project-local files."
             }
           },
           "additionalProperties": false,
-          "description": "Per-harness answers. Only claude, codex, and pi are accepted — an unknown harness name is a config_invalid error rather than a silently ignored line, so that a misspelling can never read as the default when the operator meant to disable. Any harness left out stays on."
+          "description": "Per-harness answers. Only claude and codex are accepted — an unknown harness name is a config_invalid error rather than a silently ignored line, so that a misspelling can never read as the default when the operator meant to disable. Any harness left out stays on."
         }
       ]
     },
@@ -51,7 +47,7 @@
       "items": {
         "type": "string",
         "pattern": "^[a-z0-9][a-z0-9-]*$",
-        "description": "One priming choice: a skill name the form prefixes onto the intent — /agent:name for Claude, /name for Pi, $name for Codex."
+        "description": "One priming choice: a skill name the form prefixes onto the intent — /agent:name for Claude and $agent:name for Codex."
       },
       "description": "Primings the interactive form offers beside \"none\", in order; the first is the default. Omitted: none are offered."
     }

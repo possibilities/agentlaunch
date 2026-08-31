@@ -32,7 +32,7 @@ fault; a resume still takes no injection ever, and now says so in its own
 words rather than reporting `--x-level` as an unknown option.
 
 The union value is retired loudly: a colon anywhere in `--x-harness` names
-the replacement (`pass --x-harness pi --x-level gpt-5.6-luna:max`) rather
+the replacement (`pass --x-harness codex --x-level gpt-5.6-luna:max`) rather
 than reporting an unknown harness, because the old spelling is in every
 README, help block, and operator's muscle memory. The shims are unaffected
 — they exec `agentlaunch --x-harness <harness> "$@"`, which is now simply

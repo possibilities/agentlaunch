@@ -9,8 +9,8 @@ scoped, and read before the config so they still work while it is broken.
 An explicit `--x-no-yolo` also redacts a yolo spelling the caller
 explicitly forwarded, and the redaction is narrated; a config off only
 declines to inject. Injection still skips utility invocations, never
-duplicates a forwarded spelling (aliases included: pi `-a`), and never
-overrides pi's own `--no-approve`. A malformed config still fails the
+duplicates a forwarded spelling, and never overrides a native gate setting
+the caller chose. A malformed config still fails the
 launch — silently misreading a config meant to disable would launch with
 the gates down against the operator's wishes. Rejected: default-off with
 an enabling config, which makes every caller carry policy state.

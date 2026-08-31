@@ -19,12 +19,12 @@ export const META = {
   name: "agentlaunch",
   version: "0.1.0",
   purpose:
-    "Resolve the harness, model, effort, yolo policy, and account for one interactive claude, codex, or pi session, then become it or resume a recorded native session.",
+    "Resolve the harness, model, effort, yolo policy, and account for one interactive claude or codex session, then become it or resume a recorded native session.",
   audience: "operator" as const,
 };
 
 export const GUIDANCE = `agentlaunch resolves the harness, model, effort, yolo policy, and account for
-one interactive claude, codex, or pi session, then becomes it (or resumes a
+one interactive claude or codex session, then becomes it (or resumes a
 recorded native session). It is invoked by a human at a shell, by herdr panes,
 and by agentsurface's launch form — never by a running agent on itself, which
 is why every command here is operator- or internal-facing.
@@ -47,7 +47,7 @@ x-surface is the operator's interactive launch form for a surface host
 nothing that is not a human at a terminal, or that host, should run it.`;
 
 export const TEASER =
-  "Resolve, balance, launch, and resume native claude/codex/pi sessions: agentlaunch --x-harness <name> [--x-level <model>:<effort>] [native tokens…], x-resume <native-session-id>, x-doctor, and x-catalog.";
+  "Resolve, balance, launch, and resume native claude/codex sessions: agentlaunch --x-harness <name> [--x-level <model>:<effort>] [native tokens…], x-resume <native-session-id>, x-doctor, and x-catalog.";
 
 const HARNESS_ARG = {
   name: "--x-harness",
@@ -192,7 +192,7 @@ export const COMMANDS: ContractCommand[] = [
     mutates: true,
     blocking: true,
     guidance:
-      "Any invocation not beginning with x-. At least one of --x-harness or --x-level is required. --x-harness alone uses that harness's catalog defaults; --x-level alone selects the earliest catalog harness offering the pair; together they pin and validate all three dimensions. A forwarded native model or effort wins unless --x-level was explicit, in which case the duplicate decision is a usage fault. --x-prompt-file appends a file's exact text as the final native token, for callers whose own argv cannot carry it (a shell-typed line that refuses control characters). Management invocations such as `codex login`, `claude doctor`, `pi auth`, and bare --version pass through unbalanced and receive no yolo injection.",
+      "Any invocation not beginning with x-. At least one of --x-harness or --x-level is required. --x-harness alone uses that harness's catalog defaults; --x-level alone selects the earliest catalog harness offering the pair; together they pin and validate all three dimensions. A forwarded native model or effort wins unless --x-level was explicit, in which case the duplicate decision is a usage fault. --x-prompt-file appends a file's exact text as the final native token, for callers whose own argv cannot carry it (a shell-typed line that refuses control characters). Management invocations such as `codex login`, `claude doctor`, and bare --version pass through unbalanced and receive no yolo injection.",
     arguments: [
       TOKENS_ARG,
       HARNESS_ARG,
@@ -250,7 +250,7 @@ export const COMMANDS: ContractCommand[] = [
         description: "Select the earliest catalog harness offering this model:effort pair.",
       },
       {
-        invocation: "agentlaunch --x-harness pi --x-level gpt-5.6-luna:max --x-dry-run --x-json",
+        invocation: "agentlaunch --x-harness claude --x-level opus-5:high --x-dry-run --x-json",
         description:
           "Report the resolved argv and decisions as a JSON envelope instead of launching.",
       },
@@ -267,7 +267,7 @@ export const COMMANDS: ContractCommand[] = [
     mutates: true,
     blocking: true,
     guidance:
-      "Without --x-harness, scans the native Claude, Codex, and Pi session stores; no match and multiple matches are explicit errors. A resume never injects a model or effort — the native session continues with its own state. If the recorded cwd is gone or unavailable, the session starts where agentlaunch was invoked instead.",
+      "Without --x-harness, scans the native Claude and Codex session stores; no match and multiple matches are explicit errors. A resume never injects a model or effort — the native session continues with its own state. If the recorded cwd is gone or unavailable, the session starts where agentlaunch was invoked instead.",
     arguments: [
       {
         name: "session-id",

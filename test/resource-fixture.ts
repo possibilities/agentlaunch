@@ -10,6 +10,4 @@ export function seedFleetResources(home: string): void {
   const claude = join(root, "claude", "agent", ".claude-plugin");
   mkdirSync(claude, { recursive: true });
   writeFileSync(join(claude, "plugin.json"), "{}\n");
-  mkdirSync(join(root, "pi", "extensions"), { recursive: true });
-  mkdirSync(join(root, "pi", "prompt-templates"), { recursive: true });
 }

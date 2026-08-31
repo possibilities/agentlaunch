@@ -24,7 +24,7 @@ export interface Config {
   exists: boolean;
 }
 
-const ALL_YOLO: Record<HarnessName, boolean> = { claude: true, codex: true, pi: true };
+const ALL_YOLO: Record<HarnessName, boolean> = { claude: true, codex: true };
 
 export const DEFAULT_ROOTS = ["~/code", "~/src"] as const;
 
@@ -69,7 +69,7 @@ export function loadConfig(env: Environ, home: string): Config {
  * one decision stated in one place (ADR 0009). */
 function resolveYolo(value: ConfigValues["yolo"]): Record<HarnessName, boolean> {
   if (value === undefined) return { ...ALL_YOLO };
-  if (typeof value === "boolean") return { claude: value, codex: value, pi: value };
+  if (typeof value === "boolean") return { claude: value, codex: value };
   const yolo = { ...ALL_YOLO };
   for (const harness of HARNESS_NAMES) {
     const flag = value[harness];

@@ -9,8 +9,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 RESOURCES="$WORK/home/.local/share/agentstart/resources"
-mkdir -p "$RESOURCES/skills/collab" "$RESOURCES/claude/agent/.claude-plugin" \
-  "$RESOURCES/pi/extensions" "$RESOURCES/pi/prompt-templates"
+mkdir -p "$RESOURCES/skills/collab" "$RESOURCES/claude/agent/.claude-plugin"
 printf '# collab\n' >"$RESOURCES/skills/collab/SKILL.md"
 printf 'collab\n' >"$RESOURCES/managed-skills.txt"
 printf '{}\n' >"$RESOURCES/claude/agent/.claude-plugin/plugin.json"
@@ -18,13 +17,13 @@ printf '{}\n' >"$RESOURCES/claude/agent/.claude-plugin/plugin.json"
 run() {
   env -i PATH="$PATH" HOME="$WORK/home" AGENTLAUNCH_NO_BALANCE=1 \
     CLAUDE_CONFIG_DIR="$WORK/claude" CODEX_HOME="$WORK/codex" \
-    PI_CODING_AGENT_DIR="$WORK/pi" bun "$ROOT/src/main.ts" "$@"
+    bun "$ROOT/src/main.ts" "$@"
 }
 
 run_balanced() {
   env -i PATH="$WORK/bin:$PATH" HOME="$WORK/home" \
     CLAUDE_CONFIG_DIR="$WORK/claude" CODEX_HOME="$WORK/codex" \
-    PI_CODING_AGENT_DIR="$WORK/pi" bun "$ROOT/src/main.ts" "$@"
+    bun "$ROOT/src/main.ts" "$@"
 }
 
 expect_exit() {
@@ -74,8 +73,8 @@ expect_exit 0 run --x-harness claude --x-dry-run
 expect_out "--dangerously-skip-permissions --allow-dangerously-skip-permissions --model 'opus\[1m\]' --effort medium"
 expect_exit 0 run --x-harness codex --x-no-yolo --x-dry-run
 expect_out "--cd .* --model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"'"
-expect_exit 0 run --x-harness pi --x-level gpt-5.6-luna:max --x-no-yolo --x-dry-run
-expect_out "--model openai-codex/gpt-5.6-luna --thinking max"
+expect_exit 0 run --x-harness codex --x-level gpt-5.6-luna:max --x-no-yolo --x-dry-run
+expect_out "--model gpt-5.6-luna -c 'model_reasoning_effort=\"max\"'"
 expect_exit 0 run --x-level sonnet:high --x-no-yolo --x-dry-run
 expect_out "--model sonnet --effort high"
 
@@ -86,8 +85,8 @@ if grep -q '"name"' "$WORK/out"; then
   echo "FAIL: AgentLaunch interpreted native --name as metadata" >&2
   exit 1
 fi
-expect_exit 0 run --x-harness pi --x-no-yolo --x-dry-run -n native
-expect_out "--model openai-codex/gpt-5.6-sol --thinking high -n native"
+expect_exit 0 run --x-harness codex --x-no-yolo --x-dry-run -n native
+expect_out "--model gpt-5.6-sol -c 'model_reasoning_effort=\"high\"' -n native"
 expect_exit 2 run --x-harness claude --x-name launcher-name --x-dry-run
 expect_err 'unknown option "--x-name"'
 
@@ -98,6 +97,19 @@ expect_exit 2 run --x-harness claude --x-level opus:high --model sonnet --x-dry-
 expect_exit 2 run --x-level opus --x-dry-run
 expect_exit 2 run --x-harness cursor --x-dry-run
 expect_exit 2 run --x-dry-run
+
+# Retired harness spellings fail before they can become a prompt or broaden
+# a scoped policy to every remaining harness.
+expect_exit 2 run --x-harness pi --x-dry-run
+expect_err 'harness "pi" is retired'
+expect_exit 2 run --x-harness pi:gpt-5.6-luna:max --x-dry-run
+expect_err 'harness "pi" is retired'
+for flag in --x-yolo --x-no-yolo; do
+  expect_exit 2 run --x-harness codex "$flag" pi --x-dry-run
+  expect_err 'scope "pi" names a retired harness'
+  expect_exit 2 run --x-harness codex "$flag=pi" --x-dry-run
+  expect_err 'scope "pi" names a retired harness'
+done
 
 # Yolo policy, native gate ownership, and utility passthrough.
 expect_exit 0 run --x-harness claude --dangerously-skip-permissions --x-no-yolo --x-dry-run
@@ -136,8 +148,6 @@ printf '{"cwd":"%s"}\n' "$SESSION_CWD" >"$WORK/claude/projects/-somewhere/$SESSI
 expect_exit 0 run x-resume "$SESSION_ID" --x-no-yolo --x-dry-run --x-json
 expect_out '"--resume"'
 expect_out "\"cwd\":\"$SESSION_CWD\""
-expect_exit 0 run x-resume "$SESSION_ID" --x-harness pi --x-no-yolo --x-dry-run
-expect_out "--session $SESSION_ID"
 expect_exit 2 run x-resume "$SESSION_ID" --x-level opus:high --x-dry-run
 expect_exit 1 run x-resume 99999999-9999-4999-9999-999999999999 --x-dry-run --x-json
 expect_out '"code":"session_not_found"'
@@ -158,8 +168,6 @@ expect_exit 0 run_balanced --x-harness claude --x-no-yolo --x-dry-run
 expect_out "cswap run 1 --share-history --"
 expect_exit 0 run_balanced --x-harness codex --x-no-yolo --x-dry-run
 expect_out "codex-swap run --account account:smoke --"
-expect_exit 0 run_balanced --x-harness pi --x-no-yolo --x-dry-run
-expect_out "codex-swap pi run --account account:smoke --"
 
 # Narration never contaminates stdout; JSON silences it.
 expect_exit 0 run --x-harness claude --x-no-yolo --x-dry-run
@@ -171,7 +179,9 @@ expect_err '^open      claude$'
 expect_exit 0 run --x-harness claude --x-dry-run --x-json --x-verbose
 [[ ! -s "$WORK/err" ]] || { echo "FAIL: JSON did not silence narration" >&2; exit 1; }
 
-# Hermetic installer convergence and verified uninstall.
+# Hermetic installer convergence and verified uninstall. The legacy harness
+# name below is ownership evidence for the exact retired receipt schema; it is
+# not an accepted launch, catalog, or config value.
 INSTALL_BIN="$WORK/install/bin"
 INSTALL_STATE="$WORK/install/state"
 mkdir -p "$INSTALL_STATE/capabilities/pi"
@@ -219,5 +229,31 @@ fi
 grep -F 'Refusing unrecognized retired capability receipts:' "$WORK/refuse-err" >/dev/null
 [[ -f "$REFUSE_STATE/capabilities/pi/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json" ]]
 [[ ! -e "$REFUSE_BIN/agentlaunch" && ! -L "$REFUSE_BIN/agentlaunch" ]]
+
+# A shape-valid receipt under a foreign harness name is still not provenance:
+# the retired vocabulary is exact, not a lowercase-name pattern.
+FOREIGN_BIN="$WORK/foreign/bin"
+FOREIGN_STATE="$WORK/foreign/state"
+mkdir -p "$FOREIGN_STATE/capabilities/legacy"
+chmod 700 "$FOREIGN_STATE" "$FOREIGN_STATE/capabilities" "$FOREIGN_STATE/capabilities/legacy"
+cat >"$FOREIGN_STATE/capabilities/legacy/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json" <<'EOF'
+{
+  "schema_version": 1,
+  "harness": "legacy",
+  "session_id": "c9889494-8da8-4b34-9a14-c0e3c7f8b9b0",
+  "capabilities": ["common", "focus"],
+  "digest": "ae8f157f1a72a6114001d56b"
+}
+EOF
+chmod 600 "$FOREIGN_STATE/capabilities/legacy/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json"
+if AGENTLAUNCH_INSTALL_BIN_DIR="$FOREIGN_BIN" \
+  AGENTLAUNCH_INSTALL_STATE_DIR="$FOREIGN_STATE" \
+  "$ROOT/scripts/install.sh" --install >"$WORK/foreign-out" 2>"$WORK/foreign-err"; then
+  echo "FAIL: installer accepted a foreign retired harness directory" >&2
+  exit 1
+fi
+grep -F 'unknown harness directory legacy' "$WORK/foreign-err" >/dev/null
+[[ -f "$FOREIGN_STATE/capabilities/legacy/c9889494-8da8-4b34-9a14-c0e3c7f8b9b0.json" ]]
+[[ ! -e "$FOREIGN_BIN/agentlaunch" && ! -L "$FOREIGN_BIN/agentlaunch" ]]
 
 echo "smoke: launch, resume, doctor, balance, and installer behaved"

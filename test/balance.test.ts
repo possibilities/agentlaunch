@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { composeCodexFamily, normalizePiModel } from "../src/balance.ts";
+import { composeCodex } from "../src/balance.ts";
 import type { Envelope } from "../src/envelope.ts";
 import { seedFleetResources } from "./resource-fixture.ts";
 
@@ -96,7 +96,6 @@ function run(world: World, args: string[], extraEnv: Record<string, string> = {}
       HOME: join(world.root, "home"),
       CLAUDE_CONFIG_DIR: join(world.root, "claude"),
       CODEX_HOME: join(world.root, "codex"),
-      PI_CODING_AGENT_DIR: join(world.root, "pi"),
       ...extraEnv,
     },
   });
@@ -318,29 +317,6 @@ describe("balanced launch", () => {
     expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-sol"]);
   });
 
-  test("pi injects the provider spelling and routes on the family name", () => {
-    const world = makeWorld();
-    const result = run(world, ["--x-harness", "pi", "--x-no-yolo", "--x-dry-run", "--x-json"]);
-    expect(result.code).toBe(0);
-    const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
-    expect(data.command).toEqual([
-      "codex-swap",
-      "pi",
-      "run",
-      "--account",
-      "account:org-test",
-      "--",
-      "--no-skills",
-      "--no-extensions",
-      "--no-prompt-templates",
-      "--model",
-      "openai-codex/gpt-5.6-sol",
-      "--thinking",
-      "high",
-    ]);
-    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-sol"]);
-  });
-
   test("a level routes on its requested model", () => {
     const world = makeWorld();
     const result = run(world, ["--x-level", "gpt-5.6-luna:max", "--x-no-yolo", "--x-dry-run"]);
@@ -545,40 +521,12 @@ describe("balanced resume", () => {
       "--",
     ]);
   });
-
-  test("pi resume rides --session through the pi runner", () => {
-    const world = makeWorld();
-    const result = run(world, [
-      "x-resume",
-      SESSION_ID,
-      "--x-harness",
-      "pi",
-      "--x-no-yolo",
-      "--x-dry-run",
-      "--x-json",
-    ]);
-    expect(result.code).toBe(0);
-    const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
-    expect(data.command).toEqual([
-      "codex-swap",
-      "pi",
-      "run",
-      "--account",
-      "account:org-test",
-      "--",
-      "--no-skills",
-      "--no-extensions",
-      "--no-prompt-templates",
-      "--session",
-      SESSION_ID,
-    ]);
-  });
 });
 
 describe("compose units", () => {
   test("claimed codex launches use --claim", () => {
     expect(
-      composeCodexFamily(
+      composeCodex(
         {
           harness: "codex",
           command: ["codex", "-p", "x"],
@@ -588,7 +536,7 @@ describe("compose units", () => {
       ),
     ).toEqual(["codex-swap", "run", "--claim", "lease-1", "--", "-p", "x"]);
     expect(
-      composeCodexFamily(
+      composeCodex(
         {
           harness: "codex",
           command: ["codex", "resume", SESSION_ID, "--search"],
@@ -597,23 +545,6 @@ describe("compose units", () => {
         ["--claim", "lease-1"],
       ),
     ).toEqual(["codex-swap", "resume", SESSION_ID, "--claim", "lease-1", "--", "--search"]);
-    expect(
-      composeCodexFamily(
-        {
-          harness: "pi",
-          command: ["pi", "--session", SESSION_ID],
-          sessionId: SESSION_ID,
-        },
-        ["--claim", "lease-1"],
-      ),
-    ).toEqual(["codex-swap", "pi", "run", "--claim", "lease-1", "--", "--session", SESSION_ID]);
-  });
-
-  test("pi model normalization strips only the provider prefix", () => {
-    expect(normalizePiModel("pi", "openai-codex/gpt-5.4")).toBe("gpt-5.4");
-    expect(normalizePiModel("pi", "gpt-5.4")).toBe("gpt-5.4");
-    expect(normalizePiModel("codex", "openai-codex/gpt-5.4")).toBe("openai-codex/gpt-5.4");
-    expect(normalizePiModel("pi", undefined)).toBeUndefined();
   });
 });
 

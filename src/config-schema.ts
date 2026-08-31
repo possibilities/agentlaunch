@@ -35,18 +35,12 @@ const yoloShape = {
       "Inject --dangerously-bypass-approvals-and-sandbox into codex launches. Defaults to true when omitted.",
     )
     .optional(),
-  pi: z
-    .boolean()
-    .describe(
-      "Inject --approve into pi launches. Defaults to true when omitted. Pi's tools never prompt, so this only auto-trusts project-local files.",
-    )
-    .optional(),
 } satisfies Record<HarnessName, z.ZodOptional<z.ZodBoolean>>;
 
 const yoloMapSchema = z
   .strictObject(yoloShape)
   .describe(
-    "Per-harness answers. Only claude, codex, and pi are accepted — an unknown harness name is a config_invalid error rather than a silently ignored line, so that a misspelling can never read as the default when the operator meant to disable. Any harness left out stays on.",
+    "Per-harness answers. Only claude and codex are accepted — an unknown harness name is a config_invalid error rather than a silently ignored line, so that a misspelling can never read as the default when the operator meant to disable. Any harness left out stays on.",
   );
 
 const yoloSchema = z
@@ -54,12 +48,12 @@ const yoloSchema = z
     z
       .boolean()
       .describe(
-        "One answer for every harness: true (the default state) injects each harness's permission flag into claude, codex, and pi alike; false injects nothing anywhere.",
+        "One answer for every harness: true (the default state) injects each harness's permission flag into claude and codex alike; false injects nothing anywhere.",
       ),
     yoloMapSchema,
   ])
   .describe(
-    "Whether a launch stands each harness's own interactive permission gates down by injecting that harness's documented flag into the launch spec: --dangerously-skip-permissions --allow-dangerously-skip-permissions for claude, --dangerously-bypass-approvals-and-sandbox for codex, --approve for pi. Omit the key (or the whole file) and every harness is ON. A bare boolean sets all three at once; an object sets them individually and leaves the unnamed ones on. Utility invocations never receive the flag, a spelling the caller already forwarded is not duplicated, and pi's own --no-approve — or any other --permission-mode the caller chose — is never overridden. `--x-yolo` and `--x-no-yolo` (optionally scoped to a harness, repeatable) override this per launch; an explicit --x-no-yolo also removes a yolo flag that was explicitly forwarded, narrated on stderr.",
+    "Whether a launch stands each harness's own interactive permission gates down by injecting that harness's documented flag into the launch spec: --dangerously-skip-permissions --allow-dangerously-skip-permissions for claude, and --dangerously-bypass-approvals-and-sandbox for codex. Omit the key (or the whole file) and every harness is ON. A bare boolean sets both at once; an object sets them individually and leaves the unnamed one on. Utility invocations never receive the flag, a spelling the caller already forwarded is not duplicated, and a --permission-mode the caller chose is never overridden. `--x-yolo` and `--x-no-yolo` (optionally scoped to a harness, repeatable) override this per launch; an explicit --x-no-yolo also removes a yolo flag that was explicitly forwarded, narrated on stderr.",
   );
 
 const rootsSchema = z
@@ -83,7 +77,7 @@ const primingSchema = z
         "a priming is a bare skill name: lowercase letters, digits, hyphens",
       )
       .describe(
-        "One priming choice: a skill name the form prefixes onto the intent — /agent:name for Claude, /name for Pi, $name for Codex.",
+        "One priming choice: a skill name the form prefixes onto the intent — /agent:name for Claude and $agent:name for Codex.",
       ),
   )
   .describe(

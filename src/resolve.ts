@@ -6,9 +6,9 @@ import type { HarnessName, SessionStore } from "./harness.ts";
 import { HARNESS_NAMES, sessionStore } from "./harness.ts";
 import type { Environ } from "./paths.ts";
 
-/** Broad enough for claude/codex UUIDs, pi custom ids, and codex session
- * names; narrow enough that every character is glob-literal, so an id can be
- * spliced into a pattern without escaping. */
+/** Broad enough for Claude/Codex UUIDs and Codex session names; narrow enough
+ * that every character is glob-literal, so an id can be spliced into a
+ * pattern without escaping. */
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function assertSessionId(sessionId: string): void {

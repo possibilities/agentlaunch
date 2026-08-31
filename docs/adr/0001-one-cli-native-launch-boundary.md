@@ -1,7 +1,7 @@
 # 0001 — One CLI ends at the native launch boundary
 
 AgentLaunch is one CLI for resolving, balancing, launching, and resuming the
-three native harnesses. Its state ends at config and catalog. The harness owns
+two native harnesses. Its state ends at config and catalog. The harness owns
 the session; an agent development environment owns workspaces, panes, identity,
 presence, and steering.
 

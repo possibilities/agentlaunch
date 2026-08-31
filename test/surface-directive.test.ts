@@ -30,9 +30,6 @@ describe("primedIntent", () => {
     expect(primedIntent({ harness: "claude", prompt: "fix it", priming: "collab" })).toBe(
       "/agent:collab fix it",
     );
-    expect(primedIntent({ harness: "pi", prompt: "fix it", priming: "build" })).toBe(
-      "/build fix it",
-    );
     expect(primedIntent({ harness: "codex", prompt: "fix it", priming: "collab" })).toBe(
       "$agent:collab fix it",
     );

@@ -38,7 +38,7 @@
                   "description": "The name the operator types for this model — identical in every harness that includes the family; only the emitted spelling varies per harness."
                 },
                 "spelling": {
-                  "description": "What is actually passed to the harness's native model flag when it differs from the typed name — the same field a local model carries, so a family member can name a spelling the typed-name grammar forbids (claude's opus[1m]). Defaults to the typed name; a provider on the include combines with this, not with the typed name.",
+                  "description": "What is actually passed to the harness's native model flag when it differs from the typed name — the same field a local model carries, so a family member can name a spelling the typed-name grammar forbids (claude's opus[1m]). Defaults to the typed name.",
                   "type": "string",
                   "pattern": "^\\S+$"
                 },
@@ -104,8 +104,8 @@
         "properties": {
           "harness": {
             "type": "string",
-            "enum": ["claude", "codex", "pi"],
-            "description": "Which harness adapter this entry describes. The catalog describes what a harness offers; it cannot conjure an adapter, so only claude, codex, and pi are accepted."
+            "enum": ["claude", "codex"],
+            "description": "Which harness adapter this entry describes. The catalog describes what a harness offers; it cannot conjure an adapter, so only claude and codex are accepted."
           },
           "efforts": {
             "minItems": 1,
@@ -171,11 +171,6 @@
                   "type": "string",
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
                   "description": "Name of a family from the top-level \"families\" map."
-                },
-                "provider": {
-                  "type": "string",
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
-                  "description": "Provider the harness runs these models through. How a provider combines with a model name is that harness's own semantics — pi spells it openai-codex/gpt-5.6-sol — and a provider on a harness with no provider semantics is a catalog fault."
                 }
               },
               "required": ["family"],

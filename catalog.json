@@ -37,11 +37,6 @@
       "harness": "codex",
       "families": [{ "family": "gpt" }],
       "metadata": { "model": "gpt-5.4-mini", "effort": "low" }
-    },
-    {
-      "harness": "pi",
-      "families": [{ "family": "gpt", "provider": "openai-codex" }],
-      "metadata": { "model": "gpt-5.4-mini", "effort": "low" }
     }
   ]
 }

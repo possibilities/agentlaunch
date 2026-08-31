@@ -9,9 +9,9 @@
  * - Every object is strict; an unknown key is rejected, never ignored.
  * - `$schema` appears only in the published-file schema; the loader strips
  *   it before validation, whatever its value.
- * - Invariants that need the whole document — include references, provider
- *   semantics, duplicates after family expansion, the effort-inheritance
- *   chain, defaults resolution — live in `catalog.ts`, not here.
+ * - Invariants that need the whole document — include references, duplicates
+ *   after family expansion, the effort-inheritance chain, defaults
+ *   resolution — live in `catalog.ts`, not here.
  * - Validation failures become one `catalog_invalid` CliError via
  *   `catalogParseError`, on the first issue in document order.
  */
@@ -19,18 +19,18 @@ import { z } from "zod";
 import { CliError } from "./errors.ts";
 import type { HarnessName } from "./harness.ts";
 
-/** Names the operator types or references: models, efforts, families,
- * providers. No slashes or colons — colons belong to the harness-value
- * grammar and slashes to emitted spellings. */
+/** Names the operator types or references: models, efforts, and families.
+ * No slashes or colons — colons belong to the harness-value grammar and
+ * slashes to emitted spellings. */
 export const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-/** Emitted spellings may carry provider paths and the like; only whitespace
- * is out, because the spelling becomes one argv token. */
+/** Emitted spellings may carry native punctuation; only whitespace is out,
+ * because the spelling becomes one argv token. */
 export const SPELLING_PATTERN = /^\S+$/;
 
 /** Keep in lockstep with HARNESS_NAMES in harness.ts; the `satisfies` pins
  * them together at compile time. */
-const HARNESSES = ["claude", "codex", "pi"] as const satisfies readonly HarnessName[];
+const HARNESSES = ["claude", "codex"] as const satisfies readonly HarnessName[];
 
 const effortList = (description: string) =>
   z.array(z.string().regex(NAME_PATTERN)).min(1).describe(description);
@@ -59,7 +59,7 @@ const familyMemberSchema = z
       .regex(SPELLING_PATTERN)
       .optional()
       .describe(
-        "What is actually passed to the harness's native model flag when it differs from the typed name — the same field a local model carries, so a family member can name a spelling the typed-name grammar forbids (claude's opus[1m]). Defaults to the typed name; a provider on the include combines with this, not with the typed name.",
+        "What is actually passed to the harness's native model flag when it differs from the typed name — the same field a local model carries, so a family member can name a spelling the typed-name grammar forbids (claude's opus[1m]). Defaults to the typed name.",
       ),
     efforts: effortList(
       "Model-bound effort vocabulary: the efforts this model supports wherever it runs, replacing the family's (or including harness's) set. Omit it and the model inherits down the chain.",
@@ -123,13 +123,6 @@ const includeSchema = z
       .string()
       .regex(NAME_PATTERN)
       .describe('Name of a family from the top-level "families" map.'),
-    provider: z
-      .string()
-      .regex(NAME_PATTERN)
-      .describe(
-        "Provider the harness runs these models through. How a provider combines with a model name is that harness's own semantics — pi spells it openai-codex/gpt-5.6-sol — and a provider on a harness with no provider semantics is a catalog fault.",
-      )
-      .optional(),
   })
   .describe("One family this harness includes.");
 
@@ -172,7 +165,7 @@ const harnessEntrySchema = z
     harness: z
       .enum(HARNESSES)
       .describe(
-        "Which harness adapter this entry describes. The catalog describes what a harness offers; it cannot conjure an adapter, so only claude, codex, and pi are accepted.",
+        "Which harness adapter this entry describes. The catalog describes what a harness offers; it cannot conjure an adapter, so only claude and codex are accepted.",
       ),
     efforts: effortList(
       "The harness's own effort vocabulary: what a local model inherits when neither it nor a family provides a set. Required exactly when some local model has no set of its own.",
