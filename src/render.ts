@@ -1,4 +1,9 @@
-import type { ContractArgument, ContractCommand, ContractConstraint } from "./contract.ts";
+import type {
+  ContractArgument,
+  ContractCommand,
+  ContractConstraint,
+  ContractExample,
+} from "./contract.ts";
 import { COMMANDS, GLOBAL_ARGUMENTS, GUIDANCE, TEASER } from "./contract.ts";
 
 /**
@@ -39,6 +44,24 @@ function constraintLine(constraint: ContractConstraint): string {
   return `  - ${head}${constraint.description ? ` — ${constraint.description}` : ""}`;
 }
 
+function exampleLines(examples: ContractExample[]): string[] {
+  const lines: string[] = ["Examples:"];
+  for (const example of examples) {
+    lines.push(`  ${example.invocation}`);
+    lines.push(`    ${example.description}`);
+  }
+  return lines;
+}
+
+function allExamples(): Array<{ command: string; example: ContractExample }> {
+  const out: Array<{ command: string; example: ContractExample }> = [];
+  for (const command of COMMANDS) {
+    if (command.audience === "internal") continue;
+    for (const example of command.examples ?? []) out.push({ command: command.name, example });
+  }
+  return out;
+}
+
 function isLeaf(command: ContractCommand): boolean {
   return command.subcommands === undefined;
 }
@@ -65,6 +88,12 @@ export function renderCommandHelp(path: string[]): string {
   if (command === undefined || !isLeaf(command)) return renderTopHelp();
   const lines: string[] = [renderUsage(path, command), ""];
   if (command.guidance !== undefined) lines.push(command.guidance, "");
+  if (command.blocking === true) {
+    lines.push(
+      "Blocking: this command waits on something outside itself and may not return promptly.",
+      "",
+    );
+  }
   const args = command.arguments ?? [];
   if (args.length > 0) {
     lines.push("Arguments:");
@@ -81,6 +110,9 @@ export function renderCommandHelp(path: string[]): string {
     lines.push("Constraints:");
     for (const constraint of command.constraints) lines.push(constraintLine(constraint));
     lines.push("");
+  }
+  if (command.examples !== undefined && command.examples.length > 0) {
+    lines.push(...exampleLines(command.examples), "");
   }
   lines.push("Global flags:");
   for (const arg of GLOBAL_ARGUMENTS) lines.push(argDetail(arg));
@@ -128,19 +160,25 @@ export function renderTopHelp(): string {
     "  AGENTLAUNCH_LAUNCH=1       Recursion sentinel used by bare harness shims",
     "  AGENTSTART_RESOURCES_ROOT     Override the fixed AgentStart resource root",
     "",
-    "Examples:",
-    '  agentlaunch --x-harness claude "fix the failing tests"',
-    '  agentlaunch --x-level gpt-5.6-sol:ultra "hard problem"',
-    "  agentlaunch --x-harness pi --x-level gpt-5.6-luna:max --x-dry-run --x-json",
-    "  agentlaunch x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60",
   );
+  const examples = allExamples();
+  if (examples.length > 0) {
+    lines.push("Examples:");
+    for (const { example } of examples) lines.push(`  ${example.invocation}`);
+  }
   return lines.join("\n");
 }
 
 export function renderAgentHelp(): string {
   const lines: string[] = ["agentlaunch agent runbook", "", GUIDANCE, "", "Commands:"];
   for (const command of COMMANDS) {
-    lines.push(`  ${command.name.padEnd(10)} [${command.audience}]  ${command.summary}`);
+    const blocking = command.blocking === true ? " (blocking)" : "";
+    lines.push(`  ${command.name.padEnd(10)} [${command.audience}]  ${command.summary}${blocking}`);
+  }
+  const examples = allExamples();
+  if (examples.length > 0) {
+    lines.push("", "Examples:");
+    for (const { example } of examples) lines.push(`  ${example.invocation}`);
   }
   return lines.join("\n");
 }

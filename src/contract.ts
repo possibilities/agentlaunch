@@ -132,13 +132,19 @@ export interface ContractArgument {
   choices?: string[];
   default?: unknown;
   aliases?: string[];
+  role?: "call" | "output-format" | "store-selection" | "meta";
 }
 
 export interface ContractConstraint {
-  kind: "one_of" | "conflicts" | "requires";
+  kind: "one_of" | "at_least_one" | "conflicts" | "requires";
   arguments: string[];
   required?: boolean;
   description?: string;
+}
+
+export interface ContractExample {
+  invocation: string;
+  description: string;
 }
 
 export interface ContractStdin {
@@ -157,6 +163,10 @@ export interface ContractCommand {
   subcommands?: ContractCommand[];
   stdin?: ContractStdin;
   constraints?: ContractConstraint[];
+  examples?: ContractExample[];
+  blocking?: boolean;
+  aliases?: string[];
+  deprecated?: string;
 }
 
 export const GLOBAL_ARGUMENTS: ContractArgument[] = [
@@ -164,11 +174,13 @@ export const GLOBAL_ARGUMENTS: ContractArgument[] = [
     name: "--x-json",
     type: "boolean",
     description: "Emit the schema_version 1 machine envelope instead of the human narrative.",
+    role: "output-format",
   },
   {
     name: "--x-help",
     type: "boolean",
     description: "Print this command's help text and exit.",
+    role: "meta",
   },
 ];
 
@@ -178,6 +190,7 @@ export const COMMANDS: ContractCommand[] = [
     summary: "Resolve harness, model, effort, yolo, and account, then become the native harness",
     audience: "operator",
     mutates: true,
+    blocking: true,
     guidance:
       "Any invocation not beginning with x-. At least one of --x-harness or --x-level is required. --x-harness alone uses that harness's catalog defaults; --x-level alone selects the earliest catalog harness offering the pair; together they pin and validate all three dimensions. A forwarded native model or effort wins unless --x-level was explicit, in which case the duplicate decision is a usage fault. --x-prompt-file appends a file's exact text as the final native token, for callers whose own argv cannot carry it (a shell-typed line that refuses control characters). Management invocations such as `codex login`, `claude doctor`, `pi auth`, and bare --version pass through unbalanced and receive no yolo injection.",
     arguments: [
@@ -227,12 +240,32 @@ export const COMMANDS: ContractCommand[] = [
         description: "A resumed session has no launch intent.",
       },
     ],
+    examples: [
+      {
+        invocation: 'agentlaunch --x-harness claude "fix the failing tests"',
+        description: "Launch Claude with its catalog default model/effort.",
+      },
+      {
+        invocation: 'agentlaunch --x-level gpt-5.6-sol:ultra "hard problem"',
+        description: "Select the earliest catalog harness offering this model:effort pair.",
+      },
+      {
+        invocation: "agentlaunch --x-harness pi --x-level gpt-5.6-luna:max --x-dry-run --x-json",
+        description:
+          "Report the resolved argv and decisions as a JSON envelope instead of launching.",
+      },
+      {
+        invocation: "agentlaunch --x-harness codex --x-dry-run --x-json",
+        description: "Preview a Codex launch's resolved command without running it.",
+      },
+    ],
   },
   {
     name: "x-resume",
     summary: "Detect a native session store and resume in its recorded cwd",
     audience: "operator",
     mutates: true,
+    blocking: true,
     guidance:
       "Without --x-harness, scans the native Claude, Codex, and Pi session stores; no match and multiple matches are explicit errors. A resume never injects a model or effort — the native session continues with its own state. If the recorded cwd is gone or unavailable, the session starts where agentlaunch was invoked instead.",
     arguments: [
@@ -259,6 +292,16 @@ export const COMMANDS: ContractCommand[] = [
         description: "Scoped per harness; the same harness may not appear in both.",
       },
     ],
+    examples: [
+      {
+        invocation: "agentlaunch x-resume 05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60",
+        description: "Detect the native store holding this session id and resume it.",
+      },
+      {
+        invocation: "agentlaunch x-resume <native-session-id> --x-dry-run --x-json",
+        description: "Preview the resolved resume command as a JSON envelope without resuming.",
+      },
+    ],
   },
   {
     name: "x-doctor",
@@ -276,12 +319,19 @@ export const COMMANDS: ContractCommand[] = [
     guidance:
       "The validated <model>:<effort> pair space --x-level accepts. Reads only; a custom catalog file replaces the built-in when present, exactly as it does for launches.",
     arguments: [],
+    examples: [
+      {
+        invocation: "agentlaunch x-catalog --x-json",
+        description: "Report every harness's models, allowed efforts, and default pair as JSON.",
+      },
+    ],
   },
   {
     name: "x-surface",
     summary: "Open the one-screen interactive launch form for a surface host",
     audience: "operator",
     mutates: true,
+    blocking: true,
     guidance:
       "Renders on stderr; each submitted launch is written to stdout as one session-directive JSON line for a host (agentsurface) to realize as a herdr session. Never launches anything itself. Needs a terminal on stdin and stderr, and refuses a stdout that is a terminal — that means no host is reading. An interrupted form is restored from its draft file on the next open.",
     arguments: [],
