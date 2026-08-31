@@ -122,7 +122,7 @@ export function renderCommandHelp(path: string[]): string {
 /** The `--help` / no-argument top-level render. */
 export function renderTopHelp(): string {
   const lines: string[] = [
-    "agentlaunch — resolve, balance, and launch claude, codex, or pi",
+    "agentlaunch — resolve, balance, and launch claude or codex",
     "",
     "Usage:",
   ];
