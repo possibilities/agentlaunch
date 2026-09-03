@@ -18,6 +18,7 @@ type AnyEnvelope = Envelope<Record<string, unknown>>;
 
 const MAIN = join(import.meta.dir, "..", "src", "main.ts");
 const SESSION_ID = "05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60";
+const SHADCN_MCP = 'mcp_servers.shadcn={command="npx",args=["shadcn@latest","mcp"]}';
 
 let roots: string[] = [];
 
@@ -251,6 +252,8 @@ describe("balanced launch", () => {
       "--account",
       "account:org-test",
       "--",
+      "-c",
+      SHADCN_MCP,
       // A launch anchors Codex to the directory it was typed in.
       "--cd",
       realpathSync(world.root),
@@ -276,7 +279,7 @@ describe("balanced launch", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe(
-      `codex-swap run --account account:org-test -- --cd ${realpathSync(world.root)} -c 'model_reasoning_effort="high"' -m gpt-x`,
+      `codex-swap run --account account:org-test -- -c '${SHADCN_MCP}' --cd ${realpathSync(world.root)} -c 'model_reasoning_effort="high"' -m gpt-x`,
     );
     expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-x"]);
   });
@@ -310,6 +313,8 @@ describe("balanced launch", () => {
       "-c",
       'model_reasoning_effort="high"',
       "exec",
+      "-c",
+      SHADCN_MCP,
       "hello",
     ]);
     expect(data.command).not.toContain("--remote");
@@ -519,6 +524,8 @@ describe("balanced resume", () => {
       "--account",
       "account:org-test",
       "--",
+      "-c",
+      SHADCN_MCP,
     ]);
   });
 });

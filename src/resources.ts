@@ -9,6 +9,13 @@ export interface FleetResources {
   claudePluginDir: string;
   skills: Array<{ name: string; path: string }>;
   codexSkillNames: string[];
+  mcpServers: FleetMcpServer[];
+}
+
+export interface FleetMcpServer {
+  name: string;
+  command: string;
+  args: string[];
 }
 
 export function fleetResourcesRoot(env: Environ, home: string): string {
@@ -52,17 +59,41 @@ export function loadFleetResources(env: Environ, home: string): FleetResources {
   if (!existsSync(join(claudePluginDir, ".claude-plugin", "plugin.json"))) {
     throw missingResources(root);
   }
+  const mcpConfigPath = join(root, "mcp-servers.json");
+  const claudeMcpConfigPath = join(claudePluginDir, ".mcp.json");
+  let mcpConfig: string;
+  let claudeMcpConfig: string;
+  try {
+    mcpConfig = readFileSync(mcpConfigPath, "utf8");
+    claudeMcpConfig = readFileSync(claudeMcpConfigPath, "utf8");
+  } catch (error) {
+    throw missingResources(root, error);
+  }
+  if (mcpConfig !== claudeMcpConfig) {
+    throw new CliError(
+      "resources_invalid",
+      `${claudeMcpConfigPath} does not match ${mcpConfigPath}`,
+    );
+  }
   return {
     root,
     claudePluginDir,
     skills,
     codexSkillNames: names.map((name) => `agent:${name}`),
+    mcpServers: parseMcpServers(mcpConfigPath, mcpConfig),
   };
 }
 
 export function codexSkillPolicyArguments(names: string[]): string[] {
   const config = names.map((name) => `{name=${JSON.stringify(name)},enabled=true}`).join(",");
   return config === "" ? [] : ["-c", `skills.config=[${config}]`];
+}
+
+export function codexMcpArguments(servers: FleetMcpServer[]): string[] {
+  return servers.flatMap((server) => [
+    "-c",
+    `mcp_servers.${server.name}={command=${JSON.stringify(server.command)},args=${JSON.stringify(server.args)}}`,
+  ]);
 }
 
 export function applyFleetResourceArguments(
@@ -74,7 +105,10 @@ export function applyFleetResourceArguments(
   if (spec.harness === "claude") {
     return { ...spec, command: [bin, "--plugin-dir", resources.claudePluginDir, ...native] };
   }
-  const policy = codexSkillPolicyArguments(resources.codexSkillNames);
+  const policy = [
+    ...codexSkillPolicyArguments(resources.codexSkillNames),
+    ...codexMcpArguments(resources.mcpServers),
+  ];
   const commandIndex = codexNonInteractiveCommandIndex(native);
   if (commandIndex !== null) {
     return {
@@ -91,6 +125,51 @@ export function applyFleetResourceArguments(
     return { ...spec, command: [bin, native[0], native[1], ...policy, ...native.slice(2)] };
   }
   return { ...spec, command: [bin, ...policy, ...native] };
+}
+
+function parseMcpServers(path: string, text: string): FleetMcpServer[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    const detail = error instanceof Error ? `: ${error.message}` : "";
+    throw new CliError("resources_invalid", `${path} is not valid JSON${detail}`);
+  }
+  if (!isObject(parsed) || Object.keys(parsed).length !== 1 || !isObject(parsed["mcpServers"])) {
+    throw new CliError("resources_invalid", `${path} must contain only an mcpServers object`);
+  }
+  const entries = Object.entries(parsed["mcpServers"]).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
+  if (entries.length === 0) {
+    throw new CliError("resources_invalid", `${path} contains no MCP servers`);
+  }
+  return entries.map(([name, value]) => {
+    if (!/^[A-Za-z0-9_-]+$/.test(name)) {
+      throw new CliError(
+        "resources_invalid",
+        `${path} contains an invalid MCP server name: ${name}`,
+      );
+    }
+    if (
+      !isObject(value) ||
+      Object.keys(value).some((key) => key !== "command" && key !== "args") ||
+      typeof value["command"] !== "string" ||
+      value["command"] === "" ||
+      !Array.isArray(value["args"]) ||
+      !value["args"].every((arg) => typeof arg === "string")
+    ) {
+      throw new CliError(
+        "resources_invalid",
+        `${path} MCP server ${name} must contain only a command and string args`,
+      );
+    }
+    return { name, command: value["command"], args: value["args"] };
+  });
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function missingResources(root: string, error?: unknown): CliError {

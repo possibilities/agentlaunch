@@ -13,6 +13,9 @@ mkdir -p "$RESOURCES/skills/collab" "$RESOURCES/claude/agent/.claude-plugin"
 printf '# collab\n' >"$RESOURCES/skills/collab/SKILL.md"
 printf 'collab\n' >"$RESOURCES/managed-skills.txt"
 printf '{}\n' >"$RESOURCES/claude/agent/.claude-plugin/plugin.json"
+printf '{"mcpServers":{"shadcn":{"command":"npx","args":["shadcn@latest","mcp"]}}}\n' \
+  >"$RESOURCES/mcp-servers.json"
+cp "$RESOURCES/mcp-servers.json" "$RESOURCES/claude/agent/.mcp.json"
 
 run() {
   env -i PATH="$PATH" HOME="$WORK/home" AGENTLAUNCH_NO_BALANCE=1 \

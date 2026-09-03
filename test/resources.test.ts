@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { LaunchSpec } from "../src/harness.ts";
 import {
   applyFleetResourceArguments,
+  codexMcpArguments,
   codexSkillPolicyArguments,
   fleetResourcesRoot,
   loadFleetResources,
@@ -28,6 +29,11 @@ function seed(): { home: string; root: string } {
   writeFileSync(join(root, "managed-skills.txt"), "collab\nwiki\n");
   mkdirSync(join(root, "claude", "agent", ".claude-plugin"), { recursive: true });
   writeFileSync(join(root, "claude", "agent", ".claude-plugin", "plugin.json"), "{}\n");
+  const mcpConfig = `${JSON.stringify({
+    mcpServers: { shadcn: { command: "npx", args: ["shadcn@latest", "mcp"] } },
+  })}\n`;
+  writeFileSync(join(root, "mcp-servers.json"), mcpConfig);
+  writeFileSync(join(root, "claude", "agent", ".mcp.json"), mcpConfig);
   return { home, root };
 }
 
@@ -43,6 +49,9 @@ describe("fixed fleet resources", () => {
     expect(fleetResourcesRoot({}, world.home)).toBe(world.root);
     const resources = loadFleetResources({}, world.home);
     expect(resources.codexSkillNames).toEqual(["agent:collab", "agent:wiki"]);
+    expect(resources.mcpServers).toEqual([
+      { name: "shadcn", command: "npx", args: ["shadcn@latest", "mcp"] },
+    ]);
   });
 
   test("projects Claude resources through its native surface", () => {
@@ -58,16 +67,24 @@ describe("fixed fleet resources", () => {
     const resources = loadFleetResources({}, world.home);
     const policy =
       'skills.config=[{name="agent:collab",enabled=true},{name="agent:wiki",enabled=true}]';
+    const mcp = 'mcp_servers.shadcn={command="npx",args=["shadcn@latest","mcp"]}';
     expect(codexSkillPolicyArguments(resources.codexSkillNames)).toEqual(["-c", policy]);
+    expect(codexMcpArguments(resources.mcpServers)).toEqual(["-c", mcp]);
     expect(
       applyFleetResourceArguments(spec("codex", ["codex", "hello"]), resources).command,
-    ).toEqual(["codex", "-c", policy, "hello"]);
+    ).toEqual(["codex", "-c", policy, "-c", mcp, "hello"]);
     expect(
       applyFleetResourceArguments(spec("codex", ["codex", "resume", "id", "--search"]), resources)
         .command,
-    ).toEqual(["codex", "resume", "id", "-c", policy, "--search"]);
+    ).toEqual(["codex", "resume", "id", "-c", policy, "-c", mcp, "--search"]);
     expect(
       applyFleetResourceArguments(spec("codex", ["codex", "exec", "hello"]), resources).command,
-    ).toEqual(["codex", "exec", "-c", policy, "hello"]);
+    ).toEqual(["codex", "exec", "-c", policy, "-c", mcp, "hello"]);
+  });
+
+  test("rejects divergent Claude and canonical MCP resources", () => {
+    const world = seed();
+    writeFileSync(join(world.root, "claude", "agent", ".mcp.json"), '{"mcpServers":{}}\n');
+    expect(() => loadFleetResources({}, world.home)).toThrow(/does not match/);
   });
 });

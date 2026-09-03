@@ -59,14 +59,17 @@ Every managed session receives AgentStart's one fixed private resource set at
 `--x-capability` and `--x-no-common` flags are explicit usage errors.
 
 - Claude receives `--plugin-dir` for one synthetic plugin named `agent`, so
-  skills are `/agent:<skill>`.
+  skills are `/agent:<skill>` and the plugin's shadcn MCP server is
+  session-only.
 - Codex uses the globally installed skills-only `agent@agentstart-managed`
   plugin. Its `$agent:<skill>` names are persistently disabled outside managed
   sessions and name-enabled through session config on native interactive,
-  resume, `exec`/`e`, and `review` launches.
+  resume, `exec`/`e`, and `review` launches. The same session config injects
+  shadcn without adding it to ambient Codex configuration.
 The native stores do not move: Claude continues through `cswap --share-history`,
 and Codex uses `~/.codex/sessions`, preserving native resume and history
 indexing. Utility invocations such as `codex login` receive no fleet resources.
+LiveKit is absent from the fixed set and is not injected into either harness.
 
 ## Surface form
 

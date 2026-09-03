@@ -10,4 +10,9 @@ export function seedFleetResources(home: string): void {
   const claude = join(root, "claude", "agent", ".claude-plugin");
   mkdirSync(claude, { recursive: true });
   writeFileSync(join(claude, "plugin.json"), "{}\n");
+  const mcpConfig = `${JSON.stringify({
+    mcpServers: { shadcn: { command: "npx", args: ["shadcn@latest", "mcp"] } },
+  })}\n`;
+  writeFileSync(join(root, "mcp-servers.json"), mcpConfig);
+  writeFileSync(join(root, "claude", "agent", ".mcp.json"), mcpConfig);
 }
