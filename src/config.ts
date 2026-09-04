@@ -26,7 +26,7 @@ export interface Config {
 
 const ALL_YOLO: Record<HarnessName, boolean> = { claude: true, codex: true };
 
-export const DEFAULT_ROOTS = ["~/code", "~/src"] as const;
+export const DEFAULT_ROOTS = ["~/code", "~/source"] as const;
 
 export function configPath(env: Environ, home: string): string {
   return join(configDirectory(env, home, "agentlaunch"), "config.json");

@@ -123,11 +123,11 @@ describe("loadConfig", () => {
     const root = mkdtempSync(join(tmpdir(), "agentlaunch-config-"));
     roots.push(root);
     const absent = loadConfig({}, join(root, "home"));
-    expect(absent.roots).toEqual(["~/code", "~/src"]);
+    expect(absent.roots).toEqual(["~/code", "~/source"]);
     expect(absent.priming).toEqual([]);
     const { env, home } = writeConfig(JSON.stringify({}));
     const empty = loadConfig(env, home);
-    expect(empty.roots).toEqual(["~/code", "~/src"]);
+    expect(empty.roots).toEqual(["~/code", "~/source"]);
     expect(empty.priming).toEqual([]);
   });
 

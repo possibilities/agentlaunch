@@ -40,7 +40,7 @@
         "minLength": 1,
         "description": "One project root; ~ and ~/ expand to the operator's home directory."
       },
-      "description": "Parent directories the interactive form (--x-surface) scans one level deep for project directories, in scan order. Omitted entirely: ~/code and ~/src."
+      "description": "Parent directories the interactive form (--x-surface) scans one level deep for project directories, in scan order. Omitted entirely: ~/code and ~/source."
     },
     "priming": {
       "type": "array",

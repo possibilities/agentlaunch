@@ -30,7 +30,7 @@ describe("scanProjects", () => {
     mkdirSync(join(home, "code", "beta"));
     mkdirSync(join(home, "code", ".hidden"));
     writeFileSync(join(home, "code", "notes.md"), "");
-    const found = scanProjects(["~/code", "~/src"], home);
+    const found = scanProjects(["~/code", "~/source"], home);
     expect(found).toEqual([
       join(home, "code"),
       join(home, "code", "alpha"),
@@ -54,11 +54,11 @@ describe("projectIndexForCwd", () => {
 describe("orderProjects", () => {
   test("most-launched first, alphabetical on ties, with tilde display", () => {
     const home = "/home/u";
-    const paths = [`${home}/code/zeta`, `${home}/code/alpha`, `${home}/src/beta`];
-    const counts = new Map([[`${home}/src/beta`, 2]]);
+    const paths = [`${home}/code/zeta`, `${home}/code/alpha`, `${home}/source/beta`];
+    const counts = new Map([[`${home}/source/beta`, 2]]);
     const ordered = orderProjects(paths, counts, home, (path) => path.endsWith("beta"));
     expect(ordered.map((project) => project.display)).toEqual([
-      "~/src/beta",
+      "~/source/beta",
       "~/code/alpha",
       "~/code/zeta",
     ]);

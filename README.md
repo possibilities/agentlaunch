@@ -167,7 +167,7 @@ The optional strict config is `~/.config/agentlaunch/config.json`:
 {
   "$schema": "/path/to/config.schema.json",
   "yolo": { "claude": true, "codex": false },
-  "roots": ["~/code", "~/src"],
+  "roots": ["~/code", "~/source"],
   "priming": ["collab", "build"]
 }
 ```
