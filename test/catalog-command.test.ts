@@ -69,8 +69,10 @@ describe("catalogCommand", () => {
     expect(fable?.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
     expect(fable?.family).toBe("claude");
 
-    // A per-model effort narrowing survives resolution: luna has no ultra.
+    // Family effort inheritance and per-model narrowing both survive resolution.
     const codex = data.harnesses[1]!;
+    const astra = codex.models.find((model) => model.model === "gpt-6-astra");
+    expect(astra?.efforts).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
     const luna = codex.models.find((model) => model.model === "gpt-5.6-luna");
     expect(luna?.efforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
     const sol = codex.models.find((model) => model.model === "gpt-5.6-sol");
