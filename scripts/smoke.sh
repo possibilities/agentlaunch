@@ -188,15 +188,19 @@ INSTALL_STATE="$WORK/install/state"
 AGENTLAUNCH_INSTALL_BIN_DIR="$INSTALL_BIN" \
   AGENTLAUNCH_INSTALL_STATE_DIR="$INSTALL_STATE" \
   "$ROOT/scripts/install.sh" --install >"$WORK/install-out"
-[[ -L "$INSTALL_BIN/agentlaunch" ]]
-[[ "$(readlink "$INSTALL_BIN/agentlaunch")" == "$ROOT/src/main.ts" ]]
-[[ "$(stat -f %Lp "$INSTALL_STATE/deployed-sha" 2>/dev/null || stat -c %a "$INSTALL_STATE/deployed-sha")" == "600" ]]
+[[ -L "$INSTALL_BIN/agentlaunch" ]] || { echo "FAIL: installer did not link agentlaunch" >&2; exit 1; }
+[[ "$(readlink "$INSTALL_BIN/agentlaunch")" == "$ROOT/src/main.ts" ]] \
+  || { echo "FAIL: agentlaunch link does not point at src/main.ts" >&2; exit 1; }
+# GNU stat first: it also accepts -f, as "filesystem info", and would print that.
+deployed_mode="$(stat -c %a "$INSTALL_STATE/deployed-sha" 2>/dev/null || stat -f %Lp "$INSTALL_STATE/deployed-sha")"
+[[ "$deployed_mode" == "600" ]] || { echo "FAIL: deployed-sha is mode $deployed_mode, not 600" >&2; exit 1; }
 AGENTLAUNCH_INSTALL_BIN_DIR="$INSTALL_BIN" \
   AGENTLAUNCH_INSTALL_STATE_DIR="$INSTALL_STATE" \
   "$ROOT/scripts/install.sh" --install >>"$WORK/install-out"
 AGENTLAUNCH_INSTALL_BIN_DIR="$INSTALL_BIN" \
   AGENTLAUNCH_INSTALL_STATE_DIR="$INSTALL_STATE" \
   "$ROOT/scripts/install.sh" --uninstall >>"$WORK/install-out"
-[[ ! -e "$INSTALL_BIN/agentlaunch" && ! -L "$INSTALL_BIN/agentlaunch" ]]
+[[ ! -e "$INSTALL_BIN/agentlaunch" && ! -L "$INSTALL_BIN/agentlaunch" ]] \
+  || { echo "FAIL: uninstall left agentlaunch behind" >&2; exit 1; }
 
 echo "smoke: launch, resume, doctor, balance, and installer behaved"
