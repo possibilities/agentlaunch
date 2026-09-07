@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { type BalanceDecision, balanceDisabled, balanceSpec } from "./balance.ts";
+import { type BalanceDecision, balanceDisabledBy, balanceSpec } from "./balance.ts";
 import {
   BUILTIN_CATALOG_PATH,
   catalogPath,
@@ -372,6 +372,7 @@ interface ConfigReport {
   exists: boolean;
   valid: boolean;
   yolo: Record<HarnessName, boolean> | null;
+  balance: Record<HarnessName, boolean> | null;
   error: string | null;
 }
 
@@ -383,6 +384,7 @@ function configReport(context: Context): ConfigReport {
       exists: config.exists,
       valid: true,
       yolo: config.yolo,
+      balance: config.balance,
       error: null,
     };
   } catch (error) {
@@ -391,6 +393,7 @@ function configReport(context: Context): ConfigReport {
       exists: true,
       valid: false,
       yolo: null,
+      balance: null,
       error: (error as Error).message,
     };
   }
@@ -494,6 +497,19 @@ async function finishLaunch(
       `--x-account pins a session launch; "${spec.command[1]}" is a utility invocation that passes through`,
     );
   }
+  const disabledBy = utility
+    ? null
+    : balanceDisabledBy(
+        context.env,
+        noBalance,
+        spec.harness,
+        loadConfig(context.env, context.home).balance[spec.harness],
+      );
+  if (disabledBy !== null && account !== undefined) {
+    throw new UsageError(
+      `--x-account pins a balanced launch; balancing is disabled by ${disabledBy}`,
+    );
+  }
   narrateYolo(context, yolo, applied, utility);
   let resources: FleetResources | null = null;
   let launchSpec = spec;
@@ -505,11 +521,8 @@ async function finishLaunch(
   let decision: BalanceDecision | null = null;
   if (utility) {
     context.narrator.row("account", `skipped · ${spec.command[1]} is a utility invocation`);
-  } else if (balanceDisabled(context.env, noBalance)) {
-    context.narrator.row(
-      "account",
-      `skipped · balancing off ${noBalance ? "for this launch" : "(AGENTLAUNCH_NO_BALANCE)"}`,
-    );
+  } else if (disabledBy !== null) {
+    context.narrator.row("account", `skipped · balancing off (${disabledBy})`);
   } else {
     if (account !== undefined) context.narrator.detail("pin", `${account} · still gated`);
     const balanced = await balanceSpec(context.env, launchSpec, {

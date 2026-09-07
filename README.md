@@ -122,7 +122,38 @@ Session launches balance by default:
 
 `--x-account <selector>` pins a balanced launch but keeps the swap tool's
 eligibility checks. `--x-no-balance` runs the raw harness.
-`AGENTLAUNCH_NO_BALANCE=1` makes that the machine default.
+Configure the default in `~/.config/agentlaunch/config.json` (or under
+`$XDG_CONFIG_HOME/agentlaunch`). Disable both with `"balance": false`, or
+choose separately:
+
+```json
+{
+  "balance": {
+    "claude": false,
+    "codex": true
+  }
+}
+```
+
+An omitted setting or harness defaults to balancing on. Disabled launches and
+resumes use the native harness's configured authentication, skipping AgentUsage
+selection and the swap executable; fleet resources and yolo policy still apply.
+
+Environment switches override config for processes inheriting them:
+
+```sh
+export AGENTLAUNCH_NO_BALANCE=1        # disable both
+export AGENTLAUNCH_CLAUDE_NO_BALANCE=1 # disable Claude only
+export AGENTLAUNCH_CODEX_NO_BALANCE=1  # disable Codex only
+```
+
+Each nonempty value disables balancing, including `0` or `false`; unset or
+empty means no override. The global switch disables both regardless of the
+per-harness switches. `--x-no-balance` always disables for that invocation.
+These controls only disable: remove them to use the config default again.
+An account pin (`--x-account`) is rejected when balancing is disabled.
+Already-running processes must inherit the updated environment for environment
+changes to apply; config is read on each launch.
 
 Yolo is on by default and means each harness's own unattended setting:
 

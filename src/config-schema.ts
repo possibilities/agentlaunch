@@ -84,7 +84,28 @@ const primingSchema = z
     'Primings the interactive form offers beside "none", in order; the first is the default. Omitted: none are offered.',
   );
 
+const balanceSchema = z
+  .union([
+    z.boolean().describe("Enable or disable account selection and swap for both harnesses."),
+    z
+      .strictObject({
+        claude: z
+          .boolean()
+          .describe("Balance and swap Claude accounts; omitted means true.")
+          .optional(),
+        codex: z
+          .boolean()
+          .describe("Balance and swap Codex accounts; omitted means true.")
+          .optional(),
+      })
+      .describe("Per-harness balance defaults; omitted harnesses remain enabled."),
+  ])
+  .describe(
+    "Whether launches select and swap accounts. A boolean sets both harnesses; an object sets claude and codex individually. Omitted harnesses default to true. False uses native authentication while retaining fleet resources and yolo policy. --x-no-balance, nonempty AGENTLAUNCH_NO_BALANCE, or nonempty AGENTLAUNCH_CLAUDE_NO_BALANCE / AGENTLAUNCH_CODEX_NO_BALANCE disable balancing regardless of config.",
+  );
+
 const configShape = {
+  balance: balanceSchema.optional(),
   yolo: yoloSchema.optional(),
   roots: rootsSchema.optional(),
   priming: primingSchema.optional(),
@@ -100,7 +121,7 @@ export const configFileSchema = z.strictObject({
   $schema: z
     .string()
     .describe(
-      'Path or URL of this schema, for editors that offer completion and validation. The loader accepts it and ignores it; it is the only key besides "yolo" that does not fail validation.',
+      "Path or URL of this schema, for editors that offer completion and validation. The loader accepts it and ignores it; unknown setting keys still fail validation.",
     )
     .optional(),
   ...configShape,
@@ -161,12 +182,17 @@ function mapBranchIssues(issue: z.ZodIssue | undefined): readonly z.ZodIssue[] {
 }
 
 /**
- * The fault a `yolo` value carries, addressed by key: the first offending
+ * The fault a harness setting carries, addressed by key: the first offending
  * entry in document order, as the config has always reported it. What
  * counts as offending is the schema's verdict; only which one is named
  * first is decided here.
  */
-function yoloFault(raw: unknown, issue: z.ZodIssue | undefined, path: string): CliError | null {
+function harnessSettingFault(
+  setting: string,
+  raw: unknown,
+  issue: z.ZodIssue | undefined,
+  path: string,
+): CliError | null {
   const fault = (message: string): CliError =>
     new CliError("config_invalid", `${path}: ${message}`, `fix ${path}`);
   if (isRecord(raw)) {
@@ -179,21 +205,21 @@ function yoloFault(raw: unknown, issue: z.ZodIssue | undefined, path: string): C
     for (const key of Object.keys(raw)) {
       if (unknown.has(key)) {
         return fault(
-          `"yolo" names an unknown harness "${key}" (expected ${HARNESS_NAMES.join(", ")})`,
+          `"${setting}" names an unknown harness "${key}" (expected ${HARNESS_NAMES.join(", ")})`,
         );
       }
-      if (mistyped.has(key)) return fault(`"yolo.${key}" must be a boolean`);
+      if (mistyped.has(key)) return fault(`"${setting}.${key}" must be a boolean`);
     }
   }
   if (issue === undefined) return null;
-  return fault('"yolo" must be a boolean or an object of per-harness booleans');
+  return fault(`"${setting}" must be a boolean or an object of per-harness booleans`);
 }
 
 /**
  * Validate a parsed config document. `$schema` is editor tooling and is
  * stripped before validation, whatever its value; everything else is the
  * schema's business. Faults are raised in the order this file has always
- * reported them — every unknown root key first, then the `yolo` value — as
+ * reported them — every unknown root key first, then the harness settings — as
  * one `config_invalid` CliError naming the offending key.
  */
 export function parseConfig(body: Record<string, unknown>, path: string): ConfigValues {
@@ -203,12 +229,15 @@ export function parseConfig(body: Record<string, unknown>, path: string): Config
   const error = result.success ? undefined : result.error;
   const unknown = unknownConfigKeys(body, error);
   if (unknown.length > 0) throw unknownKeyError(unknown, path);
-  const fault = yoloFault(
-    body["yolo"],
-    error?.issues.find((issue) => issue.path[0] === "yolo"),
-    path,
-  );
-  if (fault !== null) throw fault;
+  for (const setting of ["yolo", "balance"] as const) {
+    const fault = harnessSettingFault(
+      setting,
+      body[setting],
+      error?.issues.find((issue) => issue.path[0] === setting),
+      path,
+    );
+    if (fault !== null) throw fault;
+  }
   if (!result.success) throw remainingFault(result.error, path);
   return result.data;
 }

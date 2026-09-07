@@ -89,6 +89,9 @@ account-bound model session, such as `codex login`, `claude doctor`, or bare
 
 **Balance** — Choosing an eligible account through `agentusage balance`.
 AgentLaunch consumes the answer; AgentUsage owns policy and capacity facts.
+The launcher’s `balance` config enables this globally or per harness; a false
+setting skips both balance and swap and uses native authentication. Disabling
+extension flags and environment switches override the config.
 
 **Swap** — Starting under the chosen account: `cswap` for Claude and
 `codex-swap` for Codex. Choosing is balance; credential activation is swap.

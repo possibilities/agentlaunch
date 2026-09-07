@@ -1,5 +1,5 @@
 import { CliError } from "./errors.ts";
-import type { LaunchSpec } from "./harness.ts";
+import type { HarnessName, LaunchSpec } from "./harness.ts";
 import type { Narrator } from "./narrate.ts";
 import { shellLine } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
@@ -38,11 +38,22 @@ export interface BalancedLaunch {
   decision: BalanceDecision;
 }
 
-/** Balance is on unless the launch or the machine opts out. */
-export function balanceDisabled(env: Environ, noBalanceFlag: boolean): boolean {
-  if (noBalanceFlag) return true;
-  const machine = env["AGENTLAUNCH_NO_BALANCE"];
-  return machine !== undefined && machine !== "";
+/** Explicit disable controls win over the configured harness default.
+ * Environment switches retain their existing nonempty-value semantics. */
+export function balanceDisabledBy(
+  env: Environ,
+  noBalanceFlag: boolean,
+  harness: HarnessName,
+  configured: boolean,
+): string | null {
+  if (noBalanceFlag) return "--x-no-balance";
+  for (const name of [
+    "AGENTLAUNCH_NO_BALANCE",
+    `AGENTLAUNCH_${harness.toUpperCase()}_NO_BALANCE`,
+  ]) {
+    if (env[name] !== undefined && env[name] !== "") return name;
+  }
+  return configured ? null : `config balance.${harness}`;
 }
 
 export async function balanceSpec(

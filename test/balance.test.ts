@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { composeCodex } from "../src/balance.ts";
+import { balanceDisabledBy, composeCodex } from "../src/balance.ts";
 import type { Envelope } from "../src/envelope.ts";
 import { seedFleetResources } from "./resource-fixture.ts";
 
@@ -568,5 +568,89 @@ describe("shim support", () => {
     const result = run(world, ["--x-harness", "claude", "--x-no-balance"]);
     expect(result.code).toBe(0);
     expect(readFileSync(out, "utf8")).toBe("1");
+  });
+});
+
+describe("balance defaults", () => {
+  test("disable controls override config and stay scoped", () => {
+    for (const harness of ["claude", "codex"] as const) {
+      const own = `AGENTLAUNCH_${harness.toUpperCase()}_NO_BALANCE`;
+      const other =
+        harness === "claude" ? "AGENTLAUNCH_CODEX_NO_BALANCE" : "AGENTLAUNCH_CLAUDE_NO_BALANCE";
+      expect(balanceDisabledBy({}, false, harness, true)).toBeNull();
+      expect(balanceDisabledBy({}, false, harness, false)).toBe(`config balance.${harness}`);
+      expect(balanceDisabledBy({ [other]: "1" }, false, harness, true)).toBeNull();
+      expect(balanceDisabledBy({ [own]: "" }, false, harness, true)).toBeNull();
+      for (const value of ["1", "0", "false"]) {
+        expect(balanceDisabledBy({ [own]: value }, false, harness, true)).toBe(own);
+        expect(
+          balanceDisabledBy({ AGENTLAUNCH_NO_BALANCE: value, [own]: "" }, false, harness, true),
+        ).toBe("AGENTLAUNCH_NO_BALANCE");
+      }
+      expect(balanceDisabledBy({ [own]: "1" }, true, harness, false)).toBe("--x-no-balance");
+    }
+  });
+
+  test.each([
+    "claude",
+    "codex",
+  ] as const)("config and environment skip selection and swap for %s", (harness) => {
+    const world = makeWorld();
+    const directory = join(world.root, "home", ".config", "agentlaunch");
+    mkdirSync(directory, { recursive: true });
+    const path = join(directory, "config.json");
+    const args = ["--x-harness", harness, "--x-dry-run", "--x-json"];
+    writeFileSync(path, JSON.stringify({ balance: { [harness]: false } }));
+    const configured = run(world, args);
+    expect(configured.code).toBe(0);
+    expect(JSON.parse(configured.stdout).data.command[0]).toBe(harness);
+    expect(JSON.parse(configured.stdout).data.balance).toBeNull();
+    expect(balanceCalls(world)).toEqual([]);
+    const pinned = run(world, [...args, "--x-account", "1"]);
+    expect(pinned.code).toBe(2);
+    expect(pinned.stderr).toContain("balancing is disabled");
+    writeFileSync(path, JSON.stringify({ balance: true }));
+    const switched = run(world, args, { [`AGENTLAUNCH_${harness.toUpperCase()}_NO_BALANCE`]: "1" });
+    expect(switched.code).toBe(0);
+    expect(JSON.parse(switched.stdout).data.command[0]).toBe(harness);
+    expect(balanceCalls(world)).toEqual([]);
+    const other = harness === "claude" ? "codex" : "claude";
+    writeFileSync(path, JSON.stringify({ balance: { [other]: false } }));
+    const balanced = run(world, args);
+    expect(balanced.code).toBe(0);
+    expect(JSON.parse(balanced.stdout).data.command[0]).toBe(
+      harness === "claude" ? "cswap" : "codex-swap",
+    );
+    expect(balanceCalls(world).length).toBe(1);
+  });
+});
+
+describe("native auth resume defaults", () => {
+  test.each(["claude", "codex"] as const)("resumes %s without selection or swap", (harness) => {
+    const world = makeWorld();
+    const directory = join(world.root, "home", ".config", "agentlaunch");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "config.json"), JSON.stringify({ balance: false }));
+    const args = [
+      "x-resume",
+      SESSION_ID,
+      "--x-harness",
+      harness,
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
+    ];
+    const result = run(world, args);
+    expect(result.code).toBe(0);
+    const data = JSON.parse(result.stdout).data;
+    expect(data.command[0]).toBe(harness);
+    expect(data.command).toContain(SESSION_ID);
+    expect(data.balance).toBeNull();
+    expect(balanceCalls(world)).toEqual([]);
+    writeFileSync(join(directory, "config.json"), JSON.stringify({ balance: true }));
+    const switched = run(world, args, { [`AGENTLAUNCH_${harness.toUpperCase()}_NO_BALANCE`]: "1" });
+    expect(switched.code).toBe(0);
+    expect(JSON.parse(switched.stdout).data.command[0]).toBe(harness);
+    expect(balanceCalls(world)).toEqual([]);
   });
 });

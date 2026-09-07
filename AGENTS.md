@@ -47,8 +47,8 @@ agentsurface — realizing a directive is entirely the host's.
   token in order. Unknown native syntax is never AgentLaunch's to reject.
 - `catalog*.ts` strictly load and validate the built-in catalog or a custom
   replacement at `~/.config/agentlaunch/catalog.json`.
-- `config*.ts` strictly load yolo policy from
-  `~/.config/agentlaunch/config.json`; absence means yolo on everywhere.
+- `config*.ts` strictly load yolo and balance policy from
+  `~/.config/agentlaunch/config.json`; absence means both on everywhere.
 - `harness.ts` is the native asymmetry boundary: argument spellings, utility
   classification, yolo gates, session metadata, store layouts, and Codex cwd
   anchoring.
@@ -83,8 +83,8 @@ agentsurface — realizing a directive is entirely the host's.
   native sessions and receive the same qualified skill enables. No Codex
   launch receives `--remote` or an AgentLaunch-owned App Server endpoint.
 - A real launch always either balances successfully or fails; never silently
-  fall back to unbalanced. Utility invocations and explicit no-balance are the
-  stated exceptions.
+  fall back to unbalanced. Utility invocations and balancing disabled by flag,
+  environment, or config are the stated exceptions.
 - Dry-run balance must not claim capacity. Real Codex balance consumes the
   AgentUsage claim and passes it to codex-swap.
 - JSON is a single schema-versioned envelope on stdout. Narration is stderr;

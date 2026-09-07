@@ -41,6 +41,7 @@ describe("loadConfig", () => {
     roots.push(root);
     const config = loadConfig({}, join(root, "home"));
     expect(config.exists).toBe(false);
+    expect(config.balance).toEqual({ claude: true, codex: true });
     expect(config.yolo).toEqual({ claude: true, codex: true });
   });
 
@@ -218,5 +219,29 @@ describe("loadConfig faults", () => {
       expect(fault.code).toBe("config_invalid");
       expect(fault.message).toContain("yolo");
     }
+  });
+});
+
+describe("balance config", () => {
+  test.each([
+    [{}, { claude: true, codex: true }],
+    [{ balance: false }, { claude: false, codex: false }],
+    [{ balance: true }, { claude: true, codex: true }],
+    [{ balance: { claude: false } }, { claude: false, codex: true }],
+    [{ balance: { codex: false } }, { claude: true, codex: false }],
+  ])("resolves %j", (body, expected) => {
+    const { env, home } = writeConfig(JSON.stringify(body));
+    expect(loadConfig(env, home).balance).toEqual(expected);
+  });
+
+  test.each([
+    '{"balance":"false"}',
+    '{"balance":null}',
+    '{"balance":[]}',
+    '{"balance":{"codex":"false"}}',
+    '{"balance":{"cluade":false}}',
+    '{"balance":{"__proto__":false}}',
+  ])("rejects malformed balance %s", (body) => {
+    expect(faultOf(body).message).toContain("balance");
   });
 });

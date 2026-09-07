@@ -74,7 +74,7 @@ const NO_BALANCE_ARG = {
   name: "--x-no-balance",
   type: "boolean" as const,
   description:
-    "Run the raw native harness without the account balancing stack (also AGENTLAUNCH_NO_BALANCE=1).",
+    "Run the native harness without account selection or swap. Overrides config balance (boolean or per-harness object). Nonempty AGENTLAUNCH_NO_BALANCE or AGENTLAUNCH_CLAUDE_NO_BALANCE / AGENTLAUNCH_CODEX_NO_BALANCE also disable, including values 0 and false.",
 };
 
 const DRY_RUN_ARG = {
