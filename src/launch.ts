@@ -1,3 +1,4 @@
+import { maintainLease, releaseLease } from "./account-session.ts";
 import { CliError } from "./errors.ts";
 import type { LaunchSpec } from "./harness.ts";
 import type { Narrator } from "./narrate.ts";
@@ -12,16 +13,53 @@ const SIGNAL_EXIT: Record<string, number> = {
 };
 
 /** Launch the native harness process. AgentLaunch owns no Codex server,
- * socket, remote client, or session lifecycle; codex-swap remains the account
- * pin and Codex itself owns trust, history, resume, and its terminal UI. */
+ * socket, remote client, or session registry. The existing parent maintains
+ * its AgentUsage lease; Codex owns trust, history, resume and its terminal UI. */
 export async function launch(
   spec: LaunchSpec,
   narrator: Narrator,
   env: Environ = process.env,
   cwd: string | null = null,
 ): Promise<number> {
-  const child = spawnInteractive(spec.command, narrator, env, cwd);
-  return adoptInteractive(child);
+  const session = spec.accountSession;
+  const childEnv = { ...env };
+  if (session) {
+    for (const key of session.unsetEnv) delete childEnv[key];
+    Object.assign(childEnv, session.env);
+  }
+  let stopHeartbeat: (() => Promise<void>) | undefined;
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const child = spawnInteractive(spec.command, narrator, childEnv, cwd);
+    if (session)
+      stopHeartbeat = maintainLease(
+        session,
+        () => {
+          narrator.row(
+            "account",
+            "session lease expired or was rejected; resume to prepare a fresh account",
+          );
+          try {
+            child.kill("SIGTERM");
+          } catch {
+            /* Already exited. */
+          }
+          killTimer = setTimeout(() => {
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              /* Already exited. */
+            }
+          }, 2000);
+        },
+        (key) => narrator.row("account", `rebalanced to ${key} after quota exhaustion`),
+      );
+    return await adoptInteractive(child);
+  } finally {
+    clearTimeout(killTimer);
+    await stopHeartbeat?.();
+    if (session) await releaseLease(session.lease);
+  }
 }
 
 function spawnInteractive(command: string[], narrator: Narrator, env: Environ, cwd: string | null) {

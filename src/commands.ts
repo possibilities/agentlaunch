@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { releaseLease } from "./account-session.ts";
 import { type BalanceDecision, balanceDisabledBy, balanceSpec } from "./balance.ts";
 import {
   BUILTIN_CATALOG_PATH,
@@ -519,46 +520,73 @@ async function finishLaunch(
     context.narrator.row("resources", facts("fleet", tildePath(resources.root, context.home)));
   }
   let decision: BalanceDecision | null = null;
-  if (utility) {
-    context.narrator.row("account", `skipped · ${spec.command[1]} is a utility invocation`);
-  } else if (disabledBy !== null) {
-    context.narrator.row("account", `skipped · balancing off (${disabledBy})`);
-  } else {
-    if (account !== undefined) context.narrator.detail("pin", `${account} · still gated`);
-    const balanced = await balanceSpec(context.env, launchSpec, {
-      account,
-      model: routingModel,
-      dryRun,
-      narrator: context.narrator,
-    });
-    launchSpec = balanced.spec;
-    decision = balanced.decision;
-    context.narrator.row("account", describeAccount(balanced.decision));
-  }
+  try {
+    if (utility) {
+      context.narrator.row("account", `skipped · ${spec.command[1]} is a utility invocation`);
+    } else if (disabledBy !== null) {
+      context.narrator.row("account", `skipped · balancing off (${disabledBy})`);
+    } else {
+      if (account !== undefined) context.narrator.detail("pin", `${account} · still gated`);
+      const balanced = await balanceSpec(context.env, launchSpec, {
+        account,
+        model: routingModel,
+        dryRun,
+        narrator: context.narrator,
+      });
+      launchSpec = balanced.spec;
+      decision = balanced.decision;
+      context.narrator.row("account", describeAccount(balanced.decision));
+    }
 
-  const effectiveCwd = launchCwd ?? context.cwd;
-  const data = {
-    harness: spec.harness,
-    session_id: spec.sessionId,
-    cwd: effectiveCwd,
-    command: launchSpec.command,
-    balance: decision,
-    utility,
-    yolo: yolo.on,
-    redactions: applied.redacted,
-    model: model.value,
-    model_source: model.source,
-    effort: effort.value,
-    effort_source: effort.source,
-    resources: resources === null ? null : { root: resources.root },
-  };
+    const effectiveCwd = launchCwd ?? context.cwd;
+    const reprepare =
+      decision === null
+        ? null
+        : [
+            "agentlaunch",
+            ...(spec.sessionId === null ? [] : ["x-resume", spec.sessionId]),
+            "--x-harness",
+            spec.harness,
+            "--x-account",
+            decision.accountKey,
+            ...(!yolo.on ? ["--x-no-yolo"] : []),
+            ...spec.command.slice(spec.sessionId === null ? 1 : 3),
+          ];
+    const data = {
+      reprepare_command: reprepare,
+      command_requires_prepare: decision !== null,
+      harness: spec.harness,
+      session_id: spec.sessionId,
+      cwd: effectiveCwd,
+      command: launchSpec.command,
+      balance: decision,
+      utility,
+      yolo: yolo.on,
+      redactions: applied.redacted,
+      model: model.value,
+      model_source: model.source,
+      effort: effort.value,
+      effort_source: effort.source,
+      resources: resources === null ? null : { root: resources.root },
+    };
 
-  if (!dryRun) {
-    context.narrator.row("launch", shellLine(launchSpec.command));
-    return { kind: "launch", spec: launchSpec, cwd: launchCwd, resources };
+    if (!dryRun) {
+      context.narrator.row("launch", shellLine(launchSpec.command));
+      return { kind: "launch", spec: launchSpec, cwd: launchCwd, resources };
+    }
+    context.narrator.row("dry run", "nothing launched · command on stdout");
+    return {
+      kind: "result",
+      data,
+      human:
+        reprepare === null
+          ? shellLine(launchSpec.command)
+          : `(cd ${shellLine([effectiveCwd])} && ${shellLine(reprepare)})`,
+    };
+  } catch (error) {
+    if (launchSpec.accountSession) await releaseLease(launchSpec.accountSession.lease);
+    throw error;
   }
-  context.narrator.row("dry run", "nothing launched · command on stdout");
-  return { kind: "result", data, human: shellLine(launchSpec.command) };
 }
 
 function narrateYolo(
@@ -603,9 +631,7 @@ function narrateYolo(
 
 function describeAccount(decision: BalanceDecision): string {
   return facts(
-    decision.route !== null
-      ? `claude-swap slot ${decision.route.slot}`
-      : (decision.accountKey ?? "chosen by the swap tool"),
+    decision.accountKey,
     decision.leaseId === null ? undefined : `lease ${decision.leaseId}`,
     decision.reason ?? undefined,
   );

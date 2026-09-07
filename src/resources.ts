@@ -109,16 +109,22 @@ export function applyFleetResourceArguments(
     ...codexSkillPolicyArguments(resources.codexSkillNames),
     ...codexMcpArguments(resources.mcpServers),
   ];
-  const commandIndex = codexNonInteractiveCommandIndex(native);
+  const commandIndex = codexNonInteractiveCommandIndex(native, true);
   if (commandIndex !== null) {
+    let insertion = commandIndex + 1;
+    if (native[commandIndex] === "exec" || native[commandIndex] === "e") {
+      const nested = codexNonInteractiveCommandIndex(native.slice(insertion), true);
+      if (nested !== null) insertion += nested + 1;
+    } else if (
+      native[commandIndex] === "resume" &&
+      native[insertion] !== undefined &&
+      !native[insertion]!.startsWith("-")
+    ) {
+      insertion += 1;
+    }
     return {
       ...spec,
-      command: [
-        bin,
-        ...native.slice(0, commandIndex + 1),
-        ...policy,
-        ...native.slice(commandIndex + 1),
-      ],
+      command: [bin, ...native.slice(0, insertion), ...policy, ...native.slice(insertion)],
     };
   }
   if (native[0] === "resume" && native[1] !== undefined) {

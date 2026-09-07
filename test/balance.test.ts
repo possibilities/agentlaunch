@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { balanceDisabledBy, composeCodex } from "../src/balance.ts";
+import { balanceDisabledBy } from "../src/balance.ts";
 import type { Envelope } from "../src/envelope.ts";
 import { seedFleetResources } from "./resource-fixture.ts";
 
@@ -18,6 +18,12 @@ type AnyEnvelope = Envelope<Record<string, unknown>>;
 
 const MAIN = join(import.meta.dir, "..", "src", "main.ts");
 const SESSION_ID = "05c42ef4-93a2-4a5c-9d3e-1b2c3d4e5f60";
+const PROVIDER_ARGS = [
+  "-c",
+  'model_provider="agentusage"',
+  "-c",
+  'model_providers.agentusage={name="AgentUsage",base_url="http://127.0.0.1:43623/codex",env_key="AGENTUSAGE_AUTH_TOKEN",wire_api="responses",supports_websockets=false}',
+];
 const SHADCN_MCP = 'mcp_servers.shadcn={command="npx",args=["shadcn@latest","mcp"]}';
 
 let roots: string[] = [];
@@ -42,7 +48,7 @@ interface World {
 /**
  * A world with a fake `agentusage` first on PATH: it records its argv and
  * answers from canned per-provider JSON files, so balanced dry runs compose
- * real prefixes without the real stack.
+ * planned native commands without the real account service.
  */
 function makeWorld(): World {
   const root = mkdtempSync(join(tmpdir(), "agentlaunch-balance-"));
@@ -70,7 +76,11 @@ function makeWorld(): World {
       schema_version: 1,
       provider: "claude",
       ok: true,
-      route: { id: "claude-swap:2", kind: "managed", slot: 2 },
+      account_key: "claude-2",
+      args: [],
+      env: { AGENTUSAGE_ACCOUNT: "claude-2" },
+      unset_env: [],
+      lease: null,
       reason: "selected",
     }),
   );
@@ -80,7 +90,10 @@ function makeWorld(): World {
       schema_version: 1,
       provider: "codex",
       ok: true,
-      accountKey: "account:org-test",
+      account_key: "codex-1",
+      args: PROVIDER_ARGS,
+      env: { AGENTUSAGE_ACCOUNT: "codex-1" },
+      unset_env: [],
       lease: null,
       reason: "highest headroom",
     }),
@@ -168,7 +181,7 @@ describe("balanced launch", () => {
     expect(balanceCalls(world)).toEqual([]);
   });
 
-  test("claude composes the cswap prefix around the injected defaults", () => {
+  test("Claude prepares with the injected defaults", () => {
     const world = makeWorld();
     const result = run(world, [
       "--x-harness",
@@ -185,11 +198,7 @@ describe("balanced launch", () => {
       balance: { provider: string; route: { slot: number } };
     };
     expect(data.command).toEqual([
-      "cswap",
-      "run",
-      "2",
-      "--share-history",
-      "--",
+      "claude",
       "--model",
       "opus[1m]",
       "--effort",
@@ -197,7 +206,7 @@ describe("balanced launch", () => {
       "hi there",
     ]);
     expect(data.balance.route.slot).toBe(2);
-    expect(balanceCalls(world)).toEqual(["balance claude --json --model opus-1m --dry-run"]);
+    expect(balanceCalls(world)).toEqual(["prepare claude --json --model opus-1m --dry-run"]);
   });
 
   test("a forwarded model yields the dimension and drives routing", () => {
@@ -213,22 +222,18 @@ describe("balanced launch", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe(
-      "cswap run 2 --share-history -- --effort medium --model fable -p",
+      `(cd ${realpathSync(world.root)} && agentlaunch --x-harness claude --x-account claude-2 --x-no-yolo --effort medium --model fable -p)`,
     );
-    expect(balanceCalls(world)).toEqual(["balance claude --json --model fable --dry-run"]);
+    expect(balanceCalls(world)).toEqual(["prepare claude --json --model fable --dry-run"]);
   });
 
-  test("the injected yolo flag rides inside the wrapped command", () => {
+  test("the injected yolo flag rides inside the native command", () => {
     const world = makeWorld();
     const result = run(world, ["--x-harness", "claude", "--x-dry-run", "--x-json"]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
     expect(data.command).toEqual([
-      "cswap",
-      "run",
-      "2",
-      "--share-history",
-      "--",
+      "claude",
       "--dangerously-skip-permissions",
       "--allow-dangerously-skip-permissions",
       "--model",
@@ -238,7 +243,7 @@ describe("balanced launch", () => {
     ]);
   });
 
-  test("codex composes the copy-runnable --account spelling around its spellings", () => {
+  test("Codex exposes a planned native command without a lease", () => {
     const world = makeWorld();
     const result = run(world, ["--x-harness", "codex", "--x-no-yolo", "--x-dry-run", "--x-json"]);
     expect(result.code).toBe(0);
@@ -247,11 +252,7 @@ describe("balanced launch", () => {
       balance: { accountKey: string; leaseId: string | null };
     };
     expect(data.command).toEqual([
-      "codex-swap",
-      "run",
-      "--account",
-      "account:org-test",
-      "--",
+      "codex",
       "-c",
       SHADCN_MCP,
       // A launch anchors Codex to the directory it was typed in.
@@ -261,10 +262,11 @@ describe("balanced launch", () => {
       "gpt-5.6-sol",
       "-c",
       'model_reasoning_effort="high"',
+      ...PROVIDER_ARGS,
     ]);
     expect(data.balance.leaseId).toBeNull();
     // Dry runs never claim.
-    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-sol"]);
+    expect(balanceCalls(world)).toEqual(["prepare codex --json --model gpt-5.6-sol --dry-run"]);
   });
 
   test("codex's -m short yields the model dimension and drives routing", () => {
@@ -279,9 +281,9 @@ describe("balanced launch", () => {
     ]);
     expect(result.code).toBe(0);
     expect(result.stdout.trim()).toBe(
-      `codex-swap run --account account:org-test -- -c '${SHADCN_MCP}' --cd ${realpathSync(world.root)} -c 'model_reasoning_effort="high"' -m gpt-x`,
+      `(cd ${realpathSync(world.root)} && agentlaunch --x-harness codex --x-account codex-1 --x-no-yolo --cd ${realpathSync(world.root)} -c 'model_reasoning_effort="high"' -m gpt-x)`,
     );
-    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-x"]);
+    expect(balanceCalls(world)).toEqual(["prepare codex --json --model gpt-x --dry-run"]);
   });
 
   test("codex exec stays native while fleet resources and balance compose", () => {
@@ -301,11 +303,7 @@ describe("balanced launch", () => {
       balance: { accountKey: string };
     };
     expect(data.command).toEqual([
-      "codex-swap",
-      "run",
-      "--account",
-      "account:org-test",
-      "--",
+      "codex",
       "--cd",
       realpathSync(world.root),
       "--model",
@@ -316,20 +314,21 @@ describe("balanced launch", () => {
       "-c",
       SHADCN_MCP,
       "hello",
+      ...PROVIDER_ARGS,
     ]);
     expect(data.command).not.toContain("--remote");
-    expect(data.balance.accountKey).toBe("account:org-test");
-    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-sol"]);
+    expect(data.balance.accountKey).toBe("codex-1");
+    expect(balanceCalls(world)).toEqual(["prepare codex --json --model gpt-5.6-sol --dry-run"]);
   });
 
   test("a level routes on its requested model", () => {
     const world = makeWorld();
     const result = run(world, ["--x-level", "gpt-5.6-luna:max", "--x-no-yolo", "--x-dry-run"]);
     expect(result.code).toBe(0);
-    expect(balanceCalls(world)).toEqual(["balance codex --json --model gpt-5.6-luna"]);
+    expect(balanceCalls(world)).toEqual(["prepare codex --json --model gpt-5.6-luna --dry-run"]);
   });
 
-  test("--x-account pins codex without a balance call", () => {
+  test("explicit Codex pins prepare afresh", () => {
     const world = makeWorld();
     const result = run(world, [
       "--x-harness",
@@ -345,9 +344,10 @@ describe("balanced launch", () => {
       command: string[];
       balance: { reason: string };
     };
-    expect(data.command.slice(0, 4)).toEqual(["codex-swap", "run", "--account", "you@example.com"]);
-    expect(data.balance.reason).toBe("requested-account");
-    expect(balanceCalls(world)).toEqual([]);
+    expect(data.command.slice(-4)).toEqual(PROVIDER_ARGS);
+    expect(balanceCalls(world)).toEqual([
+      "prepare codex --json --model gpt-5.6-sol --account you@example.com --dry-run",
+    ]);
   });
 
   test("--x-account forwards to balance for claude", () => {
@@ -362,7 +362,7 @@ describe("balanced launch", () => {
     ]);
     expect(result.code).toBe(0);
     expect(balanceCalls(world)).toEqual([
-      "balance claude --json --model opus-1m --account c1 --dry-run",
+      "prepare claude --json --model opus-1m --account c1 --dry-run",
     ]);
   });
 
@@ -408,7 +408,9 @@ describe("balanced launch", () => {
       JSON.stringify({
         schema_version: 1,
         ok: false,
-        error: { code: "no-eligible-account", message: "every account is exhausted" },
+        provider: "codex",
+        refusal: "no-eligible-account",
+        detail: "every account is exhausted",
       }),
     );
     writeFileSync(join(world.binDir, "exit-code"), "3");
@@ -431,7 +433,7 @@ describe("balanced launch", () => {
     expect(result.code).toBe(1);
     const envelope = JSON.parse(result.stdout) as AnyEnvelope;
     expect(envelope.error?.code).toBe("balance_unavailable");
-    expect(envelope.error?.recovery).toContain("AGENTLAUNCH_NO_BALANCE");
+    expect(envelope.error?.recovery).toContain("--x-no-balance");
   });
 
   test("a utility invocation passes through without balance or injection", () => {
@@ -492,19 +494,11 @@ describe("balanced resume", () => {
     const result = run(world, ["x-resume", SESSION_ID, "--x-no-yolo", "--x-dry-run", "--x-json"]);
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
-    expect(data.command).toEqual([
-      "cswap",
-      "run",
-      "2",
-      "--share-history",
-      "--",
-      "--resume",
-      SESSION_ID,
-    ]);
-    expect(balanceCalls(world)).toEqual(["balance claude --json --dry-run"]);
+    expect(data.command).toEqual(["claude", "--resume", SESSION_ID]);
+    expect(balanceCalls(world)).toEqual(["prepare claude --json --dry-run"]);
   });
 
-  test("codex resume moves the session id into the wrapper grammar", () => {
+  test("Codex resume keeps transport config in its native scope", () => {
     const world = makeWorld();
     const result = run(world, [
       "x-resume",
@@ -518,40 +512,13 @@ describe("balanced resume", () => {
     expect(result.code).toBe(0);
     const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
     expect(data.command).toEqual([
-      "codex-swap",
+      "codex",
       "resume",
       SESSION_ID,
-      "--account",
-      "account:org-test",
-      "--",
       "-c",
       SHADCN_MCP,
+      ...PROVIDER_ARGS,
     ]);
-  });
-});
-
-describe("compose units", () => {
-  test("claimed codex launches use --claim", () => {
-    expect(
-      composeCodex(
-        {
-          harness: "codex",
-          command: ["codex", "-p", "x"],
-          sessionId: null,
-        },
-        ["--claim", "lease-1"],
-      ),
-    ).toEqual(["codex-swap", "run", "--claim", "lease-1", "--", "-p", "x"]);
-    expect(
-      composeCodex(
-        {
-          harness: "codex",
-          command: ["codex", "resume", SESSION_ID, "--search"],
-          sessionId: SESSION_ID,
-        },
-        ["--claim", "lease-1"],
-      ),
-    ).toEqual(["codex-swap", "resume", SESSION_ID, "--claim", "lease-1", "--", "--search"]);
   });
 });
 
@@ -594,7 +561,7 @@ describe("balance defaults", () => {
   test.each([
     "claude",
     "codex",
-  ] as const)("config and environment skip selection and swap for %s", (harness) => {
+  ] as const)("config and environment skip account preparation for %s", (harness) => {
     const world = makeWorld();
     const directory = join(world.root, "home", ".config", "agentlaunch");
     mkdirSync(directory, { recursive: true });
@@ -618,9 +585,7 @@ describe("balance defaults", () => {
     writeFileSync(path, JSON.stringify({ balance: { [other]: false } }));
     const balanced = run(world, args);
     expect(balanced.code).toBe(0);
-    expect(JSON.parse(balanced.stdout).data.command[0]).toBe(
-      harness === "claude" ? "cswap" : "codex-swap",
-    );
+    expect(JSON.parse(balanced.stdout).data.command[0]).toBe(harness);
     expect(balanceCalls(world).length).toBe(1);
   });
 });
@@ -652,5 +617,110 @@ describe("native auth resume defaults", () => {
     expect(switched.code).toBe(0);
     expect(JSON.parse(switched.stdout).data.command[0]).toBe(harness);
     expect(balanceCalls(world)).toEqual([]);
+  });
+});
+
+describe("prepare safety", () => {
+  test.each([
+    "--oss",
+    "--local-provider=ollama",
+    "-cmodel_provider=other",
+    "--config=model_providers.agentusage.base_url=evil",
+  ])("rejects %s before reserving", (flag) => {
+    const world = makeWorld();
+    const result = run(world, ["--x-harness", "codex", flag, "--x-dry-run"]);
+    expect(result.code).toBe(2);
+    expect(balanceCalls(world)).toEqual([]);
+  });
+  test.each(
+    [
+      [
+        "-p",
+        "proof",
+        "exec",
+        "-c",
+        'model_reasoning_effort="low"',
+        "Discuss --config=model_provider=other",
+      ],
+      [
+        "-p",
+        "proof",
+        "exec",
+        "resume",
+        SESSION_ID,
+        "-c",
+        'model_reasoning_effort="low"',
+        "--",
+        "-cmodel_provider=prompt",
+      ],
+      ["resume", SESSION_ID, "-c", 'model_reasoning_effort="low"', "--", "--oss"],
+      ["e", "--", "--local-provider=prompt"],
+      ["review", "--", "--config=model_provider=prompt"],
+    ].map((native) => ({ native })),
+  )("native config scope and literal prompt tokens survive %j", ({ native }) => {
+    const world = makeWorld();
+    const result = run(world, [
+      "--x-harness",
+      "codex",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
+      ...native,
+    ]);
+    expect(result.code).toBe(0);
+    const data = JSON.parse(result.stdout).data;
+    const command = data.command as string[];
+    const boundary = command.indexOf("--");
+    const at = boundary < 0 ? command.length : boundary;
+    expect(command.slice(at - PROVIDER_ARGS.length, at)).toEqual(PROVIDER_ARGS);
+    expect(command.indexOf(SHADCN_MCP)).toBeLessThan(at - PROVIDER_ARGS.length);
+    const originalBoundary = native.indexOf("--");
+    if (originalBoundary >= 0)
+      expect(command.slice(boundary)).toEqual(native.slice(originalBoundary));
+    if (native.includes("exec") && native.includes("resume"))
+      expect(command.indexOf(SHADCN_MCP)).toBeGreaterThan(command.indexOf("resume"));
+    for (const token of native) expect(command).toContain(token);
+    expect(balanceCalls(world)).toHaveLength(1);
+  });
+  test("native text option values that look like auth flags remain opaque", () => {
+    const world = makeWorld();
+    const result = run(world, [
+      "--x-harness",
+      "claude",
+      "--system-prompt",
+      "--settings=example",
+      "--x-dry-run",
+      "--x-json",
+    ]);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout).data.command).toContain("--settings=example");
+    expect(balanceCalls(world)).toHaveLength(1);
+  });
+  test("AgentVoice app-server stays a utility without provider or resource injection", () => {
+    const world = makeWorld();
+    const result = run(world, ["--x-harness", "codex", "app-server", "--x-dry-run", "--x-json"]);
+    expect(result.code).toBe(0);
+    const data = JSON.parse(result.stdout).data;
+    expect(data.command).toEqual(["codex", "app-server"]);
+    expect(data.balance).toBeNull();
+    expect(balanceCalls(world)).toEqual([]);
+  });
+  test("JSON dry run documents a planned command and a credential-free re-prepare invocation", () => {
+    const world = makeWorld();
+    const result = run(world, ["--x-harness", "codex", "exec", "hello", "--x-dry-run", "--x-json"]);
+    expect(result.code).toBe(0);
+    const data = JSON.parse(result.stdout).data;
+    expect(data.command_requires_prepare).toBe(true);
+    expect(data.reprepare_command.slice(0, 5)).toEqual([
+      "agentlaunch",
+      "--x-harness",
+      "codex",
+      "--x-account",
+      "codex-1",
+    ]);
+    expect(data.reprepare_command).not.toContain("--x-dry-run");
+    expect(data.balance.leaseId).toBeNull();
+    expect(data.env).toBeUndefined();
+    expect(data.lease).toBeUndefined();
   });
 });

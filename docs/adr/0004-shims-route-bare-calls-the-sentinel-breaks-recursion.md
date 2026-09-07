@@ -1,5 +1,7 @@
 # 0004 — PATH shims route bare harness calls; the sentinel breaks recursion
 
+Account transport superseded by [ADR 0032](0032-agentusage-owns-account-preparation.md).
+
 Bare `claude` and `codex` on this machine are shims (installed by
 AgentStart, ahead of the real binaries on PATH) that exec
 `agentlaunch --x-harness <harness> "$@"` — every launch balances, however it

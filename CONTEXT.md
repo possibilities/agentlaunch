@@ -87,17 +87,23 @@ native session records the launch directory. Claude inherits cwd.
 account-bound model session, such as `codex login`, `claude doctor`, or bare
 `--version`. It passes through unbalanced and without yolo injection.
 
-**Balance** — Choosing an eligible account through `agentusage balance`.
+**Balance** — Choosing an eligible account through `agentusage prepare`.
 AgentLaunch consumes the answer; AgentUsage owns policy and capacity facts.
 The launcher’s `balance` config enables this globally or per harness; a false
-setting skips both balance and swap and uses native authentication. Disabling
+setting skips preparation and uses native authentication. Disabling
 extension flags and environment switches override the config.
 
-**Swap** — Starting under the chosen account: `cswap` for Claude and
-`codex-swap` for Codex. Choosing is balance; credential activation is swap.
+**Account lease** — Private 90-second authorization for AgentUsage’s shared
+loopback proxy, renewed and released by the existing launcher parent. Provider
+credentials remain in AgentUsage; native homes and history remain shared.
+
+**Re-prepare command** — The credential-free AgentLaunch invocation a balanced
+dry run prints. Its selected account is pinned, but execution checks current
+eligibility and obtains a fresh lease. JSON’s native `command` is only a plan
+when `command_requires_prepare` is true.
 
 **Pin** — `--x-account <selector>`, which forces the candidate account while
-retaining the swap tool's eligibility gate. _Avoid_: bypass.
+retaining AgentUsage’s eligibility gate and preventing automatic quota failover. _Avoid_: bypass.
 
 **Yolo** — Each harness's native unattended permission setting, enabled by
 default and configurable globally/per harness. An explicit `--x-no-yolo` may

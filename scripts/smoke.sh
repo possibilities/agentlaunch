@@ -156,21 +156,30 @@ expect_exit 1 run x-resume 99999999-9999-4999-9999-999999999999 --x-dry-run --x-
 expect_out '"code":"session_not_found"'
 expect_exit 2 run x-resume run:not-a-native-id --x-dry-run
 
-# Balanced prefix composition with a fake read-only selector.
+# Balanced preparation is read-only and its human command prepares again.
 mkdir -p "$WORK/bin"
 cat >"$WORK/bin/agentusage" <<'FAKE'
-#!/usr/bin/env bash
-if [ "$2" = "claude" ]; then
-  printf '{"schema_version":1,"provider":"claude","ok":true,"route":{"id":"claude-swap:1","slot":1},"reason":"selected"}\n'
-else
-  printf '{"schema_version":1,"provider":"codex","ok":true,"accountKey":"account:smoke","lease":null,"reason":"selected"}\n'
-fi
+#!/usr/bin/env bun
+const provider = process.argv[3];
+if (process.argv[2] !== "prepare" || !process.argv.includes("--dry-run")) process.exit(9);
+console.log(JSON.stringify({schema_version:1,provider,ok:true,account_key:`${provider}-1`,
+  args:provider === "claude" ? [] : ["-c", 'model_provider="agentusage"', "-c", 'model_providers.agentusage={name="AgentUsage",base_url="http://127.0.0.1:43623/codex",env_key="AGENTUSAGE_AUTH_TOKEN",wire_api="responses",supports_websockets=false}'],
+  env:{AGENTUSAGE_ACCOUNT:`${provider}-1`},unset_env:[],lease:null,reason:"selected"}));
 FAKE
 chmod +x "$WORK/bin/agentusage"
 expect_exit 0 run_balanced --x-harness claude --x-no-yolo --x-dry-run
-expect_out "cswap run 1 --share-history --"
+expect_out "agentlaunch --x-harness claude --x-account claude-1 --x-no-yolo"
 expect_exit 0 run_balanced --x-harness codex --x-no-yolo --x-dry-run
-expect_out "codex-swap run --account account:smoke --"
+expect_out "agentlaunch --x-harness codex --x-account codex-1 --x-no-yolo"
+expect_exit 0 run_balanced --x-harness codex exec --x-dry-run --x-json -- hello
+expect_out '"command_requires_prepare":true'
+expect_out '"reprepare_command":\["agentlaunch"'
+if grep -Eq 'cswap|codex-swap|"token"|"accountSession"' "$WORK/out"; then
+  echo "FAIL: dry-run exposed legacy runtime or private lease state" >&2
+  exit 1
+fi
+expect_exit 0 run_balanced --x-harness codex app-server --x-dry-run
+expect_out '^codex app-server$'
 
 # Narration never contaminates stdout; JSON silences it.
 expect_exit 0 run --x-harness claude --x-no-yolo --x-dry-run

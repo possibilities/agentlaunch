@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { AccountSession } from "./account-session.ts";
 import { UsageError } from "./errors.ts";
 import type { Environ } from "./paths.ts";
 import { expandTilde } from "./paths.ts";
@@ -132,6 +133,8 @@ export function effortDimensionToken(
 }
 
 export interface LaunchSpec {
+  /** Private execution state; never included in result envelopes or narration. */
+  accountSession?: AccountSession;
   harness: HarnessName;
   command: string[];
   sessionId: string | null;
@@ -305,11 +308,17 @@ const CODEX_ATTACHED_VALUE_FLAGS = ["-c", "-i", "-m", "-p", "-s", "-C", "-a"];
 /** Index of Codex's non-interactive top-level command after global options.
  * The launcher calls this both before and after its own global injections, so
  * `codex exec`, `codex -m gpt-x exec`, and the fully resolved command agree. */
-export function codexNonInteractiveCommandIndex(tokens: readonly string[]): number | null {
+export function codexNonInteractiveCommandIndex(
+  tokens: readonly string[],
+  includeResume = false,
+): number | null {
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!;
     if (token === "--") return null;
-    if (CODEX_GLOBAL_VALUE_FLAGS.has(token)) {
+    if (
+      CODEX_GLOBAL_VALUE_FLAGS.has(token) ||
+      ["--output-schema", "--output-last-message", "-o"].includes(token)
+    ) {
       index += 1;
       continue;
     }
@@ -321,7 +330,10 @@ export function codexNonInteractiveCommandIndex(tokens: readonly string[]): numb
     ) {
       continue;
     }
-    return CODEX_NON_INTERACTIVE_COMMANDS.has(token) ? index : null;
+    return CODEX_NON_INTERACTIVE_COMMANDS.has(token) ||
+      (includeResume && (token === "resume" || token === "fork"))
+      ? index
+      : null;
   }
   return null;
 }
@@ -334,8 +346,8 @@ export function buildOpen(harness: HarnessName, tokens: string[]): LaunchSpec {
  * Management and service words per harness — everything in each CLI's
  * command list that opens no account-bound model session. A first token in
  * this set makes the invocation a utility invocation: balancing it is
- * meaningless (no quota is spent on an account) and the swap wrappers
- * reject several outright (codex `login` cannot run under an account pin).
+ * meaningless (no quota is spent on an account). In particular, app-server
+ * retains its own provider transport for AgentVoice and receives no lease.
  * Session words stay out: codex exec/e/review/resume/fork, and every
  * prompt/flag launch. Matches each CLI's own parsing — a leading
  * subcommand word already outranks the prompt positional there, so a
@@ -469,8 +481,7 @@ function stringField(record: Record<string, unknown>, key: string): string | nul
 
 export interface SessionStore {
   harness: HarnessName;
-  /** Env var that relocates the store; swap tools lean on these, so honoring
-   * them is what keeps resume working under per-account profiles. */
+  /** Native home override; account preparation must preserve this history root. */
   override: string;
   overrideActive: boolean;
   root: string;

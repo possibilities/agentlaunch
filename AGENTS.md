@@ -52,14 +52,15 @@ agentsurface — realizing a directive is entirely the host's.
 - `harness.ts` is the native asymmetry boundary: argument spellings, utility
   classification, yolo gates, session metadata, store layouts, and Codex cwd
   anchoring.
-- `balance.ts` calls AgentUsage and composes `cswap`/`codex-swap` prefixes.
-  AgentLaunch never reads provider credential stores.
+- `balance.ts` calls bounded `agentusage prepare`, validates the private env/args/lease
+  contract and composes native transport config. `account-session.ts` renews/releases
+  in the existing parent. AgentLaunch never reads provider credential stores.
 - `resources.ts` loads AgentStart's one fixed private resource set and emits
   each harness's native arguments: Claude's plugin directory, plus qualified
   Codex skill enables and the session-only MCP definitions authored by AgentStart.
 - `launch.ts` resolves final executables, sets `AGENTLAUNCH_LAUNCH=1`, connects
   the terminal, and adopts native exit status/signal semantics. Interactive
-  Codex, resume, `exec`/`e`, and `review` all stay native through codex-swap.
+  Codex, resume, `exec`/`e`, and `review` all stay native with an AgentUsage lease.
 - `help.ts`, `README.md`, and `CONTEXT.md` are product contract, operator guide,
   and vocabulary. Removed AgentSurface concepts must not reappear there.
 
@@ -86,8 +87,10 @@ agentsurface — realizing a directive is entirely the host's.
 - A real launch always either balances successfully or fails; never silently
   fall back to unbalanced. Utility invocations and balancing disabled by flag,
   environment, or config are the stated exceptions.
-- Dry-run balance must not claim capacity. Real Codex balance consumes the
-  AgentUsage claim and passes it to codex-swap.
+- Dry runs reserve nothing and expose no bearer. Human output re-prepares through
+  AgentLaunch; JSON marks native argv as planned. Lease/private env never enter
+  result data or narration. Stop/await renewals before release, including all
+  post-prepare failures. Expired cleanup preserves native exit status.
 - JSON is a single schema-versioned envelope on stdout. Narration is stderr;
   usage faults are stderr/help and exit 2, never envelopes. The `--x-surface`
   directive stream is the one stated exception: schema-versioned directive

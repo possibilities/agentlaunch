@@ -6,15 +6,17 @@ a native session by ID and resume it in the directory recorded by that harness.
 
 Its boundary ends at the native session: AgentLaunch has no workspace, pane,
 agent identity, naming, presence, steering, conversation registry, App Server,
-socket, or remote TUI. Codex launches through codex-swap's ordinary native
-`run`/`resume` contract, so Codex itself owns linked-worktree trust, history,
+socket, or remote TUI. AgentLaunch starts the native binary with an AgentUsage
+account lease, so Codex itself owns linked-worktree trust, history,
 resume, and terminal behavior. A native flag such as Claude's `--name` is
 forwarded unchanged and is never interpreted or persisted here.
 
 ## Install
 
 Requirements: Bun 1.3.14 or newer, the desired native harnesses, and—unless
-launching with `--x-no-balance`—AgentUsage plus `cswap` and `codex-swap`.
+launching with `--x-no-balance`—AgentUsage with enrolled accounts and its daemon
+running. See AgentUsage’s README for `accounts login` / `accounts import` and
+cutover. Claude/Codex swap tools and codex-multi-auth are not dependencies.
 
 ```sh
 git clone https://github.com/possibilities/agentlaunch.git ~/code/agentlaunch
@@ -68,9 +70,11 @@ Every managed session receives AgentStart's one fixed private resource set at
   the same MCP definitions without adding them to ambient Codex configuration.
   AgentStart currently supplies Executor for shared fleet tools and a direct
   shadcn connection that retains the project working directory.
-The native stores do not move: Claude continues through `cswap --share-history`,
-and Codex uses `~/.codex/sessions`, preserving native resume and history
-indexing. Utility invocations such as `codex login` receive no fleet resources.
+
+The native homes do not move: Claude and Codex keep their configuration and
+shared history in the usual homes (including environment overrides). Resume
+prepares a fresh account without copying history. Utility invocations such as
+`codex login` and `codex app-server` receive no fleet resources or proxy config.
 LiveKit is absent from the fixed set and is not injected into either harness.
 
 ## Surface form
@@ -116,14 +120,30 @@ Resume injects no model or effort; the session continues with its native state.
 
 ## Accounts and permissions
 
-Session launches balance by default:
+Session launches call `agentusage prepare claude|codex --json` by default.
+AgentUsage owns accounts, usage, policy and the single loopback proxy. It returns
+native arguments, private environment and a 90-second lease. AgentLaunch’s
+existing parent renews every 25 seconds and releases on exit or failed spawn.
+Credentials stay out of argv, narration and JSON results. Native homes remain
+unchanged. A rejected/expired lease terminates the child with resume guidance;
+a parent suspended beyond the TTL cannot revive it.
 
-- Claude: `agentusage balance claude`, then `cswap run <slot> --share-history`.
-- Codex: `agentusage balance codex`, then `codex-swap run|resume` with the
-  selected account/claim.
+`--x-account <key|ordinal|email|label>` pins an account while retaining eligibility
+checks. Every launch and resume prepares afresh. An automatic Codex session can
+switch after an explicit quota rejection of a self-contained request, before
+streaming, with at most three accounts attempted. Pins stay fixed. Generic
+throttling, timeouts, disconnects and account-bound continuations do not replay.
+The next lease renewal reports any changed account. If a session has stopped
+for quota, `x-resume <id>` selects again from the available accounts.
 
-`--x-account <selector>` pins a balanced launch but keeps the swap tool's
-eligibility checks. `--x-no-balance` runs the raw harness.
+Explicit native provider/auth overrides are rejected before preparing a lease.
+Ambient credentials are cleared only as specified by AgentUsage’s `unset_env`;
+use `--x-no-balance` for intentional native authentication. Codex transport
+config is appended after native/resource options and before the first literal
+`--`, in the effective native subcommand scope. This preserves profile, user
+config and resource overlays on exec and resume.
+
+`--x-no-balance` runs the raw harness.
 Configure the default in `~/.config/agentlaunch/config.json` (or under
 `$XDG_CONFIG_HOME/agentlaunch`). Disable both with `"balance": false`, or
 choose separately:
@@ -139,7 +159,7 @@ choose separately:
 
 An omitted setting or harness defaults to balancing on. Disabled launches and
 resumes use the native harness's configured authentication, skipping AgentUsage
-selection and the swap executable; fleet resources and yolo policy still apply.
+preparation; fleet resources and yolo policy still apply.
 
 Environment switches override config for processes inheriting them:
 
@@ -170,8 +190,15 @@ yolo spelling and reports that redaction. Utility invocations such as
 ## Output and machine use
 
 Before a launch, labelled decision rows go to stderr. Stdout remains the
-result. `--x-dry-run` prints a shell-runnable command; adding `--x-json`
-prints a schema-versioned envelope with the exact argv and decisions.
+result. A balanced `--x-dry-run` reserves nothing and prints a credential-free
+AgentLaunch invocation, pinned to the previewed account, which prepares again
+when run. It includes the launch cwd. It needs no live daemon.
+
+With `--x-json`, `command` is the planned native argv;
+`command_requires_prepare: true` means it needs private environment from a fresh
+prepare and is not directly runnable. Execute `reprepare_command` in `cwd` to
+reproduce the preview. No lease or bearer is emitted. Unbalanced and utility
+dry runs have `command_requires_prepare: false` and `reprepare_command: null`.
 
 ```sh
 agentlaunch --x-harness codex --x-dry-run --x-json
@@ -227,3 +254,6 @@ bash scripts/smoke.sh
 
 The project is MIT licensed. Historical AgentSurface commits are retained in
 Git; the current product intentionally contains only native launch and resume.
+
+[Account integration credits](CREDITS.md) acknowledge the predecessor projects
+and link to AgentUsage's detailed source and license notices.

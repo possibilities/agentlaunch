@@ -1,5 +1,7 @@
 # 0003 — Balanced launches compose a prefix, never touch the spec
 
+Account transport superseded by [ADR 0032](0032-agentusage-owns-account-preparation.md).
+
 Launches are balanced by default: `agentusage balance` picks the account
 from live observations, and the runner composes the swap tool's public
 contract around the untouched launch spec — `cswap run <slot>

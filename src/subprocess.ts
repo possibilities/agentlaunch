@@ -29,6 +29,7 @@ export interface BoundedSpawnOptions {
   cwd?: string;
   env: Record<string, string | undefined>;
   timeoutMs: number;
+  maxOutputBytes?: number;
   /** Names the command in a timeout's domain error. */
   label: string;
 }
@@ -47,17 +48,53 @@ export async function spawnBounded(options: BoundedSpawnOptions): Promise<Bounde
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     env: options.env as Record<string, string>,
   });
+  const abort = new AbortController();
+  const terminate = () => {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* Already exited. */
+    }
+    abort.abort();
+  };
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill();
+    terminate();
   }, options.timeoutMs);
+  let capped = false;
+  const read = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
+    const reader = stream.getReader();
+    const cancel = () => {
+      void reader.cancel().catch(() => {});
+    };
+    abort.signal.addEventListener("abort", cancel, { once: true });
+    let size = 0;
+    const chunks: Uint8Array[] = [];
+    try {
+      while (!abort.signal.aborted) {
+        const part = await reader.read();
+        if (part.done) break;
+        size += part.value.byteLength;
+        if (size > (options.maxOutputBytes ?? 4 * 1024 * 1024)) {
+          capped = true;
+          terminate();
+          break;
+        }
+        chunks.push(part.value);
+      }
+      return Buffer.concat(chunks).toString();
+    } finally {
+      abort.signal.removeEventListener("abort", cancel);
+      reader.releaseLock();
+    }
+  };
+  const stdoutRead = read(child.stdout),
+    stderrRead = read(child.stderr);
   try {
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
+    const [stdout, stderr, code] = await Promise.all([stdoutRead, stderrRead, child.exited]);
+    if (capped)
+      throw new CliError("subprocess_output_limit", `${options.label} exceeded its output limit`);
     if (timedOut) {
       throw new CliError(
         "subprocess_timeout",
@@ -68,5 +105,7 @@ export async function spawnBounded(options: BoundedSpawnOptions): Promise<Bounde
     return { code, stdout, stderr: stderr.slice(0, MAX_STDERR_CHARS) };
   } finally {
     clearTimeout(timer);
+    terminate();
+    await Promise.allSettled([stdoutRead, stderrRead, child.exited]);
   }
 }

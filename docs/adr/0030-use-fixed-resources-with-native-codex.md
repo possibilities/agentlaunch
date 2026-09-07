@@ -1,5 +1,7 @@
 # 0030: Use fixed resources with native Codex
 
+Account transport superseded by [ADR 0032](0032-agentusage-owns-account-preparation.md).
+
 AgentLaunch loads AgentStart's one fixed private resource set: a session-only
 Claude plugin containing skills and shadcn, plus qualified Codex skills from
 the globally installed skills-only `agent` plugin. Codex skills are

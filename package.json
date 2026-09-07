@@ -27,6 +27,7 @@
     "catalog.schema.json",
     "config.schema.json",
     "README.md",
+    "CREDITS.md",
     "LICENSE"
   ],
   "engines": {
