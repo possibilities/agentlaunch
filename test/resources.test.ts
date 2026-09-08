@@ -31,9 +31,9 @@ function seed(): { home: string; root: string } {
   writeFileSync(join(root, "claude", "agent", ".claude-plugin", "plugin.json"), "{}\n");
   const mcpConfig = `${JSON.stringify({
     mcpServers: {
-      executor: {
-        command: "/Applications/Executor.app/Contents/Resources/executor/executor",
-        args: ["mcp", "--no-artifacts", "--elicitation-mode", "model"],
+      agentbrain: {
+        command: "/home/test/.local/bin/agentbrain",
+        args: ["mcp"],
       },
       shadcn: { command: "npx", args: ["shadcn@latest", "mcp"] },
     },
@@ -57,9 +57,9 @@ describe("fixed fleet resources", () => {
     expect(resources.codexSkillNames).toEqual(["agent:collab", "agent:wiki"]);
     expect(resources.mcpServers).toEqual([
       {
-        name: "executor",
-        command: "/Applications/Executor.app/Contents/Resources/executor/executor",
-        args: ["mcp", "--no-artifacts", "--elicitation-mode", "model"],
+        name: "agentbrain",
+        command: "/home/test/.local/bin/agentbrain",
+        args: ["mcp"],
       },
       { name: "shadcn", command: "npx", args: ["shadcn@latest", "mcp"] },
     ]);
@@ -78,21 +78,45 @@ describe("fixed fleet resources", () => {
     const resources = loadFleetResources({}, world.home);
     const policy =
       'skills.config=[{name="agent:collab",enabled=true},{name="agent:wiki",enabled=true}]';
-    const executor =
-      'mcp_servers.executor={command="/Applications/Executor.app/Contents/Resources/executor/executor",args=["mcp","--no-artifacts","--elicitation-mode","model"]}';
+    const agentbrain =
+      'mcp_servers.agentbrain={command="/home/test/.local/bin/agentbrain",args=["mcp"]}';
     const mcp = 'mcp_servers.shadcn={command="npx",args=["shadcn@latest","mcp"]}';
     expect(codexSkillPolicyArguments(resources.codexSkillNames)).toEqual(["-c", policy]);
-    expect(codexMcpArguments(resources.mcpServers)).toEqual(["-c", executor, "-c", mcp]);
+    expect(codexMcpArguments(resources.mcpServers)).toEqual(["-c", agentbrain, "-c", mcp]);
     expect(
       applyFleetResourceArguments(spec("codex", ["codex", "hello"]), resources).command,
-    ).toEqual(["codex", "-c", policy, "-c", executor, "-c", mcp, "hello"]);
+    ).toEqual(["codex", "-c", policy, "-c", agentbrain, "-c", mcp, "hello"]);
     expect(
       applyFleetResourceArguments(spec("codex", ["codex", "resume", "id", "--search"]), resources)
         .command,
-    ).toEqual(["codex", "resume", "id", "-c", policy, "-c", executor, "-c", mcp, "--search"]);
+    ).toEqual(["codex", "resume", "id", "-c", policy, "-c", agentbrain, "-c", mcp, "--search"]);
     expect(
       applyFleetResourceArguments(spec("codex", ["codex", "exec", "hello"]), resources).command,
-    ).toEqual(["codex", "exec", "-c", policy, "-c", executor, "-c", mcp, "hello"]);
+    ).toEqual(["codex", "exec", "-c", policy, "-c", agentbrain, "-c", mcp, "hello"]);
+  });
+
+  test("review and nested exec resume receive every direct MCP", () => {
+    const world = seed();
+    const resources = loadFleetResources({}, world.home);
+    const injected = [
+      ...codexSkillPolicyArguments(resources.codexSkillNames),
+      ...codexMcpArguments(resources.mcpServers),
+    ];
+    const cases: Array<[string[], string[]]> = [
+      [
+        ["codex", "review", "--uncommitted"],
+        ["codex", "review", ...injected, "--uncommitted"],
+      ],
+      [
+        ["codex", "exec", "resume", "id", "continue"],
+        ["codex", "exec", "resume", ...injected, "id", "continue"],
+      ],
+    ];
+    for (const [native, expected] of cases) {
+      expect(applyFleetResourceArguments(spec("codex", native), resources).command).toEqual(
+        expected,
+      );
+    }
   });
 
   test("rejects divergent Claude and canonical MCP resources", () => {

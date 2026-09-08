@@ -78,7 +78,8 @@ agentsurface — realizing a directive is entirely the host's.
 - Every managed session receives AgentStart's fixed resources. Claude exposes
   `/agent:<skill>` and loads the configured MCPs from its session-only plugin;
   Codex exposes `$agent:<skill>` and receives the same MCP definitions through
-  session config. The fixed set includes Executor and project-local shadcn.
+  session config. The shared inventory includes the individual fleet MCPs,
+  Terminal Control, agent-browser, Agentdesk, Gog, and project-local shadcn.
   Utility invocations receive no resource arguments. The retired `--x-capability`
   and `--x-no-common` options are usage errors.
 - Interactive Codex, resume, `exec`/`e`, and `review` remain account-balanced
