@@ -56,7 +56,7 @@ agentsurface — realizing a directive is entirely the host's.
   AgentLaunch never reads provider credential stores.
 - `resources.ts` loads AgentStart's one fixed private resource set and emits
   each harness's native arguments: Claude's plugin directory, plus qualified
-  Codex skill enables and the session-only shadcn MCP definition.
+  Codex skill enables and the session-only MCP definitions authored by AgentStart.
 - `launch.ts` resolves final executables, sets `AGENTLAUNCH_LAUNCH=1`, connects
   the terminal, and adopts native exit status/signal semantics. Interactive
   Codex, resume, `exec`/`e`, and `review` all stay native through codex-swap.
@@ -75,10 +75,11 @@ agentsurface — realizing a directive is entirely the host's.
   registry fallback.
 - Session stores are native and read-only. Honor their environment overrides.
 - Every managed session receives AgentStart's fixed resources. Claude exposes
-  `/agent:<skill>` and loads shadcn from its session-only plugin; Codex exposes
-  `$agent:<skill>` and receives the same shadcn MCP definition through session
-  config. Utility invocations receive no resource arguments. The retired
-  `--x-capability` and `--x-no-common` options are usage errors.
+  `/agent:<skill>` and loads the configured MCPs from its session-only plugin;
+  Codex exposes `$agent:<skill>` and receives the same MCP definitions through
+  session config. The fixed set includes Executor and project-local shadcn.
+  Utility invocations receive no resource arguments. The retired `--x-capability`
+  and `--x-no-common` options are usage errors.
 - Interactive Codex, resume, `exec`/`e`, and `review` remain account-balanced
   native sessions and receive the same qualified skill enables. No Codex
   launch receives `--remote` or an AgentLaunch-owned App Server endpoint.

@@ -30,7 +30,13 @@ function seed(): { home: string; root: string } {
   mkdirSync(join(root, "claude", "agent", ".claude-plugin"), { recursive: true });
   writeFileSync(join(root, "claude", "agent", ".claude-plugin", "plugin.json"), "{}\n");
   const mcpConfig = `${JSON.stringify({
-    mcpServers: { shadcn: { command: "npx", args: ["shadcn@latest", "mcp"] } },
+    mcpServers: {
+      executor: {
+        command: "/Applications/Executor.app/Contents/Resources/executor/executor",
+        args: ["mcp", "--no-artifacts", "--elicitation-mode", "model"],
+      },
+      shadcn: { command: "npx", args: ["shadcn@latest", "mcp"] },
+    },
   })}\n`;
   writeFileSync(join(root, "mcp-servers.json"), mcpConfig);
   writeFileSync(join(root, "claude", "agent", ".mcp.json"), mcpConfig);
@@ -50,6 +56,11 @@ describe("fixed fleet resources", () => {
     const resources = loadFleetResources({}, world.home);
     expect(resources.codexSkillNames).toEqual(["agent:collab", "agent:wiki"]);
     expect(resources.mcpServers).toEqual([
+      {
+        name: "executor",
+        command: "/Applications/Executor.app/Contents/Resources/executor/executor",
+        args: ["mcp", "--no-artifacts", "--elicitation-mode", "model"],
+      },
       { name: "shadcn", command: "npx", args: ["shadcn@latest", "mcp"] },
     ]);
   });
@@ -67,19 +78,21 @@ describe("fixed fleet resources", () => {
     const resources = loadFleetResources({}, world.home);
     const policy =
       'skills.config=[{name="agent:collab",enabled=true},{name="agent:wiki",enabled=true}]';
+    const executor =
+      'mcp_servers.executor={command="/Applications/Executor.app/Contents/Resources/executor/executor",args=["mcp","--no-artifacts","--elicitation-mode","model"]}';
     const mcp = 'mcp_servers.shadcn={command="npx",args=["shadcn@latest","mcp"]}';
     expect(codexSkillPolicyArguments(resources.codexSkillNames)).toEqual(["-c", policy]);
-    expect(codexMcpArguments(resources.mcpServers)).toEqual(["-c", mcp]);
+    expect(codexMcpArguments(resources.mcpServers)).toEqual(["-c", executor, "-c", mcp]);
     expect(
       applyFleetResourceArguments(spec("codex", ["codex", "hello"]), resources).command,
-    ).toEqual(["codex", "-c", policy, "-c", mcp, "hello"]);
+    ).toEqual(["codex", "-c", policy, "-c", executor, "-c", mcp, "hello"]);
     expect(
       applyFleetResourceArguments(spec("codex", ["codex", "resume", "id", "--search"]), resources)
         .command,
-    ).toEqual(["codex", "resume", "id", "-c", policy, "-c", mcp, "--search"]);
+    ).toEqual(["codex", "resume", "id", "-c", policy, "-c", executor, "-c", mcp, "--search"]);
     expect(
       applyFleetResourceArguments(spec("codex", ["codex", "exec", "hello"]), resources).command,
-    ).toEqual(["codex", "exec", "-c", policy, "-c", mcp, "hello"]);
+    ).toEqual(["codex", "exec", "-c", policy, "-c", executor, "-c", mcp, "hello"]);
   });
 
   test("rejects divergent Claude and canonical MCP resources", () => {

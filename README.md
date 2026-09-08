@@ -59,13 +59,15 @@ Every managed session receives AgentStart's one fixed private resource set at
 `--x-capability` and `--x-no-common` flags are explicit usage errors.
 
 - Claude receives `--plugin-dir` for one synthetic plugin named `agent`, so
-  skills are `/agent:<skill>` and the plugin's shadcn MCP server is
+  skills are `/agent:<skill>` and the plugin's configured MCP servers are
   session-only.
 - Codex uses the globally installed skills-only `agent@agentstart-managed`
   plugin. Its `$agent:<skill>` names are persistently disabled outside managed
   sessions and name-enabled through session config on native interactive,
   resume, `exec`/`e`, and `review` launches. The same session config injects
-  shadcn without adding it to ambient Codex configuration.
+  the same MCP definitions without adding them to ambient Codex configuration.
+  AgentStart currently supplies Executor for shared fleet tools and a direct
+  shadcn connection that retains the project working directory.
 The native stores do not move: Claude continues through `cswap --share-history`,
 and Codex uses `~/.codex/sessions`, preserving native resume and history
 indexing. Utility invocations such as `codex login` receive no fleet resources.
