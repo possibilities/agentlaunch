@@ -54,11 +54,12 @@ means no host is reading, and the form refuses to open. _Avoid_: sink file
 native session ID for a resume. `--x-dry-run --x-json` exposes it with the
 associated decisions. _Avoid_: run (there is no AgentLaunch run lifecycle).
 
-**Fleet resources** — AgentStart's one fixed private set of skills, the shadcn
-MCP server, and harness-specific files under
+**Fleet resources** — AgentStart's one fixed private set of skills, the
+fleet-owned shadcn registry MCP server, and harness-specific files under
 `~/.local/share/agentstart/resources`. Every managed session receives it:
 Claude as one `agent` plugin, Codex by name-enabling the globally installed
-skills-only plugin and injecting shadcn through session config. _Avoid_:
+skills-only plugin and injecting the same MCP inventory through session config.
+_Avoid_:
 capability pack, session projection (there is no selection or per-session
 rendering).
 

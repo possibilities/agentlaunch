@@ -79,7 +79,8 @@ agentsurface — realizing a directive is entirely the host's.
   `/agent:<skill>` and loads the configured MCPs from its session-only plugin;
   Codex exposes `$agent:<skill>` and receives the same MCP definitions through
   session config. The shared inventory includes the individual fleet MCPs,
-  Terminal Control, agent-browser, Agentdesk, Gog, and project-local shadcn.
+  Terminal Control, agent-browser, Agentdesk, Gog, and the fleet-owned shadcn
+  registry service.
   Utility invocations receive no resource arguments. The retired `--x-capability`
   and `--x-no-common` options are usage errors.
 - Interactive Codex, resume, `exec`/`e`, and `review` remain account-balanced

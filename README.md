@@ -69,9 +69,11 @@ Every managed session receives AgentStart's one fixed private resource set at
   resume, `exec`/`e`, and `review` launches. The same session config injects
   the same MCP definitions without adding them to ambient Codex configuration.
   AgentStart renders one shared inventory of individual fleet stdio servers,
-  Terminal Control, agent-browser, Agentdesk, Gog, and project-local shadcn.
+  Terminal Control, agent-browser, Agentdesk, Gog, and the fleet-owned shadcn
+  registry service.
   Launch reads that file once; it neither scans checkouts nor keeps a second
-  server inventory. Shadcn retains the project working directory.
+  server inventory. The shadcn service uses AgentStart's fixed registry
+  directory rather than the launched project's working directory.
 
 The native homes do not move: Claude and Codex keep their configuration and
 shared history in the usual homes (including environment overrides). Resume
