@@ -96,7 +96,9 @@ extension flags and environment switches override the config.
 
 **Account lease** — Private 90-second authorization for AgentUsage’s shared
 loopback proxy, renewed and released by the existing launcher parent. Provider
-credentials remain in AgentUsage; native homes and history remain shared.
+credentials remain in AgentUsage; native homes and history remain shared. The
+managed Codex provider explicitly disables native OpenAI authentication, so
+ambient account-limit features cannot change its model.
 
 **Re-prepare command** — The credential-free AgentLaunch invocation a balanced
 dry run prints. Its selected account is pinned, but execution checks current

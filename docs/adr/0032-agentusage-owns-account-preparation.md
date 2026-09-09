@@ -22,6 +22,9 @@ Stock Codex 0.153.4 demonstrated that subcommand-local config discards global
 precede the first literal `--`. Resources enter the nested `exec resume` scope.
 Native acceptance covers profiles, user config, resource overlays, exec,
 nested exec resume and interactive resume against isolated mock upstreams.
+The injected custom provider explicitly sets `requires_openai_auth=false`, so
+the shared native home retains history and configuration without exposing its
+OpenAI account-limit features to a managed session.
 
 Automatic Codex leases may change account following an explicit quota rejection
 of a self-contained request before streaming, with at most three accounts.

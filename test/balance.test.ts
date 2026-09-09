@@ -22,7 +22,7 @@ const PROVIDER_ARGS = [
   "-c",
   'model_provider="agentusage"',
   "-c",
-  'model_providers.agentusage={name="AgentUsage",base_url="http://127.0.0.1:43623/codex",env_key="AGENTUSAGE_AUTH_TOKEN",wire_api="responses",supports_websockets=false}',
+  'model_providers.agentusage={name="AgentUsage",base_url="http://127.0.0.1:43623/codex",env_key="AGENTUSAGE_AUTH_TOKEN",wire_api="responses",requires_openai_auth=false,supports_websockets=false}',
 ];
 const SHADCN_MCP = 'mcp_servers.shadcn={command="npx",args=["shadcn@latest","mcp"]}';
 

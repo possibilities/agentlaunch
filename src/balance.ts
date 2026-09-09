@@ -269,7 +269,7 @@ export async function balanceSpec(
         args[0] !== "-c" ||
         args[1] !== 'model_provider="agentusage"' ||
         args[2] !== "-c" ||
-        !/^model_providers\.agentusage=\{name="AgentUsage",base_url="http:\/\/127\.0\.0\.1:\d+\/codex",env_key="AGENTUSAGE_AUTH_TOKEN",wire_api="responses",supports_websockets=false\}$/u.test(
+        !/^model_providers\.agentusage=\{name="AgentUsage",base_url="http:\/\/127\.0\.0\.1:\d+\/codex",env_key="AGENTUSAGE_AUTH_TOKEN",wire_api="responses",requires_openai_auth=false,supports_websockets=false\}$/u.test(
           args[3]!,
         )
       )

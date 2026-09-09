@@ -163,7 +163,7 @@ cat >"$WORK/bin/agentusage" <<'FAKE'
 const provider = process.argv[3];
 if (process.argv[2] !== "prepare" || !process.argv.includes("--dry-run")) process.exit(9);
 console.log(JSON.stringify({schema_version:1,provider,ok:true,account_key:`${provider}-1`,
-  args:provider === "claude" ? [] : ["-c", 'model_provider="agentusage"', "-c", 'model_providers.agentusage={name="AgentUsage",base_url="http://127.0.0.1:43623/codex",env_key="AGENTUSAGE_AUTH_TOKEN",wire_api="responses",supports_websockets=false}'],
+  args:provider === "claude" ? [] : ["-c", 'model_provider="agentusage"', "-c", 'model_providers.agentusage={name="AgentUsage",base_url="http://127.0.0.1:43623/codex",env_key="AGENTUSAGE_AUTH_TOKEN",wire_api="responses",requires_openai_auth=false,supports_websockets=false}'],
   env:{AGENTUSAGE_ACCOUNT:`${provider}-1`},unset_env:[],lease:null,reason:"selected"}));
 FAKE
 chmod +x "$WORK/bin/agentusage"
