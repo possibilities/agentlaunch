@@ -1,13 +1,13 @@
 # 0018 — A level is its own flag
 
-`--x-harness` took three shapes (ADR 0011), and two of them named no
+`--x-harness` took three shapes ([ADR 0011](0011-the-harness-value-carries-model-and-effort.md)), and two of them named no
 harness: `--x-harness fable:xhigh` read as a lie about its own value, and
 `--x-resume --x-harness` had already quietly kept the honest meaning —
 a harness name and nothing else. The value splits along the seam that was
 always there. **`--x-harness <harness>` takes a harness name, on a launch
 and on x-resume alike. `--x-level <model>:<effort>` takes the level.** One
 of the two is required, so a typo still launches nothing; each alone keeps
-the route ADR 0011 gave it — `--x-harness` alone the harness's catalog
+the route [ADR 0011](0011-the-harness-value-carries-model-and-effort.md) gave it — `--x-harness` alone the harness's catalog
 defaults, `--x-level` alone the earliest harness in catalog order offering
 that level — and both together pin and validate.
 
@@ -18,13 +18,13 @@ against an effort set in their head before typing — with a `--x-model` that
 silently filled a default effort as the reward for guessing wrong. So
 `--x-level` takes `<model>:<effort>`, both parts, and the catalog validates
 them as one: no lone model, no lone effort, no sparse forms — the same
-strictness ADR 0011 applied to its colon forms, now applied to a value that
+strictness [ADR 0011](0011-the-harness-value-carries-model-and-effort.md) applied to its colon forms, now applied to a value that
 carries only what colons were ever good at joining.
 
 **Ownership moves to the flag's presence, unchanged in substance.**
 `--x-level` owns both dimensions and hard-faults on a forwarded native
 counterpart; a launch without one yields per dimension, the caller's
-forwarded spelling winning unjudged. That is ADR 0011's rule with "a colon
+forwarded spelling winning unjudged. That is [ADR 0011](0011-the-harness-value-carries-model-and-effort.md)'s rule with "a colon
 form" replaced by "the flag" — the three request shapes reaching the
 catalog are the same three, so resolution, injection, narration, and
 balance routing are untouched. A level on a utility invocation is still a

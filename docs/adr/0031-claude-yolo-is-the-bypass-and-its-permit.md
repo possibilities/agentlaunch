@@ -6,7 +6,7 @@ Claude's yolo spelling is
 classifier dislikes, which is exactly the interruption a managed launch
 exists to remove; the permitting flag is needed alongside the bypass
 because claude only offers the bypass to a session that was launched with
-it. This supersedes ADR 0028.
+it. This supersedes [ADR 0033](0033-yolo-is-each-harness-s-own-unattended-setting.md).
 
 A canonical spelling is therefore a pair of independent flags rather than a
 flag and its value: injection emits only the half a caller has not already

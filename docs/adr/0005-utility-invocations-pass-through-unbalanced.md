@@ -7,7 +7,7 @@ account-bound model session, so balancing it spends nothing and means
 nothing, and the swap wrappers reject several outright — ndy refuses
 `codex login` under an account pin. The launcher therefore skips the balance
 prefix for these and launches the argv verbatim; the launch sentinel
-(ADR 0004) still makes PATH shims exec the real binary. Classification is
+([ADR 0004](0004-shims-route-bare-calls-the-sentinel-breaks-recursion.md)) still makes PATH shims exec the real binary. Classification is
 first-token only and per-harness in `harness.ts`, mirroring each CLI's own
 subcommand-over-prompt parsing; an unknown word stays a session launch, so
 misclassification can only fail the way the raw CLI would.

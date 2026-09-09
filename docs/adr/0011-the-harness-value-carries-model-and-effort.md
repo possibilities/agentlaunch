@@ -1,5 +1,8 @@
 # 0011 — The harness value carries model and effort, on --x-harness
 
+Status review 2026-09-08: superseded for flag grammar.
+[ADR 0018](0018-a-level-is-its-own-flag.md) separates harness selection from model/effort level selection; the original rejected grammar follows.
+
 Every launch names what it runs through one flag: `--x-harness` takes a
 *harness value* — `<harness>` launches that harness on its catalog
 defaults; `<model>:<effort>` resolves to the earliest harness in catalog
@@ -17,7 +20,7 @@ bare-name form yields per dimension, the caller's forwarded spelling
 winning unjudged. Utility invocations take no injection, and a colon form
 on one is a fault; resumes take none ever — a session continues on its own
 model. Balance routing follows the resolved model name. The catalog
-reshapes to carry this (amending ADR 0010): defaults live in a `defaults`
+reshapes to carry this (amending [ADR 0010](0010-the-catalog-defines-models-and-efforts.md)): defaults live in a `defaults`
 object — per harness, per family (supplying a harness that includes it
 and states none; two defaults-bearing includes without own defaults is a
 fault), and per model (effort only) — effort sets inherit model > family

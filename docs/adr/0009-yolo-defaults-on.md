@@ -1,7 +1,7 @@
 # 0009 — Yolo defaults on
 
 Yolo is the launcher default: with no config at all, every launch gets its
-harness's own permission-bypass flag (amends ADR 0006, where the config
+harness's own permission-bypass flag (amends [ADR 0006](0006-yolo-lives-in-launcher-config.md), where the config
 enabled it). The config and flags exist to disable — `{"yolo": false}` or a
 per-harness map in `~/.config/agentlaunch/config.json`, or per launch
 `--x-no-yolo [harness]` / `--x-yolo [harness]`, repeatable, optionally

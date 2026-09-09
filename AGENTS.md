@@ -1,5 +1,9 @@
 # AgentLaunch
 
+Read [CONTEXT.md](CONTEXT.md) for launch terms and the
+[decision log](docs/adr/README.md) before changing resources, permissions,
+account preparation or native-session ownership.
+
 AgentLaunch is the fleet's public pre-launch resolver for Claude Code and
 Codex. It chooses a harness/model/effort, loads fixed fleet resources, applies
 yolo policy, balances an account, composes the native command, and executes

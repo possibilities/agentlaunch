@@ -29,6 +29,6 @@ Pins never switch; generic failures and account-bound continuations do not
 replay. Renewal reports the current account identity. Every resume prepares a
 fresh account without finding or killing a per-session proxy.
 
-This supersedes ADR 0003’s swap prefixes, ADR 0004’s swap-child implementation
-details and ADR 0030’s swap transport. Their native-history, recursion-sentinel,
+This supersedes [ADR 0003](0003-balanced-launches-compose-a-prefix.md)’s swap prefixes, [ADR 0004](0004-shims-route-bare-calls-the-sentinel-breaks-recursion.md)’s swap-child implementation
+details and [ADR 0030](0030-use-fixed-resources-with-native-codex.md)’s swap transport. Their native-history, recursion-sentinel,
 utility-bypass and fixed-resource decisions remain.

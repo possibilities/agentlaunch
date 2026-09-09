@@ -1,5 +1,8 @@
 # 0030: Use fixed resources with native Codex
 
+Supersedes [ADR 0034](0034-compose-capabilities-around-native-stores.md)
+for resource composition; the earlier transport constraints remain historical evidence.
+
 Account transport superseded by [ADR 0032](0032-agentusage-owns-account-preparation.md).
 
 AgentLaunch loads AgentStart's one fixed private resource set: a session-only

@@ -1,6 +1,10 @@
-_Superseded by ADR 0031._
+_Superseded by [ADR 0031](0031-claude-yolo-is-the-bypass-and-its-permit.md)._
 
-# 0028 — Yolo is each harness's own unattended setting, not a bypass
+# 0033: Yolo is each harness's own unattended setting, not a bypass
+
+Identifier corrected 2026-09-08: formerly `0028-yolo-is-each-harness-s-own-unattended-setting.md`. The old number
+was shared by another decision; this record retains its original rationale.
+See the [identifier history](README.md#identifier-history).
 
 Claude's yolo spelling is `--permission-mode auto`, not
 `--dangerously-skip-permissions`: auto mode still classifies each action, so
