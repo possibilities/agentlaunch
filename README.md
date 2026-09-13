@@ -1,3 +1,5 @@
+> *Slop Made With Sweat: Made with a lot of love by someone who loves code but read none of it.*
+
 # AgentLaunch
 
 AgentLaunch resolves, balances, and starts native Claude Code and Codex
