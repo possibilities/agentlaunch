@@ -26,11 +26,12 @@ no status claim beyond the record; it does not certify every detail as current.
 | [0018: A level is its own flag](0018-a-level-is-its-own-flag.md) | Recorded | — |
 | [0028: A resume runs in the native session cwd](0028-a-resume-runs-in-native-session-cwd.md) | Recorded | — |
 | [0029: A prompt can arrive as a file](0029-a-prompt-can-arrive-as-a-file.md) | Recorded | — |
-| [0030: Use fixed resources with native Codex](0030-use-fixed-resources-with-native-codex.md) | Partially superseded | [0032](0032-agentusage-owns-account-preparation.md) replaces account transport; fixed resources remain. |
+| [0030: Use fixed resources with native Codex](0030-use-fixed-resources-with-native-codex.md) | Partially superseded | [0032](0032-agentusage-owns-account-preparation.md) replaces account transport; [0035](0035-explicit-roles-own-their-complete-resource-layer.md) narrows fixed resources to ordinary managed launches. |
 | [0031: Claude's yolo is the bypass and the flag that permits it](0031-claude-yolo-is-the-bypass-and-its-permit.md) | Recorded | — |
 | [0032: AgentUsage owns account preparation](0032-agentusage-owns-account-preparation.md) | Recorded | — |
 | [0033: Yolo is each harness's own unattended setting, not a bypass](0033-yolo-is-each-harness-s-own-unattended-setting.md) | Superseded | [0031](0031-claude-yolo-is-the-bypass-and-its-permit.md). Identifier was corrected after the successor was written. |
 | [0034: Compose capabilities around native stores](0034-compose-capabilities-around-native-stores.md) | Superseded; restored history | [0030](0030-use-fixed-resources-with-native-codex.md). |
+| [0035: Explicit roles own their complete resource layer](0035-explicit-roles-own-their-complete-resource-layer.md) | Recorded | Narrows ADR 0030's fixed-resource rule for direct AgentRoles launches. |
 
 ## Identifier history
 

@@ -3,6 +3,7 @@ import { CliError } from "./errors.ts";
 import type { LaunchSpec } from "./harness.ts";
 import type { Narrator } from "./narrate.ts";
 import type { Environ } from "./paths.ts";
+import { ROLE_RESOURCES_MARKER } from "./role-resources.ts";
 import { whichInEnv } from "./subprocess.ts";
 
 const SIGNAL_EXIT: Record<string, number> = {
@@ -27,6 +28,10 @@ export async function launch(
     for (const key of session.unsetEnv) delete childEnv[key];
     Object.assign(childEnv, session.env);
   }
+  // The role resource marker applies only to this AgentLaunch shim. Keeping
+  // the role name/path lets role skills inspect their context; consuming the
+  // marker keeps later AgentLaunch invocations on the normal fleet default.
+  delete childEnv[ROLE_RESOURCES_MARKER];
   let stopHeartbeat: (() => Promise<void>) | undefined;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
   try {

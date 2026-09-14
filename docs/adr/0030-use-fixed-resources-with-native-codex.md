@@ -3,6 +3,10 @@
 Supersedes [ADR 0034](0034-compose-capabilities-around-native-stores.md)
 for resource composition; the earlier transport constraints remain historical evidence.
 
+Explicit-role resource composition is superseded by
+[ADR 0035](0035-explicit-roles-own-their-complete-resource-layer.md); the fixed
+resource set remains the ordinary managed-launch default.
+
 Account transport superseded by [ADR 0032](0032-agentusage-owns-account-preparation.md).
 
 AgentLaunch loads AgentStart's one fixed private resource set: a session-only

@@ -58,7 +58,7 @@ forwarded without inspection.
 
 ## Fleet resources
 
-Every managed session receives AgentStart's one fixed private resource set at
+Every ordinary managed session receives AgentStart's one fixed private resource set at
 `~/.local/share/agentstart/resources`. It is not selectable: the retired
 `--x-capability` and `--x-no-common` flags are explicit usage errors.
 
@@ -76,6 +76,18 @@ Every managed session receives AgentStart's one fixed private resource set at
   Launch reads that file once; it neither scans checkouts nor keeps a second
   server inventory. The shadcn service uses AgentStart's fixed registry
   directory rather than the launched project's working directory.
+
+AgentRoles is the one composition boundary. For a direct Claude or Codex
+invocation it marks the explicit role directory as the complete skill/MCP
+layer, so AgentLaunch retains those native role arguments and does not add the
+fixed fleet plugin, skill enables, or MCP definitions. An omitted role skill
+or server is not added by AgentLaunch; native ambient configuration remains
+owned by the harness. AgentLaunch validates the private marker against
+the role name and existing absolute directory, then removes it from the native
+child environment. A later invocation that reaches AgentLaunch without a
+fresh marker uses the ordinary fleet layer; the recursion sentinel still lets
+already-managed bare shims bypass AgentLaunch. Re-run a role-scoped dry-run's `reprepare_command` as emitted; its
+one-shot environment prefix preserves the same resource decision.
 
 The native homes do not move: Claude and Codex keep their configuration and
 shared history in the usual homes (including environment overrides). Resume

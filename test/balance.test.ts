@@ -101,7 +101,12 @@ function makeWorld(): World {
   return { root, binDir, recordPath };
 }
 
-function run(world: World, args: string[], extraEnv: Record<string, string> = {}): RunResult {
+function run(
+  world: World,
+  args: string[],
+  extraEnv: Record<string, string> = {},
+  stripFleet = true,
+): RunResult {
   const result = Bun.spawnSync({
     cmd: ["bun", MAIN, ...args],
     cwd: world.root,
@@ -121,7 +126,7 @@ function run(world: World, args: string[], extraEnv: Record<string, string> = {}
   try {
     const envelope = JSON.parse(stdout) as AnyEnvelope;
     const data = envelope.data as { command?: string[] } | null;
-    if (Array.isArray(data?.command)) {
+    if (stripFleet && Array.isArray(data?.command)) {
       data.command = withoutFleetResources(data.command, plugin, skill, policy);
       stdout = `${JSON.stringify(envelope)}\n`;
     }
@@ -170,6 +175,47 @@ function balanceCalls(world: World): string[] {
 }
 
 describe("balanced launch", () => {
+  test("an explicit role composes with yolo and account preparation without fleet resources", () => {
+    const world = makeWorld();
+    const role = join(world.root, "roles", "worker");
+    mkdirSync(role, { recursive: true });
+    const roleMcp = 'mcp_servers.agentchats={command="agentchats",args=["mcp"]}';
+    const result = run(
+      world,
+      ["--x-harness", "codex", "--x-dry-run", "--x-json", "-c", roleMcp, "hello"],
+      {
+        AGENTLAUNCH_ROLE_RESOURCES: "agentroles-v1",
+        AGENTROLES_ROLE: role,
+        AGENTROLES_NAME: "worker",
+      },
+      false,
+    );
+    expect(result.code).toBe(0);
+    const data = (JSON.parse(result.stdout) as AnyEnvelope).data as {
+      command: string[];
+      reprepare_command: string[];
+      resources: { root: string };
+      balance: { accountKey: string };
+      yolo: boolean;
+    };
+    expect(data.command).toContain(roleMcp);
+    expect(data.command).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(data.command).toContain('model_provider="agentusage"');
+    expect(data.command.some((token) => token.startsWith("skills.config="))).toBe(false);
+    expect(data.command).not.toContain(SHADCN_MCP);
+    expect(data.resources).toEqual({ root: role });
+    expect(data.balance.accountKey).toBe("codex-1");
+    expect(data.yolo).toBe(true);
+    expect(data.reprepare_command.slice(0, 5)).toEqual([
+      "/usr/bin/env",
+      "AGENTLAUNCH_ROLE_RESOURCES=agentroles-v1",
+      `AGENTROLES_ROLE=${role}`,
+      "AGENTROLES_NAME=worker",
+      "agentlaunch",
+    ]);
+    expect(balanceCalls(world)).toEqual(["prepare codex --json --model gpt-5.6-sol --dry-run"]);
+  });
+
   test("retired capability flags fail before launch", () => {
     const world = makeWorld();
     for (const flag of ["--x-no-common", "--x-capability=extra"]) {

@@ -37,6 +37,11 @@ import {
   type FleetResources,
   loadFleetResources,
 } from "./resources.ts";
+import {
+  explicitRoleResources,
+  ROLE_RESOURCES_MARKER,
+  ROLE_RESOURCES_VERSION,
+} from "./role-resources.ts";
 import { whichInEnv } from "./subprocess.ts";
 
 export interface Context {
@@ -512,12 +517,24 @@ async function finishLaunch(
     );
   }
   narrateYolo(context, yolo, applied, utility);
+  const roleResources = explicitRoleResources(context.env);
+  if (roleResources !== null) delete context.env[ROLE_RESOURCES_MARKER];
   let resources: FleetResources | null = null;
+  let resourceRoot: string | null = null;
   let launchSpec = spec;
   if (!utility) {
-    resources = loadFleetResources(context.env, context.home);
-    launchSpec = applyFleetResourceArguments(spec, resources);
-    context.narrator.row("resources", facts("fleet", tildePath(resources.root, context.home)));
+    if (roleResources === null) {
+      resources = loadFleetResources(context.env, context.home);
+      resourceRoot = resources.root;
+      launchSpec = applyFleetResourceArguments(spec, resources);
+      context.narrator.row("resources", facts("fleet", tildePath(resources.root, context.home)));
+    } else {
+      resourceRoot = roleResources.root;
+      context.narrator.row(
+        "resources",
+        facts(`role ${roleResources.name}`, tildePath(roleResources.root, context.home)),
+      );
+    }
   }
   let decision: BalanceDecision | null = null;
   try {
@@ -539,10 +556,20 @@ async function finishLaunch(
     }
 
     const effectiveCwd = launchCwd ?? context.cwd;
+    const repreparePrefix =
+      roleResources === null
+        ? []
+        : [
+            "/usr/bin/env",
+            `${ROLE_RESOURCES_MARKER}=${ROLE_RESOURCES_VERSION}`,
+            `AGENTROLES_ROLE=${roleResources.root}`,
+            `AGENTROLES_NAME=${roleResources.name}`,
+          ];
     const reprepare =
       decision === null
         ? null
         : [
+            ...repreparePrefix,
             "agentlaunch",
             ...(spec.sessionId === null ? [] : ["x-resume", spec.sessionId]),
             "--x-harness",
@@ -567,7 +594,7 @@ async function finishLaunch(
       model_source: model.source,
       effort: effort.value,
       effort_source: effort.source,
-      resources: resources === null ? null : { root: resources.root },
+      resources: resourceRoot === null ? null : { root: resourceRoot },
     };
 
     if (!dryRun) {

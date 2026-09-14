@@ -79,7 +79,11 @@ agentsurface — realizing a directive is entirely the host's.
 - `x-resume` accepts a native session ID only. No `run:` references or local
   registry fallback.
 - Session stores are native and read-only. Honor their environment overrides.
-- Every managed session receives AgentStart's fixed resources. Claude exposes
+- Every ordinary managed session receives AgentStart's fixed resources. A
+  direct Claude/Codex invocation from AgentRoles carries a validated one-shot
+  marker declaring its role directory to be the complete resource layer;
+  AgentLaunch applies no additional fleet skills or MCPs and consumes the
+  marker before the native child starts. Claude exposes
   `/agent:<skill>` and loads the configured MCPs from its session-only plugin;
   Codex exposes `$agent:<skill>` and receives the same MCP definitions through
   session config. The shared inventory includes the individual fleet MCPs,
@@ -88,7 +92,7 @@ agentsurface — realizing a directive is entirely the host's.
   Utility invocations receive no resource arguments. The retired `--x-capability`
   and `--x-no-common` options are usage errors.
 - Interactive Codex, resume, `exec`/`e`, and `review` remain account-balanced
-  native sessions and receive the same qualified skill enables. No Codex
+  native sessions; ordinary launches receive the same qualified skill enables. No Codex
   launch receives `--remote` or an AgentLaunch-owned App Server endpoint.
 - A real launch always either balances successfully or fails; never silently
   fall back to unbalanced. Utility invocations and balancing disabled by flag,
@@ -129,7 +133,7 @@ lives in two siblings, and some changes here must cascade:
 
 - Skills under `skills/<name>/` ship into AgentStart's fixed private
   fleet resources (`~/code/agentstart/scripts/sync-skills`, run six-hourly
-  by the scheduled updater). AgentLaunch loads them into every managed
+  by the scheduled updater). AgentLaunch loads them into every ordinary managed
   session: Claude Code exposes `/agent:<name>`, Codex uses
   `$agent:<name>`. A SKILL.md edit is live within six hours, or on demand by
   running that script.

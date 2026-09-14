@@ -56,9 +56,14 @@ associated decisions. _Avoid_: run (there is no AgentLaunch run lifecycle).
 
 **Fleet resources** — AgentStart's one fixed private set of skills, the
 fleet-owned shadcn registry MCP server, and harness-specific files under
-`~/.local/share/agentstart/resources`. Every managed session receives it:
+`~/.local/share/agentstart/resources`. Every ordinary managed session receives it:
 Claude as one `agent` plugin, Codex by name-enabling the globally installed
 skills-only plugin and injecting the same MCP inventory through session config.
+An explicit AgentRoles launch instead declares its role directory as the
+complete skill/MCP layer for that immediate launch. The private marker is
+consumed before the native child so a later AgentLaunch invocation without
+a fresh marker uses the ordinary fleet default. The recursion sentinel still
+controls whether a bare shim reaches AgentLaunch.
 _Avoid_:
 capability pack, session projection (there is no selection or per-session
 rendering).
