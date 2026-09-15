@@ -267,7 +267,7 @@ export const COMMANDS: ContractCommand[] = [
     mutates: true,
     blocking: true,
     guidance:
-      "Without --x-harness, scans the native Claude and Codex session stores; no match and multiple matches are explicit errors. A resume never injects a model or effort — the native session continues with its own state. If the recorded cwd is gone or unavailable, the session starts where agentlaunch was invoked instead.",
+      "Without --x-harness, scans the native Claude and Codex session stores; no match and multiple matches are explicit errors. Codex resumes reapply the model and effort from the final recorded turn_context unless a forwarded native token explicitly overrides that dimension; Claude continues to own both dimensions natively. If recorded Codex dimensions are unavailable, they remain unset rather than guessed. If the recorded cwd is gone or unavailable, the session starts where agentlaunch was invoked instead.",
     arguments: [
       {
         name: "session-id",

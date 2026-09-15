@@ -22,9 +22,9 @@ no status claim beyond the record; it does not certify every detail as current.
 | [0008: The x-prefix partitions launcher and native input](0008-the-x-prefix-partition-replaces-the-double-dash.md) | Recorded | — |
 | [0009: Yolo defaults on](0009-yolo-defaults-on.md) | Recorded | — |
 | [0010: The catalog defines models and efforts; its order is the tiebreak](0010-the-catalog-defines-models-and-efforts.md) | Recorded | — |
-| [0011: The harness value carries model and effort, on --x-harness](0011-the-harness-value-carries-model-and-effort.md) | Superseded for flag grammar | [ADR 0018](0018-a-level-is-its-own-flag.md) separates harness selection from model/effort level selection; the original rejected grammar follows. |
-| [0018: A level is its own flag](0018-a-level-is-its-own-flag.md) | Recorded | — |
-| [0028: A resume runs in the native session cwd](0028-a-resume-runs-in-native-session-cwd.md) | Recorded | — |
+| [0011: The harness value carries model and effort, on --x-harness](0011-the-harness-value-carries-model-and-effort.md) | Superseded for flag grammar and resume behavior | [ADR 0018](0018-a-level-is-its-own-flag.md) separates harness selection from model/effort level selection; [ADR 0036](0036-reapply-codex-recorded-dimensions-on-resume.md) replaces the resume no-injection claim. |
+| [0018: A level is its own flag](0018-a-level-is-its-own-flag.md) | Partially superseded | [ADR 0036](0036-reapply-codex-recorded-dimensions-on-resume.md) keeps levels invalid on resume but replaces the no-injection claim for Codex. |
+| [0028: A resume runs in the native session cwd](0028-a-resume-runs-in-native-session-cwd.md) | Recorded | [ADR 0036](0036-reapply-codex-recorded-dimensions-on-resume.md) extends the same native-metadata rule to Codex dimensions. |
 | [0029: A prompt can arrive as a file](0029-a-prompt-can-arrive-as-a-file.md) | Recorded | — |
 | [0030: Use fixed resources with native Codex](0030-use-fixed-resources-with-native-codex.md) | Partially superseded | [0032](0032-agentusage-owns-account-preparation.md) replaces account transport; [0035](0035-explicit-roles-own-their-complete-resource-layer.md) narrows fixed resources to ordinary managed launches. |
 | [0031: Claude's yolo is the bypass and the flag that permits it](0031-claude-yolo-is-the-bypass-and-its-permit.md) | Recorded | — |
@@ -32,6 +32,7 @@ no status claim beyond the record; it does not certify every detail as current.
 | [0033: Yolo is each harness's own unattended setting, not a bypass](0033-yolo-is-each-harness-s-own-unattended-setting.md) | Superseded | [0031](0031-claude-yolo-is-the-bypass-and-its-permit.md). Identifier was corrected after the successor was written. |
 | [0034: Compose capabilities around native stores](0034-compose-capabilities-around-native-stores.md) | Superseded; restored history | [0030](0030-use-fixed-resources-with-native-codex.md). |
 | [0035: Explicit roles own their complete resource layer](0035-explicit-roles-own-their-complete-resource-layer.md) | Recorded | Narrows ADR 0030's fixed-resource rule for direct AgentRoles launches. |
+| [0036: Reapply Codex's recorded dimensions on resume](0036-reapply-codex-recorded-dimensions-on-resume.md) | Recorded | — |
 
 ## Identifier history
 

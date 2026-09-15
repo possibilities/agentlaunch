@@ -428,14 +428,17 @@ export function buildResume(harness: HarnessName, sessionId: string, tokens: str
 
 export interface SessionFileFacts {
   cwd: string | null;
+  effort: string | null;
+  model: string | null;
   sessionId: string | null;
 }
 
 /**
  * What a session file says about itself, per store layout: codex carries cwd
- * and id in its first session_meta line; claude files scatter cwd through
- * the records and put the id only in the filename. Read bounded — a session
- * transcript can be huge, and these facts live at the head.
+ * and id in its first session_meta line, plus model/effort in its final
+ * turn_context; claude files scatter cwd through the records and put the id
+ * only in the filename. Read bounded — a session transcript can be huge, so
+ * Codex's tail scan works backward in fixed-size chunks.
  */
 export async function sessionFileFacts(
   harness: HarnessName,
@@ -445,28 +448,68 @@ export async function sessionFileFacts(
   try {
     head = await readHead(path, 262_144);
   } catch {
-    return { cwd: null, sessionId: null };
+    return { cwd: null, effort: null, model: null, sessionId: null };
   }
   if (harness === "claude") {
     const cwd = head.match(/"cwd"\s*:\s*"([^"]+)"/)?.[1] ?? null;
     const base = path.slice(path.lastIndexOf("/") + 1);
     const sessionId = base.endsWith(".jsonl") ? base.slice(0, -".jsonl".length) : null;
-    return { cwd, sessionId };
+    return { cwd, effort: null, model: null, sessionId };
   }
   const firstLine = head.split("\n", 1)[0] ?? "";
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(firstLine) as Record<string, unknown>;
   } catch {
-    return { cwd: null, sessionId: null };
+    return { cwd: null, effort: null, model: null, sessionId: null };
   }
   const payload = parsed["payload"];
   const record =
     typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : parsed;
+  const turn = path.endsWith(".jsonl") ? await lastCodexTurnContext(path) : null;
   return {
     cwd: stringField(record, "cwd"),
+    effort: turn === null ? null : stringField(turn, "effort"),
+    model: turn === null ? null : stringField(turn, "model"),
     sessionId: stringField(record, "session_id") ?? stringField(record, "id"),
   };
+}
+
+/** Read the newest Codex turn context without loading an arbitrarily large
+ * rollout into memory. Session-wide model changes are recorded on each turn,
+ * so the final matching record is the resume source of truth. */
+async function lastCodexTurnContext(path: string): Promise<Record<string, unknown> | null> {
+  const file = Bun.file(path);
+  const chunkBytes = 262_144;
+  let end = file.size;
+  let suffix = "";
+  while (end > 0) {
+    const start = Math.max(0, end - chunkBytes);
+    let chunk: string;
+    try {
+      chunk = await file.slice(start, end).text();
+    } catch {
+      return null;
+    }
+    const lines = (chunk + suffix).split("\n");
+    suffix = start === 0 ? "" : (lines.shift() ?? "");
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index]!;
+      if (!line.includes('"turn_context"')) continue;
+      try {
+        const entry = JSON.parse(line) as Record<string, unknown>;
+        if (entry["type"] !== "turn_context") continue;
+        const payload = entry["payload"];
+        if (typeof payload === "object" && payload !== null) {
+          return payload as Record<string, unknown>;
+        }
+      } catch {
+        // A malformed native record does not make the session unresumable.
+      }
+    }
+    end = start;
+  }
+  return null;
 }
 
 async function readHead(path: string, bytes: number): Promise<string> {

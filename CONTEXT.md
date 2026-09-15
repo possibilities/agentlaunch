@@ -75,7 +75,9 @@ process's session config. _Avoid_: extra root, compatibility alias.
 
 **Native session** — A conversation owned and persisted by the harness. Its ID,
 metadata, name (if any), and lifecycle are native state. AgentLaunch only reads
-the ID/store/cwd needed to resume it. _Avoid_: AgentLaunch session.
+the ID/store/cwd needed to resume it and, for Codex, the last recorded model and
+effort needed to preserve that session across a native resume. _Avoid_:
+AgentLaunch session.
 
 **Session store** — The harness's own files under the native default or its
 environment override (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). AgentLaunch never
@@ -84,6 +86,12 @@ writes them.
 **Resume cwd** — The directory recorded in native session metadata. A resume
 starts there when it still exists; otherwise it starts in the invocation cwd
 and states the missing/unknown native directory.
+
+**Resume dimensions** — The model and reasoning effort in the final Codex
+rollout `turn_context`. AgentLaunch reapplies them because Codex resume can use
+current invocation defaults rather than the session's prior values. A caller's
+explicit native model or effort token overrides the recorded value for that
+dimension. Claude continues to own both dimensions natively.
 
 **Anchor** — The native Codex `--cd <absolute-cwd>` AgentLaunch adds to a new
 Codex launch unless the caller already supplied `--cd`/`-C`. This ensures the

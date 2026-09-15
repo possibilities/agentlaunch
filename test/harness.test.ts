@@ -307,10 +307,49 @@ describe("sessionFileFacts", () => {
 
       expect(await sessionFileFacts("claude", claude)).toEqual({
         cwd: "/work/claude",
+        effort: null,
+        model: null,
         sessionId: "claude-id",
       });
       expect(await sessionFileFacts("codex", codex)).toEqual({
         cwd: "/work/codex",
+        effort: null,
+        model: null,
+        sessionId: "codex-id",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("reads model and effort from the latest codex turn_context", async () => {
+    const root = mkdtempSync(join(tmpdir(), "agentlaunch-session-dimensions-"));
+    try {
+      const codex = join(root, "rollout-codex-id.jsonl");
+      writeFileSync(
+        codex,
+        [
+          JSON.stringify({
+            type: "session_meta",
+            payload: { id: "codex-id", cwd: "/work/codex" },
+          }),
+          JSON.stringify({
+            type: "turn_context",
+            payload: { model: "gpt-old", effort: "medium" },
+          }),
+          JSON.stringify({ type: "event_msg", payload: { message: "x".repeat(300_000) } }),
+          JSON.stringify({
+            type: "turn_context",
+            payload: { model: "gpt-current", effort: "xhigh" },
+          }),
+          "",
+        ].join("\n"),
+      );
+
+      expect(await sessionFileFacts("codex", codex)).toEqual({
+        cwd: "/work/codex",
+        effort: "xhigh",
+        model: "gpt-current",
         sessionId: "codex-id",
       });
     } finally {

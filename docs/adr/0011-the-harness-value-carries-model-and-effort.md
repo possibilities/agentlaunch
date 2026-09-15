@@ -1,7 +1,10 @@
 # 0011 — The harness value carries model and effort, on --x-harness
 
-Status review 2026-09-08: superseded for flag grammar.
-[ADR 0018](0018-a-level-is-its-own-flag.md) separates harness selection from model/effort level selection; the original rejected grammar follows.
+Status review 2026-09-15: superseded for flag grammar and resume behavior.
+[ADR 0018](0018-a-level-is-its-own-flag.md) separates harness selection from
+model/effort level selection. [ADR 0036](0036-reapply-codex-recorded-dimensions-on-resume.md)
+replaces the claim that resumes never inject dimensions. The original rejected
+grammar follows.
 
 Every launch names what it runs through one flag: `--x-harness` takes a
 *harness value* — `<harness>` launches that harness on its catalog

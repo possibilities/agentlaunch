@@ -1,5 +1,9 @@
 # 0028 — A resume runs in the native session cwd
 
+[ADR 0036](0036-reapply-codex-recorded-dimensions-on-resume.md) extends this
+read-only native-metadata rule to Codex's final recorded model and effort; the
+cwd decision below remains unchanged.
+
 `x-resume <native-session-id>` reads the owning harness's native metadata and
 starts the native resume command in the cwd recorded there. A conversation is
 about files in one place; silently picking it up elsewhere hands the harness a

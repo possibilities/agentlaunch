@@ -11,7 +11,13 @@ import {
 } from "./catalog.ts";
 import { configPath, loadConfig } from "./config.ts";
 import { CliError, UsageError } from "./errors.ts";
-import type { HarnessName, LaunchSpec, YoloApplication, YoloDecision } from "./harness.ts";
+import type {
+  HarnessName,
+  LaunchSpec,
+  SessionFileFacts,
+  YoloApplication,
+  YoloDecision,
+} from "./harness.ts";
 import {
   applyYolo,
   buildOpen,
@@ -57,7 +63,7 @@ export type Outcome =
 
 interface DimensionReport {
   value: string | null;
-  source: "requested" | "default" | "forwarded" | null;
+  source: "requested" | "default" | "forwarded" | "session" | null;
 }
 
 const NO_DIMENSION: DimensionReport = { value: null, source: null };
@@ -207,6 +213,33 @@ function modelFromArgs(args: string[]): string | undefined {
     if (arg.startsWith("-m=")) return arg.slice("-m=".length);
     if (arg.startsWith("-m") && arg.length > 2) return arg.slice(2);
   }
+  return configValueFromArgs(args, "model");
+}
+
+function effortFromArgs(args: string[]): string | undefined {
+  return configValueFromArgs(args, "model_reasoning_effort");
+}
+
+function configValueFromArgs(args: string[], key: string): string | undefined {
+  for (let i = 0; i < args.length; i += 1) {
+    const token = args[i]!;
+    let config: string | undefined;
+    if (token === "-c" || token === "--config") config = args[i + 1];
+    else if (token.startsWith("-c=")) config = token.slice(3);
+    else if (token.startsWith("--config=")) config = token.slice("--config=".length);
+    else if (token.startsWith("-c") && token.length > 2) config = token.slice(2);
+    if (config?.startsWith(`${key}=`)) {
+      const value = config.slice(key.length + 1);
+      if (
+        value.length >= 2 &&
+        ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'")))
+      ) {
+        return value.slice(1, -1);
+      }
+      return value;
+    }
+  }
   return undefined;
 }
 
@@ -216,7 +249,7 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
   assertSessionId(sessionId);
   if (parts.values["x-level"] !== undefined) {
     throw new UsageError(
-      "x-resume takes no level: a session continues on the model and effort it was started with",
+      "x-resume takes no level: Codex restores recorded dimensions and native forwarded values override them",
     );
   }
 
@@ -256,7 +289,8 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
     context.narrator.detail("session", tildePath(first.path, context.home));
   }
 
-  const lived = await sessionCwd(context, harness, sessionId, sessionPath);
+  const nativeFacts = await sessionFacts(context, harness, sessionId, sessionPath);
+  const lived = nativeFacts.cwd;
   const cwd = lived !== null && existsSync(lived) ? lived : null;
   context.narrator.row(
     "cwd",
@@ -270,40 +304,66 @@ export async function resumeCommand(context: Context, parts: Partitioned): Promi
         ),
   );
 
-  // A resumed native session owns its model. Only an explicit forwarded model
-  // override is a routing dimension; transcript contents are not launch input.
-  const model = modelFromArgs(forwarded);
-  if (model !== undefined) context.narrator.detail("model", `${model} · drives routing`);
+  // Codex 0.154 resumes under the current invocation defaults rather than the
+  // final turn's dimensions. Reapply the native rollout's last model/effort,
+  // while continuing to honor an explicit native override from the caller.
+  const modelToken = modelDimensionToken(harness, forwarded);
+  const effortToken = effortDimensionToken(harness, forwarded);
+  const model: DimensionReport =
+    modelToken === null
+      ? nativeFacts.model === null
+        ? NO_DIMENSION
+        : { value: nativeFacts.model, source: "session" }
+      : { value: modelFromArgs(forwarded) ?? null, source: "forwarded" };
+  const effort: DimensionReport =
+    effortToken === null
+      ? nativeFacts.effort === null
+        ? NO_DIMENSION
+        : { value: nativeFacts.effort, source: "session" }
+      : { value: effortFromArgs(forwarded) ?? null, source: "forwarded" };
+  const stream = [
+    ...(modelToken === null && nativeFacts.model !== null ? modelArguments(nativeFacts.model) : []),
+    ...(effortToken === null && nativeFacts.effort !== null
+      ? effortArguments(harness, nativeFacts.effort)
+      : []),
+    ...forwarded,
+  ];
+  if (model.value !== null) {
+    context.narrator.row("model", facts(model.value, model.source ?? undefined));
+  }
+  if (effort.value !== null) {
+    context.narrator.row("effort", facts(effort.value, effort.source ?? undefined));
+  }
   const yolo = resolveYolo(context, parts, harness);
-  const applied = applyYolo(harness, forwarded, yolo, false);
+  const applied = applyYolo(harness, stream, yolo, false);
   return finishLaunch(
     context,
     parts,
     buildResume(harness, sessionId, applied.tokens),
-    model,
+    model.value ?? undefined,
     yolo,
     applied,
     false,
-    NO_DIMENSION,
-    NO_DIMENSION,
+    model,
+    effort,
     cwd,
   );
 }
 
-async function sessionCwd(
+async function sessionFacts(
   context: Context,
   harness: HarnessName,
   sessionId: string,
   known: string | null,
-): Promise<string | null> {
+): Promise<SessionFileFacts> {
   const path =
     known ??
     (await findSessions(sessionId, context.env, context.home)).find(
       (match) => match.harness === harness,
     )?.path ??
     null;
-  if (path === null) return null;
-  return (await sessionFileFacts(harness, path)).cwd;
+  if (path === null) return { cwd: null, effort: null, model: null, sessionId: null };
+  return await sessionFileFacts(harness, path);
 }
 
 function resolveYolo(context: Context, parts: Partitioned, harness: HarnessName): YoloDecision {

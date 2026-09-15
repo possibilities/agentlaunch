@@ -129,7 +129,13 @@ uses that harness's native resume spelling.
 
 The resumed process starts in the cwd recorded by the native session. If the
 directory is unavailable, AgentLaunch says so and starts where it was invoked.
-Resume injects no model or effort; the session continues with its native state.
+For Codex, AgentLaunch also reads the final rollout `turn_context` and reapplies
+its recorded model and effort: native Codex resume can otherwise select the
+current invocation defaults. An explicitly forwarded native model or effort
+overrides the recorded value for that dimension. Claude continues to own both
+dimensions natively. If Codex's recorded dimensions are unavailable,
+AgentLaunch leaves them unset rather than guessing, and the session remains
+resumable.
 
 | Harness | Store (override honored) | Native resume |
 | --- | --- | --- |

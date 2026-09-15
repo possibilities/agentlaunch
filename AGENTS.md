@@ -7,8 +7,9 @@ account preparation or native-session ownership.
 AgentLaunch is the fleet's public pre-launch resolver for Claude Code and
 Codex. It chooses a harness/model/effort, loads fixed fleet resources, applies
 yolo policy, balances an account, composes the native command, and executes
-it. `x-resume` reads native
-session stores to detect the harness and recover the session's cwd.
+it. `x-resume` reads native session stores to detect the harness and recover
+the session's cwd. For Codex, it also reapplies the final recorded model and
+effort because native resume may otherwise use the current invocation defaults.
 `--x-surface` opens the interactive launch form: the same launch, spoken to
 a surface instead of executed — it renders on stderr and writes session
 directives to stdout for a surface host. Launching is the one job either
@@ -79,6 +80,9 @@ agentsurface — realizing a directive is entirely the host's.
 - `x-resume` accepts a native session ID only. No `run:` references or local
   registry fallback.
 - Session stores are native and read-only. Honor their environment overrides.
+  A Codex resume reads the last rollout `turn_context` and reapplies its model
+  and effort unless the caller explicitly forwards a native override for that
+  dimension. Claude resume remains native-only for both dimensions.
 - Every ordinary managed session receives AgentStart's fixed resources. A
   direct Claude/Codex invocation from AgentRoles carries a validated one-shot
   marker declaring its role directory to be the complete resource layer;

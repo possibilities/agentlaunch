@@ -1,5 +1,10 @@
 # 0018 — A level is its own flag
 
+Status review 2026-09-15: partially superseded for resume behavior.
+[ADR 0036](0036-reapply-codex-recorded-dimensions-on-resume.md) keeps
+`--x-level` invalid on resume but replaces the claim that resumes never inject
+dimensions: Codex's final recorded model and effort are now reapplied.
+
 `--x-harness` took three shapes ([ADR 0011](0011-the-harness-value-carries-model-and-effort.md)), and two of them named no
 harness: `--x-harness fable:xhigh` read as a lie about its own value, and
 `--x-resume --x-harness` had already quietly kept the honest meaning —

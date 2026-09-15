@@ -174,6 +174,28 @@ function balanceCalls(world: World): string[] {
   }
 }
 
+function seedCodexSession(
+  world: World,
+  dimensions: { model: string; effort: string } = {
+    model: "gpt-5.6-sol",
+    effort: "xhigh",
+  },
+): void {
+  const store = join(world.root, "codex", "sessions", "2026", "09", "15");
+  mkdirSync(store, { recursive: true });
+  writeFileSync(
+    join(store, `rollout-2026-09-15T12-00-00-${SESSION_ID}.jsonl`),
+    [
+      JSON.stringify({
+        type: "session_meta",
+        payload: { id: SESSION_ID, cwd: world.root },
+      }),
+      JSON.stringify({ type: "turn_context", payload: dimensions }),
+      "",
+    ].join("\n"),
+  );
+}
+
 describe("balanced launch", () => {
   test("an explicit role composes with yolo and account preparation without fleet resources", () => {
     const world = makeWorld();
@@ -565,6 +587,68 @@ describe("balanced resume", () => {
       SHADCN_MCP,
       ...PROVIDER_ARGS,
     ]);
+  });
+
+  test("Codex resume restores the recorded model and effort", () => {
+    const world = makeWorld();
+    seedCodexSession(world);
+    const result = run(world, [
+      "x-resume",
+      SESSION_ID,
+      "--x-harness",
+      "codex",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
+    ]);
+    expect(result.code).toBe(0);
+    const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
+    expect(data.command).toEqual([
+      "codex",
+      "resume",
+      SESSION_ID,
+      "-c",
+      SHADCN_MCP,
+      "--model",
+      "gpt-5.6-sol",
+      "-c",
+      'model_reasoning_effort="xhigh"',
+      ...PROVIDER_ARGS,
+    ]);
+    expect(balanceCalls(world)).toEqual(["prepare codex --json --model gpt-5.6-sol --dry-run"]);
+  });
+
+  test("forwarded Codex dimensions override the recorded model and effort", () => {
+    const world = makeWorld();
+    seedCodexSession(world);
+    const result = run(world, [
+      "x-resume",
+      SESSION_ID,
+      "--x-harness",
+      "codex",
+      "--x-no-yolo",
+      "--x-dry-run",
+      "--x-json",
+      "-c",
+      'model="gpt-override"',
+      "--config=model_reasoning_effort=max",
+    ]);
+    expect(result.code).toBe(0);
+    const data = (JSON.parse(result.stdout) as AnyEnvelope).data as { command: string[] };
+    expect(data.command).toEqual([
+      "codex",
+      "resume",
+      SESSION_ID,
+      "-c",
+      SHADCN_MCP,
+      "-c",
+      'model="gpt-override"',
+      "--config=model_reasoning_effort=max",
+      ...PROVIDER_ARGS,
+    ]);
+    expect(data.command).not.toContain("gpt-5.6-sol");
+    expect(data.command).not.toContain('model_reasoning_effort="xhigh"');
+    expect(balanceCalls(world)).toEqual(["prepare codex --json --model gpt-override --dry-run"]);
   });
 });
 
